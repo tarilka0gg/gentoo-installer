@@ -53,9 +53,32 @@ between them.
 
 ## Status
 
-Scaffolding stage: workspace builds (`cargo check` clean across all three
-crates, `cargo test -p installer-core` passing for swap-sizing), module
-boundaries and function signatures are in place, most bodies are `todo!()`
-pending implementation. GPU vendor detection (`hardware::detect_gpu_vendor`)
-still needs `lspci` parsing. Package-set selection (what gets installed
-beyond base system — DE/WM flavors, etc.) is intentionally not designed yet.
+Workspace builds and passes clippy clean across all three crates. Implemented
+for real (not stubs):
+
+- `hardware`: CPU vendor, GPU vendor (`lspci -nn` parsing, discrete-over-integrated
+  preference), RAM, laptop chassis detection
+- `disk`: real disk enumeration via `lsblk -J`
+- `stage3`: resolves the current autobuild from `latest-stage3-amd64-openrc.txt`,
+  pulls the SHA256 out of the companion `.DIGESTS` file, streams the download with
+  a running hash check
+- `partition`: full `parted`/`mkfs.*`/`btrfs subvolume create` sequence and
+  `mount_target` for the post-format mount layout
+- `bootloader`: Limine artifact deployment (BIOS vs UEFI path) + config generation
+- `network`: real `net.connman.iwd` D-Bus calls (scan, ordered networks, connect) —
+  open networks work end to end; secured networks need an iwd Agent object
+  registered on the bus to hand back the passphrase, not implemented yet
+- `store`: writes `repos.conf`/`binrepos.conf` into the target root and
+  chroot-syncs; binhost `Packages` index parsing for atom listing
+
+CLI (`installer-cli`) wizard now walks Network → DiskSelect with live data
+(ethernet link check, hardware profile, disk list) and a Confirm screen; GUI
+(`installer-gui`) has a working Welcome → disk-select `AdwNavigationView` flow,
+smoke-tested on a live niri session (screenshot confirmed the window renders
+and the disk-select page populates from `installer-core`).
+
+Not yet done: the Installing step in both frontends (wiring the above into an
+actual run with progress reporting), the wifi-connect UI in either frontend,
+fstab generation, and the iwd passphrase agent. Package-set selection (what
+gets installed beyond base system — DE/WM flavors, etc.) is intentionally not
+designed yet.
