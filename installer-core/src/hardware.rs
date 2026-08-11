@@ -70,9 +70,41 @@ fn detect_cpu_vendor() -> CpuVendor {
     }
 }
 
+/// Parses `lspci -nn` for VGA/3D/Display controller lines and matches the PCI vendor ID
+/// (`[10de:xxxx]` = Nvidia, `[1002:xxxx]` = AMD, `[8086:xxxx]` = Intel). If a machine has
+/// both an iGPU and a dGPU (e.g. Intel + Nvidia laptop), the discrete GPU wins, since that's
+/// the one that actually needs a matching kernel driver profile.
 fn detect_gpu_vendor() -> GpuVendor {
-    // TODO: parse `lspci -nnk` for VGA/3D controller vendor IDs (10de = Nvidia, 1002 = AMD, 8086 = Intel).
-    GpuVendor::Unknown
+    let Ok(output) = std::process::Command::new("lspci").arg("-nn").output() else {
+        return GpuVendor::Unknown;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut found: Vec<GpuVendor> = text
+        .lines()
+        .filter(|l| {
+            l.contains("VGA compatible controller")
+                || l.contains("3D controller")
+                || l.contains("Display controller")
+        })
+        .filter_map(vendor_from_pci_line)
+        .collect();
+
+    // Prefer a discrete GPU over an integrated one when both are present.
+    found.sort_by_key(|v| !matches!(v, GpuVendor::Nvidia | GpuVendor::Amd));
+    found.into_iter().next().unwrap_or(GpuVendor::None)
+}
+
+fn vendor_from_pci_line(line: &str) -> Option<GpuVendor> {
+    if line.contains("[10de:") {
+        Some(GpuVendor::Nvidia)
+    } else if line.contains("[1002:") {
+        Some(GpuVendor::Amd)
+    } else if line.contains("[8086:") {
+        Some(GpuVendor::Intel)
+    } else {
+        Some(GpuVendor::Unknown)
+    }
 }
 
 fn detect_ram_bytes() -> u64 {

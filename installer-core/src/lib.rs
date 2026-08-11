@@ -1,8 +1,10 @@
 pub mod bootloader;
+pub mod disk;
 pub mod hardware;
 pub mod kernel;
 pub mod network;
 pub mod partition;
+mod process;
 pub mod stage3;
 pub mod store;
 
