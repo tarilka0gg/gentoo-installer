@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "installer-core",
+    "installer-cli",
+    "installer-gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+installer-core = { path = "installer-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "process", "fs", "macros"] }
+zbus = "5"

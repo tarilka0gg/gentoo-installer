@@ -1,0 +1,11 @@
+[package]
+name = "installer-gui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+installer-core.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+gtk = { version = "0.9", package = "gtk4" }
+libadwaita = { version = "0.7", features = ["v1_4"] }
