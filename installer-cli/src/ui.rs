@@ -118,12 +118,9 @@ fn draw_disk_select(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, sta
 
     let profile_text = match &state.profile {
         Some(p) => format!(
-            "CPU: {:?}  GPU: {:?}  RAM: {} GiB  Laptop: {}  Kernel profile: {}",
-            p.cpu,
-            p.gpu,
+            "RAM: {} GiB  Kernel profile: {}",
             p.ram_bytes / 1024 / 1024 / 1024,
-            p.is_laptop,
-            p.kernel_suffix()
+            p.combo()
         ),
         None => "hardware detection unavailable".to_string(),
     };

@@ -1,26 +1,79 @@
-//! Picks a precompiled kernel binary package from the store that matches
-//! the detected (or manually overridden) hardware profile, with a generic fallback.
+//! Picks a precompiled kernel binary package from the store that matches the detected
+//! (or manually overridden) hardware profile. Only a popularity-ranked subset of the full
+//! cpu×gpu×platform×ec×modem matrix is actually built (147 of 1728 as of the last matrix
+//! run — see `hardware::Profile::candidates`), so this degrades through progressively more
+//! generic combos rather than requiring an exact match.
 
 use crate::hardware::Profile;
 
 #[derive(Debug, Clone)]
 pub struct KernelPackage {
-    /// Fully qualified atom in the store, e.g. "sys-kernel/mykernel-bin-intel-nvidia".
+    /// Fully qualified atom in the store, e.g.
+    /// "sys-kernel/mykernel-bin-intel-raptorlake-nvidia-laptop-lenovo-none".
     pub atom: String,
+    /// Which candidate in the degrade chain matched — 0 means an exact match, higher
+    /// means the profile's modem/ec/cpu/gpu/platform got generalized to find a build
+    /// that actually exists in the store.
+    pub degraded_by: usize,
 }
 
-/// Naming scheme: `sys-kernel/<base>-bin-<cpu>-<gpu>`, falling back to
-/// `sys-kernel/<base>-bin-generic` if no exact profile match exists in the store.
 pub fn resolve(base_name: &str, profile: &Profile, available_atoms: &[String]) -> crate::Result<KernelPackage> {
-    let exact = format!("sys-kernel/{base_name}-bin-{}", profile.kernel_suffix());
-    if available_atoms.iter().any(|a| a == &exact) {
-        return Ok(KernelPackage { atom: exact });
+    for (i, combo) in profile.candidates().into_iter().enumerate() {
+        let atom = format!("sys-kernel/{base_name}-bin-{combo}");
+        if available_atoms.iter().any(|a| a == &atom) {
+            return Ok(KernelPackage { atom, degraded_by: i });
+        }
+    }
+    Err(crate::Error::NoKernelProfile(profile.combo()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hardware::{CpuArch, Ec, Gpu, Modem, Platform};
+
+    #[test]
+    fn exact_match_wins_when_present() {
+        let profile = Profile {
+            cpu: CpuArch::IntelRaptorlake,
+            gpu: Gpu::Nvidia,
+            platform: Platform::Laptop,
+            ec: Ec::Lenovo,
+            modem: Modem::None,
+            ram_bytes: 0,
+        };
+        let atoms = vec!["sys-kernel/mykernel-bin-intel-raptorlake-nvidia-laptop-lenovo-none".to_string()];
+        let pkg = resolve("mykernel", &profile, &atoms).unwrap();
+        assert_eq!(pkg.degraded_by, 0);
     }
 
-    let generic = format!("sys-kernel/{base_name}-bin-generic");
-    if available_atoms.iter().any(|a| a == &generic) {
-        return Ok(KernelPackage { atom: generic });
+    #[test]
+    fn falls_back_when_exact_combo_missing() {
+        let profile = Profile {
+            cpu: CpuArch::AmdZnver3,
+            gpu: Gpu::Intel,
+            platform: Platform::Laptop,
+            ec: Ec::System76,
+            modem: Modem::UsbWwanGeneric,
+            ram_bytes: 0,
+        };
+        // Only the fully-generalized combo exists in the store.
+        let atoms = vec!["sys-kernel/mykernel-bin-amd-znver3-intel-laptop-none-none".to_string()];
+        let pkg = resolve("mykernel", &profile, &atoms).unwrap();
+        assert!(pkg.atom.ends_with("amd-znver3-intel-laptop-none-none"));
+        assert!(pkg.degraded_by > 0);
     }
 
-    Err(crate::Error::NoKernelProfile(profile.kernel_suffix()))
+    #[test]
+    fn errors_when_nothing_matches() {
+        let profile = Profile {
+            cpu: CpuArch::IntelRaptorlake,
+            gpu: Gpu::Nvidia,
+            platform: Platform::Laptop,
+            ec: Ec::Lenovo,
+            modem: Modem::None,
+            ram_bytes: 0,
+        };
+        assert!(resolve("mykernel", &profile, &[]).is_err());
+    }
 }

@@ -70,12 +70,9 @@ fn disk_select_page() -> adw::NavigationPage {
 
     match hardware::Profile::detect() {
         Ok(p) => profile_label.set_label(&format!(
-            "CPU: {:?}   GPU: {:?}   RAM: {} GiB   Laptop: {}   Kernel profile: {}",
-            p.cpu,
-            p.gpu,
+            "RAM: {} GiB   Kernel profile: {}",
             p.ram_bytes / 1024 / 1024 / 1024,
-            p.is_laptop,
-            p.kernel_suffix()
+            p.combo()
         )),
         Err(e) => profile_label.set_label(&format!("hardware detection failed: {e}")),
     }
