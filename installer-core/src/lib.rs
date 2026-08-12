@@ -1,6 +1,8 @@
 pub mod bootloader;
 pub mod disk;
+pub mod fstab;
 pub mod hardware;
+pub mod install;
 pub mod kernel;
 pub mod network;
 pub mod partition;

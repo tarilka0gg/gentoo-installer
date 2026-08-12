@@ -1,11 +1,11 @@
-//! Ratatui render loop. Network/disk steps pull real data from installer-core
-//! (iwd scan, lsblk, hardware detection); Confirm/Installing wire up as the
-//! mutating installer-core calls (partition::apply, stage3, bootloader) get exercised.
+//! Ratatui render loop. Network/disk steps pull real data from installer-core (iwd scan,
+//! lsblk, hardware detection); Confirm kicks off `installer_core::install::run` in the
+//! background and Installing streams its progress until it finishes or errors.
 
 use crate::steps::Step;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
-use installer_core::{disk, hardware, network};
+use installer_core::{disk, hardware, install, network, partition, store};
 use ratatui::{
     layout::{Constraint, Layout as RtLayout},
     style::{Color, Style},
@@ -13,6 +13,30 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     DefaultTerminal,
 };
+use tokio::sync::mpsc;
+
+/// The store isn't published under a fixed URL yet (see `~/portage-store-architecture.md` —
+/// currently just a local overlay, `sync-uri`/binhost not set up). Rather than hardcode a
+/// URL that doesn't exist, these come from the environment; Confirm shows a clear error if
+/// they're unset instead of silently pointing at nothing.
+struct StoreEnv {
+    binhost_url: String,
+    overlay_git_url: String,
+    overlay_name: String,
+    kernel_base_name: String,
+}
+
+impl StoreEnv {
+    fn from_env() -> Result<Self, String> {
+        let get = |key: &str| std::env::var(key).map_err(|_| format!("{key} is not set"));
+        Ok(Self {
+            binhost_url: get("GENTOO_STORE_BINHOST_URL")?,
+            overlay_git_url: get("GENTOO_STORE_OVERLAY_URL")?,
+            overlay_name: std::env::var("GENTOO_STORE_OVERLAY_NAME").unwrap_or_else(|_| "localrepo".into()),
+            kernel_base_name: std::env::var("GENTOO_KERNEL_BASE_NAME").unwrap_or_else(|_| "gentoo-diy-kernel".into()),
+        })
+    }
+}
 
 pub struct AppState {
     pub step: Step,
@@ -21,6 +45,10 @@ pub struct AppState {
     pub profile: Option<hardware::Profile>,
     pub selected_disk: usize,
     pub status: String,
+    pub install_log: Vec<String>,
+    pub install_rx: Option<mpsc::UnboundedReceiver<install::Progress>>,
+    pub install_task: Option<tokio::task::JoinHandle<installer_core::Result<()>>>,
+    pub install_finished: bool,
 }
 
 impl AppState {
@@ -32,6 +60,10 @@ impl AppState {
             profile: None,
             selected_disk: 0,
             status: String::new(),
+            install_log: Vec::new(),
+            install_rx: None,
+            install_task: None,
+            install_finished: false,
         }
     }
 }
@@ -40,6 +72,8 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
     let mut state = AppState::new();
 
     loop {
+        drain_install_progress(&mut state).await;
+
         terminal.draw(|frame| draw(frame, &state))?;
 
         if event::poll(std::time::Duration::from_millis(100))? {
@@ -66,10 +100,53 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
     }
 }
 
+/// Non-blocking drain of whatever progress events have arrived since the last frame —
+/// the install runs on its own tokio task, this just reflects it into the log.
+async fn drain_install_progress(state: &mut AppState) {
+    if let Some(rx) = &mut state.install_rx {
+        while let Ok(progress) = rx.try_recv() {
+            state.install_log.push(describe(&progress));
+            if matches!(progress, install::Progress::Done) {
+                state.install_finished = true;
+            }
+        }
+    }
+
+    if state.install_finished {
+        if let Some(task) = state.install_task.take() {
+            match task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => state.install_log.push(format!("ERROR: {e}")),
+                Err(e) => state.install_log.push(format!("ERROR: install task panicked: {e}")),
+            }
+            state.step = Step::Done;
+        }
+    }
+}
+
+fn describe(p: &install::Progress) -> String {
+    match p {
+        install::Progress::Partitioning => "Partitioning disk...".into(),
+        install::Progress::DownloadingStage3 => "Downloading stage3...".into(),
+        install::Progress::UnpackingStage3 => "Unpacking stage3...".into(),
+        install::Progress::ConfiguringStore => "Configuring portage store...".into(),
+        install::Progress::InstallingKernel { atom, degraded_by } => {
+            if *degraded_by == 0 {
+                format!("Installing kernel: {atom} (exact hardware match)")
+            } else {
+                format!("Installing kernel: {atom} (generalized, degraded {degraded_by} step(s))")
+            }
+        }
+        install::Progress::WritingFstab => "Writing fstab...".into(),
+        install::Progress::InstallingBootloader => "Installing Limine...".into(),
+        install::Progress::Done => "Install complete.".into(),
+    }
+}
+
 async fn advance(state: &mut AppState) {
-    let next = state.step.next();
-    match next {
-        Step::DiskSelect => {
+    match state.step {
+        Step::Network => {
+            state.step = Step::DiskSelect;
             state.status = "detecting hardware + listing disks...".into();
             state.profile = hardware::Profile::detect().ok();
             match disk::list().await {
@@ -80,10 +157,49 @@ async fn advance(state: &mut AppState) {
                 Err(e) => state.status = format!("disk listing failed: {e}"),
             }
         }
-        Step::Confirm | Step::Installing | Step::Done => {}
-        Step::Network => {}
+        Step::DiskSelect => {
+            if state.disks.get(state.selected_disk).is_some() {
+                state.step = Step::Confirm;
+            }
+        }
+        Step::Confirm => start_install(state),
+        Step::Installing | Step::Done => {}
     }
-    state.step = next;
+}
+
+fn start_install(state: &mut AppState) {
+    let Some(disk) = state.disks.get(state.selected_disk).cloned() else {
+        return;
+    };
+    let Some(profile) = &state.profile else {
+        state.status = "no hardware profile detected, cannot pick a kernel".into();
+        return;
+    };
+    let store_env = match StoreEnv::from_env() {
+        Ok(env) => env,
+        Err(e) => {
+            state.status = format!("store not configured: {e}");
+            return;
+        }
+    };
+
+    let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
+    let opts = install::InstallOptions {
+        layout,
+        target: "/mnt/gentoo".into(),
+        store: store::StoreConfig {
+            binhost_url: store_env.binhost_url,
+            overlay_git_url: store_env.overlay_git_url,
+            overlay_name: store_env.overlay_name,
+        },
+        kernel_base_name: store_env.kernel_base_name,
+    };
+
+    let (tx, rx) = mpsc::unbounded_channel();
+    state.install_rx = Some(rx);
+    state.install_task = Some(tokio::spawn(install::run(opts, tx)));
+    state.install_log.clear();
+    state.step = Step::Installing;
 }
 
 fn draw(frame: &mut ratatui::Frame, state: &AppState) {
@@ -99,7 +215,7 @@ fn draw(frame: &mut ratatui::Frame, state: &AppState) {
         Step::Network => draw_network(frame, chunks[1], state),
         Step::DiskSelect => draw_disk_select(frame, chunks[1], state),
         Step::Confirm => draw_confirm(frame, chunks[1], state),
-        Step::Installing | Step::Done => draw_placeholder(frame, chunks[1], "Installing..."),
+        Step::Installing | Step::Done => draw_installing(frame, chunks[1], state),
     }
 }
 
@@ -163,9 +279,10 @@ fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
     let disk = state.disks.get(state.selected_disk);
     let text = match disk {
         Some(d) => format!(
-            "About to WIPE {} ({}) and install: ESP 512MiB, swap, btrfs root with @/@home/@var/@log subvolumes, Limine bootloader.\n\n[Enter] confirm and install  [q] abort",
+            "About to WIPE {} ({}) and install: ESP 512MiB, swap, btrfs root with @/@home/@var/@log subvolumes, Limine bootloader.\n\n[Enter] confirm and install  [q] abort\n\n{}",
             d.path,
-            disk::format_size(d.size_bytes)
+            disk::format_size(d.size_bytes),
+            state.status,
         ),
         None => "No disk selected.".to_string(),
     };
@@ -175,9 +292,11 @@ fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
     );
 }
 
-fn draw_placeholder(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, msg: &str) {
+fn draw_installing(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let log = state.install_log.join("\n");
+    let title = if state.step == Step::Done { "Done [q] quit" } else { "Installing" };
     frame.render_widget(
-        Paragraph::new(msg).block(Block::default().borders(Borders::ALL)),
+        Paragraph::new(log).block(Block::default().borders(Borders::ALL).title(title)),
         area,
     );
 }

@@ -1,4 +1,7 @@
-//! Ordered wizard steps shared by the TUI's state machine.
+//! Wizard steps. Transitions are driven explicitly in `ui::advance` (each step validates
+//! its own precondition — e.g. Confirm only proceeds once `install::run` is spawned) rather
+//! than a blind `next()`, since Installing must not advance until the background task
+//! actually reports `Progress::Done`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -7,16 +10,4 @@ pub enum Step {
     Confirm,
     Installing,
     Done,
-}
-
-impl Step {
-    pub fn next(self) -> Self {
-        match self {
-            Step::Network => Step::DiskSelect,
-            Step::DiskSelect => Step::Confirm,
-            Step::Confirm => Step::Installing,
-            Step::Installing => Step::Done,
-            Step::Done => Step::Done,
-        }
-    }
 }
