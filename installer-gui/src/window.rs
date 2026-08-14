@@ -23,8 +23,16 @@ use installer_core::{
 };
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc as std_mpsc;
+
+/// Per-page "⋯" popover content, keyed by `NavigationPage` tag. Built once, up front,
+/// by whichever page function owns the context (`nav`, `state`) it needs to wire real
+/// clicks — not rebuilt per visit, and never reached-into from outside via widget-name
+/// search (a `GtkPopover` lives on its own surface; walking the main window's widget
+/// tree to find something inside one doesn't work).
+type PageMenus = Rc<RefCell<HashMap<String, gtk::Popover>>>;
 
 /// Set to click through the wizard without touching a real disk — see
 /// `installer_core::install::InstallOptions::simulate`.
@@ -89,12 +97,15 @@ pub fn build(app: &adw::Application) {
     }
 
     let menu_button = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text("More").build();
+    let page_menus: PageMenus = Rc::new(RefCell::new(HashMap::new()));
 
     let header = adw::HeaderBar::new();
     header.pack_start(&back_button);
     header.pack_end(&menu_button);
 
-    let disk_page = disk_select_page(nav.clone(), state.clone());
+    page_menus.borrow_mut().insert("welcome".to_string(), advanced_setup_popover(state.clone()));
+
+    let disk_page = disk_select_page(nav.clone(), state.clone(), page_menus.clone());
     let keyboard_page = keyboard_select_page(nav.clone(), state.clone(), disk_page.clone());
     let timezone_page = timezone_select_page(nav.clone(), state.clone(), disk_page.clone());
     nav.add(&welcome_page(&nav, state.clone(), keyboard_page.clone(), disk_page.clone()));
@@ -106,12 +117,13 @@ pub fn build(app: &adw::Application) {
     // point of no return — Confirm's own footer `Back` button is the only way backward
     // from there). Driven off the navigation stack itself rather than toggled at each
     // transition site, so it also does the right thing when the user pops back manually.
-    // The "⋯" menu follows the same visible-page signal: content swapped per page,
-    // hidden entirely on pages with nothing real to put in it.
+    // The "⋯" menu follows the same visible-page signal: content swapped per page (looked
+    // up from `page_menus`, built once above), hidden entirely on pages with nothing
+    // real to put in it.
     {
         let back_button = back_button.clone();
         let menu_button = menu_button.clone();
-        let state = state.clone();
+        let page_menus = page_menus.clone();
         nav.connect_visible_page_notify(move |nav| {
             let tag = nav.visible_page().and_then(|p| p.tag()).map(|t| t.to_string());
             let hidden = matches!(
@@ -119,10 +131,19 @@ pub fn build(app: &adw::Application) {
                 Some("welcome") | Some("confirm") | Some("installing") | Some("done") | None
             );
             back_button.set_visible(!hidden);
-            update_page_menu(&menu_button, tag.as_deref(), &state);
+            match tag.as_deref().and_then(|t| page_menus.borrow().get(t).cloned()) {
+                Some(popover) => {
+                    menu_button.set_visible(true);
+                    menu_button.set_popover(Some(&popover));
+                }
+                None => menu_button.set_visible(false),
+            }
         });
     }
-    update_page_menu(&menu_button, Some("welcome"), &state);
+    if let Some(popover) = page_menus.borrow().get("welcome") {
+        menu_button.set_visible(true);
+        menu_button.set_popover(Some(popover));
+    }
 
     let toolbar_view = adw::ToolbarView::new();
     toolbar_view.add_top_bar(&header);
@@ -164,24 +185,6 @@ fn install_css() {
     }
 }
 
-/// Rebuilds the "⋯" popover for the page the user just landed on. Menu is hidden
-/// entirely (not shown empty/greyed) on pages with no real page-specific options.
-fn update_page_menu(menu_button: &gtk::MenuButton, tag: Option<&str>, state: &Rc<WizardState>) {
-    match tag {
-        Some("welcome") => {
-            menu_button.set_visible(true);
-            menu_button.set_popover(Some(&advanced_setup_popover(state.clone())));
-        }
-        Some("disk-select") => {
-            menu_button.set_visible(true);
-            menu_button.set_popover(Some(&disk_menu_popover(state.clone())));
-        }
-        _ => {
-            menu_button.set_visible(false);
-        }
-    }
-}
-
 fn advanced_setup_popover(state: Rc<WizardState>) -> gtk::Popover {
     let label = gtk::Label::builder().label("Advanced setup").halign(gtk::Align::Start).hexpand(true).build();
     let switch = gtk::Switch::builder().active(state.advanced.get()).valign(gtk::Align::Center).build();
@@ -195,19 +198,6 @@ fn advanced_setup_popover(state: Rc<WizardState>) -> gtk::Popover {
     row.append(&switch);
 
     gtk::Popover::builder().child(&row).build()
-}
-
-fn disk_menu_popover(state: Rc<WizardState>) -> gtk::Popover {
-    let manual_button = gtk::Button::builder()
-        .label("Manual partitioning…")
-        .css_classes(vec!["flat".to_string()])
-        .sensitive(state.advanced.get())
-        .build();
-    // Only meaningful once Manual partitioning has somewhere to navigate to; wired by
-    // the Disk page itself (it owns the nav handle), see `disk_select_page`.
-    manual_button.set_widget_name("gentoo-manual-partitioning-trigger");
-
-    gtk::Popover::builder().child(&manual_button).build()
 }
 
 fn welcome_page(
@@ -390,7 +380,7 @@ fn min_disk_bytes() -> u64 {
     (ESP_SIZE_MIB + SWAP_MIN_GIB * 1024 + 8 * 1024) * 1024 * 1024
 }
 
-fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
+fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus: PageMenus) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
         .label("Where should Gentoo go?")
         .css_classes(vec!["title-1".to_string()])
@@ -539,55 +529,49 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::Na
         .build();
     page.set_tag(Some("disk-select"));
 
-    // The Disk page's own "⋯" item ("Manual partitioning…", see `disk_menu_popover`)
-    // needs a nav target; wired here once, on `map`, rather than threaded through the
-    // popover-building code (which doesn't have `nav`).
+    // The Disk page's own "⋯" item: built here, where `nav` and `state` are directly in
+    // scope, rather than in a separate free function reached into from outside — a
+    // `GtkPopover` lives on its own surface, so there's no reliable way to find a widget
+    // inside one via a widget-tree walk from elsewhere.
+    let manual_button = gtk::Button::builder()
+        .label("Manual partitioning…")
+        .css_classes(vec!["flat".to_string()])
+        .margin_top(4)
+        .margin_bottom(4)
+        .margin_start(4)
+        .margin_end(4)
+        .build();
+    let manual_popover = gtk::Popover::builder().child(&manual_button).build();
+    // Sensitivity depends on Advanced (toggled on the Welcome page, potentially after
+    // this popover was built), so it's refreshed each time the popover opens rather
+    // than fixed once at construction.
+    {
+        let state = state.clone();
+        let manual_button = manual_button.clone();
+        manual_popover.connect_show(move |_| {
+            manual_button.set_sensitive(state.advanced.get());
+        });
+    }
+    let manual_page: Rc<RefCell<Option<adw::NavigationPage>>> = Rc::new(RefCell::new(None));
     {
         let nav = nav.clone();
         let state = state.clone();
-        let manual_page: Rc<RefCell<Option<adw::NavigationPage>>> = Rc::new(RefCell::new(None));
-        page.connect_map(move |page| {
-            let Some(root) = page.root() else { return };
-            let Some(button) = find_widget_by_name(&root, "gentoo-manual-partitioning-trigger") else { return };
-            let Ok(button) = button.downcast::<gtk::Button>() else { return };
-            button.set_sensitive(state.advanced.get());
-            let nav = nav.clone();
-            let state = state.clone();
-            let manual_page = manual_page.clone();
-            button.connect_clicked(move |_| {
-                if manual_page.borrow().is_none() {
-                    let page = manual_partition_page_build(nav.clone(), state.clone());
-                    nav.add(&page);
-                    *manual_page.borrow_mut() = Some(page);
-                }
-                if let Some(page) = manual_page.borrow().as_ref() {
-                    nav.push(page);
-                }
-            });
+        let manual_popover = manual_popover.clone();
+        manual_button.connect_clicked(move |_| {
+            manual_popover.popdown();
+            if manual_page.borrow().is_none() {
+                let page = manual_partition_page_build(nav.clone(), state.clone());
+                nav.add(&page);
+                *manual_page.borrow_mut() = Some(page);
+            }
+            if let Some(page) = manual_page.borrow().as_ref() {
+                nav.push(page);
+            }
         });
     }
+    page_menus.borrow_mut().insert("disk-select".to_string(), manual_popover);
 
     page
-}
-
-/// Depth-first search for a widget by `widget-name` — used to reach into the "⋯"
-/// popover's contents from outside, since the popover is built generically in
-/// `disk_menu_popover` without a `nav` handle to wire the click to.
-fn find_widget_by_name(root: &gtk::Root, name: &str) -> Option<gtk::Widget> {
-    fn walk(widget: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
-        if widget.widget_name() == name {
-            return Some(widget.clone());
-        }
-        let mut child = widget.first_child();
-        while let Some(c) = child {
-            if let Some(found) = walk(&c, name) {
-                return Some(found);
-            }
-            child = c.next_sibling();
-        }
-        None
-    }
-    walk(root.upcast_ref::<gtk::Widget>(), name)
 }
 
 /// Advanced-setup only, reached from the Disk page's "⋯" menu: the only manual control
