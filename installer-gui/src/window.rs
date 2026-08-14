@@ -10,6 +10,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc as std_mpsc;
 
+/// Set to click through the wizard without touching a real disk — see
+/// `installer_core::install::InstallOptions::simulate`.
+fn simulate_mode() -> bool {
+    std::env::var("GENTOO_INSTALLER_SIMULATE").is_ok()
+}
+
 pub fn build(app: &adw::Application) {
     let nav = adw::NavigationView::new();
     let selected_disk: Rc<RefCell<Option<disk::Disk>>> = Rc::new(RefCell::new(None));
@@ -35,9 +41,15 @@ pub fn build(app: &adw::Application) {
 }
 
 fn welcome_page(nav: &adw::NavigationView, disk_page: &adw::NavigationPage) -> adw::NavigationPage {
+    let description = if simulate_mode() {
+        "SIMULATION MODE — GENTOO_INSTALLER_SIMULATE is set, no real changes will be made. \
+         Automated btrfs partitioning, kernel profile detection, Limine boot setup."
+    } else {
+        "Automated btrfs partitioning, kernel profile detection, Limine boot setup."
+    };
     let status = adw::StatusPage::builder()
         .title("Gentoo Installer")
-        .description("Automated btrfs partitioning, kernel profile detection, Limine boot setup.")
+        .description(description)
         .icon_name("drive-harddisk-symbolic")
         .build();
 
@@ -184,7 +196,13 @@ fn confirm_page_build(
         .icon_name("dialog-warning-symbolic")
         .build();
 
+    let simulate = simulate_mode();
     let text = match selected_disk.borrow().as_ref() {
+        Some(d) if simulate => format!(
+            "SIMULATION MODE — no real changes will be made to {} ({}).",
+            d.path,
+            disk::format_size(d.size_bytes)
+        ),
         Some(d) => format!(
             "About to WIPE {} ({}) and install: ESP 512MiB, swap, btrfs root with \
              @/@home/@var/@log subvolumes, Limine bootloader.",
@@ -196,8 +214,11 @@ fn confirm_page_build(
     warning.set_description(Some(&text));
 
     let install_button = gtk::Button::builder()
-        .label("Install")
-        .css_classes(vec!["destructive-action".to_string(), "pill".to_string()])
+        .label(if simulate { "Simulate install" } else { "Install" })
+        .css_classes(vec![
+            (if simulate { "suggested-action" } else { "destructive-action" }).to_string(),
+            "pill".to_string(),
+        ])
         .halign(gtk::Align::Center)
         .build();
     warning.set_child(Some(&install_button));
@@ -216,11 +237,16 @@ fn confirm_page_build(
         let installing_page = installing_page.clone();
         let warning = warning.clone();
         install_button.connect_clicked(move |btn| {
-            let store_env = match StoreEnv::from_env() {
-                Ok(env) => env,
-                Err(e) => {
-                    warning.set_description(Some(&format!("store not configured: {e}")));
-                    return;
+            let simulate = simulate_mode();
+            let store_env = if simulate {
+                None
+            } else {
+                match StoreEnv::from_env() {
+                    Ok(env) => Some(env),
+                    Err(e) => {
+                        warning.set_description(Some(&format!("store not configured: {e}")));
+                        return;
+                    }
                 }
             };
             let Some(disk) = selected_disk.borrow().clone() else { return };
@@ -232,11 +258,14 @@ fn confirm_page_build(
                 layout,
                 target: "/mnt/gentoo".into(),
                 store: store::StoreConfig {
-                    binhost_url: store_env.binhost_url,
-                    overlay_git_url: store_env.overlay_git_url,
-                    overlay_name: store_env.overlay_name,
+                    binhost_url: store_env.as_ref().map(|e| e.binhost_url.clone()).unwrap_or_default(),
+                    overlay_git_url: store_env.as_ref().map(|e| e.overlay_git_url.clone()).unwrap_or_default(),
+                    overlay_name: store_env.as_ref().map(|e| e.overlay_name.clone()).unwrap_or_default(),
                 },
-                kernel_base_name: store_env.kernel_base_name,
+                kernel_base_name: store_env
+                    .map(|e| e.kernel_base_name)
+                    .unwrap_or_else(|| "gentoo-diy-kernel".into()),
+                simulate,
             };
 
             if installing_page.borrow().is_none() {

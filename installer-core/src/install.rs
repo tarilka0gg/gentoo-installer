@@ -16,6 +16,12 @@ pub struct InstallOptions {
     /// Base package name for kernel atoms in the store, e.g. "mykernel" for
     /// `sys-kernel/mykernel-bin-<combo>`.
     pub kernel_base_name: String,
+    /// UI dry-run: walks through the same `Progress` sequence with the same timing
+    /// shape, but never touches a disk, the network, or a chroot — for clicking through
+    /// the wizard while iterating on the frontend. Hardware detection still runs for
+    /// real (it's read-only), so the fake kernel atom reported is at least honest about
+    /// what this machine would actually resolve to.
+    pub simulate: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +39,10 @@ pub enum Progress {
 }
 
 pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::Result<()> {
+    if opts.simulate {
+        return run_simulated(opts, tx).await;
+    }
+
     let _ = tx.send(Progress::Partitioning);
     let parts = partition::apply(&opts.layout).await?;
     let target_str = opts
@@ -73,6 +83,42 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
 
     let _ = tx.send(Progress::InstallingBootloader);
     bootloader::install(&opts.target, &opts.layout.disk).await?;
+
+    let _ = tx.send(Progress::Done);
+    Ok(())
+}
+
+/// Fake run for UI iteration: same `Progress` sequence and rough timing shape as the real
+/// pipeline, no disk/network/chroot access at all. Hardware detection is real (read-only),
+/// so the kernel atom shown at least reflects what this actual machine would resolve to —
+/// it just skips the `store::list_binhost_atoms` lookup and reports it as an exact match.
+async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::Result<()> {
+    use tokio::time::{sleep, Duration};
+
+    for step in [
+        Progress::Partitioning,
+        Progress::DownloadingStage3,
+        Progress::UnpackingStage3,
+        Progress::ConfiguringStore,
+    ] {
+        let _ = tx.send(step);
+        sleep(Duration::from_millis(700)).await;
+    }
+
+    let combo = hardware::Profile::detect()
+        .map(|p| p.combo())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let _ = tx.send(Progress::InstallingKernel {
+        atom: format!("sys-kernel/{}-bin-{combo}", opts.kernel_base_name),
+        degraded_by: 0,
+    });
+    sleep(Duration::from_millis(700)).await;
+
+    let _ = tx.send(Progress::WritingFstab);
+    sleep(Duration::from_millis(500)).await;
+
+    let _ = tx.send(Progress::InstallingBootloader);
+    sleep(Duration::from_millis(700)).await;
 
     let _ = tx.send(Progress::Done);
     Ok(())

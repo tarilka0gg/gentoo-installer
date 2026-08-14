@@ -144,6 +144,12 @@ async fn advance(state: &mut AppState) {
     }
 }
 
+/// Set to click through the wizard without touching a real disk — see
+/// `installer_core::install::InstallOptions::simulate`.
+fn simulate_mode() -> bool {
+    std::env::var("GENTOO_INSTALLER_SIMULATE").is_ok()
+}
+
 fn start_install(state: &mut AppState) {
     let Some(disk) = state.disks.get(state.selected_disk).cloned() else {
         return;
@@ -152,11 +158,16 @@ fn start_install(state: &mut AppState) {
         state.status = "no hardware profile detected, cannot pick a kernel".into();
         return;
     };
-    let store_env = match StoreEnv::from_env() {
-        Ok(env) => env,
-        Err(e) => {
-            state.status = format!("store not configured: {e}");
-            return;
+    let simulate = simulate_mode();
+    let store_env = if simulate {
+        None
+    } else {
+        match StoreEnv::from_env() {
+            Ok(env) => Some(env),
+            Err(e) => {
+                state.status = format!("store not configured: {e}");
+                return;
+            }
         }
     };
 
@@ -165,11 +176,14 @@ fn start_install(state: &mut AppState) {
         layout,
         target: "/mnt/gentoo".into(),
         store: store::StoreConfig {
-            binhost_url: store_env.binhost_url,
-            overlay_git_url: store_env.overlay_git_url,
-            overlay_name: store_env.overlay_name,
+            binhost_url: store_env.as_ref().map(|e| e.binhost_url.clone()).unwrap_or_default(),
+            overlay_git_url: store_env.as_ref().map(|e| e.overlay_git_url.clone()).unwrap_or_default(),
+            overlay_name: store_env.as_ref().map(|e| e.overlay_name.clone()).unwrap_or_default(),
         },
-        kernel_base_name: store_env.kernel_base_name,
+        kernel_base_name: store_env
+            .map(|e| e.kernel_base_name)
+            .unwrap_or_else(|| "gentoo-diy-kernel".into()),
+        simulate,
     };
 
     let (tx, rx) = mpsc::unbounded_channel();
@@ -255,6 +269,12 @@ fn draw_disk_select(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, sta
 fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
     let disk = state.disks.get(state.selected_disk);
     let text = match disk {
+        Some(d) if simulate_mode() => format!(
+            "SIMULATION MODE — no real changes will be made to {} ({}).\n\n[Enter] run simulated install  [q] abort\n\n{}",
+            d.path,
+            disk::format_size(d.size_bytes),
+            state.status,
+        ),
         Some(d) => format!(
             "About to WIPE {} ({}) and install: ESP 512MiB, swap, btrfs root with @/@home/@var/@log subvolumes, Limine bootloader.\n\n[Enter] confirm and install  [q] abort\n\n{}",
             d.path,
