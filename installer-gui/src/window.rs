@@ -5,7 +5,10 @@
 //! Visual patterns (card-style disk picker, bar-with-separate-legend partitioning preview,
 //! progress bar + collapsible log) are ported from elementary's GTK installer
 //! (github.com/elementary/installer — `Widgets/DiskGrid.vala`, `Widgets/DiskBar.vala`,
-//! `Views/ProgressView.vala`), adapted to libadwaita idioms.
+//! `Views/ProgressView.vala`), adapted to libadwaita idioms — this is the standard
+//! libadwaita look (HeaderBar, NavigationView, boxed cards), matching this system's own
+//! apps (e.g. `../portage-store`), not the stripped-down non-adwaita design from the
+//! formal build spec's §9 — that direction didn't match what was actually wanted here.
 
 use adw::prelude::*;
 use gtk::glib;

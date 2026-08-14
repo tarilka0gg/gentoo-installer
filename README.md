@@ -1,34 +1,44 @@
 # Gentoo Installer
 
 Installer for a Gentoo-based distro built on top of a custom Portage store
-(binhost + overlay, see `../portage-store`). Two separate ISOs, two separate
-frontends over one shared core:
+(binhost + overlay, see `../portage-store`). Two ISOs, two frontends over one
+shared core:
 
 - **minimal ISO** — no GUI, no WM/DE at all. `installer-cli` (ratatui TUI).
 - **main ISO** — niri + a shell package preinstalled on the target,
   GTK4 + libadwaita installer (`installer-gui`).
+
+Target architecture is a formal build spec (`INSTALLER-SPEC.md`-equivalent,
+kept in conversation history) built around a linear `Phase` state machine with
+journal/resume, an `Event` stream, and a `CommandRunner` abstraction for
+testing without root or real disks. `installer-core` is partway migrated onto
+it — see **Architecture** below for what's real vs. still legacy.
 
 ## Base system
 
 - **Stage3**: official Gentoo `amd64-openrc` autobuild — multilib, non-hardened,
   OpenRC init. Not building a custom stage3 via catalyst; the distro's identity
   lives in the overlay/binhost and in the installer itself, not the base tarball.
-- **Kernel**: no on-device compilation. Precompiled binary kernel packages, built
-  ahead of time by `kernel-configs/matrix-build.sh` (real script, `../kernel-releases/`)
-  across a 3-axis matrix — `<cpu>-<gpu>-<platform>` — e.g.
-  `intel-raptorlake-nvidia-laptop`. EC/WMI vendor and modem support are *not* axes:
-  every build always includes all vendor EC/modem drivers as modules (`ec/all` +
-  `modem/all`), since `--skip-modules` means they never affected the bzImage anyway —
-  splitting on them just produced identical kernels under different names, so that was
-  dropped. `server` was also dropped from the platform axis (out of scope for this
-  distro). 378 possible cpu×gpu×platform combinations exist (18 CPU codenames × 7 GPU ×
-  3 platform), 304 are actually built by popularity (`gen-popular-targets.py`'s scoring),
-  so `installer-core::kernel::resolve` degrades through `hardware::Profile::candidates()`
-  (generalize platform → cpu → gpu) rather than requiring an exact match. Detection
-  (`installer-core::hardware`) is real CPU-microarch/GPU/platform sensing — deliberately
-  conservative on CPU: an unrecognized SKU falls back to the generic x86-64-v2/v3
-  feature-level build rather than guessing a specific codename wrong, since a wrong
-  guess risks a kernel using instructions the CPU doesn't actually support.
+  (Deviation from the target spec, which describes unsquashing a single
+  pre-built image — this codebase has no squashfs pipeline; see `phase::deploy`'s
+  doc comment.)
+- **Kernel**: no on-device compilation, and no `emerge` either — deployment is a
+  direct file copy (`kernel::deploy`), not a package install. Precompiled kernel
+  binaries are built ahead of time by `kernel-configs/matrix-build.sh` (real
+  script, `../kernel-releases/`) across a 3-axis matrix — `<cpu>-<gpu>-<platform>`
+  — e.g. `intel-raptorlake-nvidia-laptop`. EC/WMI vendor and modem support are
+  *not* axes: every build always includes all vendor EC/modem drivers as modules
+  (`ec/all` + `modem/all`), since `--skip-modules` means they never affected the
+  bzImage anyway. `server` was also dropped from the platform axis (out of scope
+  for this distro). 378 possible cpu×gpu×platform combinations exist (18 CPU
+  codenames × 7 GPU × 3 platform), 304 are actually built by popularity
+  (`gen-popular-targets.py`'s scoring), so `installer-core::kernel::resolve`
+  degrades through `hardware::Profile::candidates()` (generalize platform → cpu
+  → gpu) rather than requiring an exact match. Detection (`installer-core::hardware`)
+  is real CPU-microarch/GPU/platform sensing — deliberately conservative on CPU:
+  an unrecognized SKU falls back to the generic x86-64-v2/v3 feature-level build
+  rather than guessing a specific codename wrong, since a wrong guess risks a
+  kernel using instructions the CPU doesn't actually support.
 - **Bootloader**: Limine only. No GRUB.
 - **Partitioning**: automatic, no manual step.
   - ESP: 512 MiB, vfat (required for Limine on UEFI)
@@ -41,56 +51,96 @@ frontends over one shared core:
     set it up manually.
 - **Network**: iwd over D-Bus, not NetworkManager (too heavy for a live image).
   Ethernet is autodetected via link state so the wifi step is skippable.
+- **Portage config**: `git init` in the target's `/etc/portage` with a first
+  commit once make.conf/repos/binrepos are written — "what did the installer
+  decide" becomes `git log`, "undo it" becomes `git revert`.
 
-## Workspace layout
+## Architecture
 
 ```
-installer-core/   lib crate — all real logic, no UI code
-  hardware.rs      CPU/GPU/platform detection -> Profile (3-axis combo)
-  kernel.rs        Profile -> matching store atom, with popularity-aware fallback
-  disk.rs          lsblk-backed disk enumeration
-  partition.rs     layout planning + swap sizing + apply() + mount_target()
-  stage3.rs        resolve/download/unpack official stage3
-  bootloader.rs    Limine config generation + install
-  network.rs       iwd client (zbus) + ethernet link check
-  store.rs         wires target root to the distro's overlay/binhost
-  fstab.rs         UUID-based /etc/fstab generation
-  install.rs       orchestrates all of the above into one run, reporting Progress
+installer-core/     lib crate — all real logic, no UI code
 
-installer-cli/    ratatui TUI binary — minimal ISO only
-installer-gui/    gtk4-rs + libadwaita binary — main ISO only
+  Spec-aligned (new):
+  phase/             Phase trait + PhaseId + Ctx — the state machine
+    preflight.rs        disk/firmware/battery/network checks
+    partition.rs        PartitionPhase + FormatPhase (parted, then mkfs)
+    mount.rs             MountPhase
+    deploy.rs            stage3 unpack + kernel match+deploy (~70% of wall-clock)
+    fstab.rs              FstabPhase
+    portage_config.rs   make.conf + git init/commit
+    bootloader.rs        Limine
+    finalize.rs          sync + unmount
+  event.rs           Event enum (PhaseStarted/Progress/Log/PhaseFinished/Failed/Complete)
+  journal.rs         on-disk resume state (JSON), is_satisfied()-driven skip logic
+  command.rs         CommandRunner trait + Real/Fake — every shell-out goes through this
+  detect.rs          env/hardware inference for make.conf + confirm screen
+
+  Step logic (called by phases above, and still by legacy install.rs):
+  hardware.rs        CPU/GPU/platform detection -> Profile (3-axis combo)
+  kernel.rs          Profile -> matching build + direct-copy deploy (no emerge)
+  disk.rs            lsblk-backed disk enumeration
+  partition.rs       layout planning + swap sizing + create/format/mount
+  stage3.rs          resolve/download/verify/unpack official stage3
+  bootloader.rs      Limine config generation + install
+  store.rs           writes repos.conf/binrepos.conf, git-clones the overlay
+  fstab.rs           UUID-based /etc/fstab generation
+  http.rs            tiny shared download helper
+  network.rs         iwd client (zbus) + ethernet link check
+  config.rs          StoreEnv (env-var-sourced store config, shared by frontends)
+
+  Legacy (still what installer-cli/installer-gui actually drive):
+  install.rs         monolithic orchestrator, same step functions as phase/, no journal
+
+installer-cli/    ratatui TUI binary — minimal ISO only, drives install.rs today
+installer-gui/    gtk4-rs + libadwaita binary — main ISO only, drives install.rs today
 ```
 
-Both frontends call into `installer-core` only; no logic is duplicated
-between them.
+Both frontends call into `installer-core` only; no step logic is duplicated
+between the phase system and `install.rs` — phases call the exact same
+functions (`partition::create_partitions`, `stage3::download`, `kernel::deploy`,
+...) that `install.rs` does, just with journal/resume/event-stream bookkeeping
+around them.
+
+**Why two orchestrators right now**: the target spec's own build order says
+build the phase/journal/CommandRunner foundation and prove it headless *before*
+touching the GUI. `installer-gui` predates that spec and is built on
+libadwaita's `AdwNavigationView`/`AdwStatusPage` — which the spec explicitly
+rules out for the primary path (GNOME layout grammar, not this installer's
+interaction model). Rewriting it is deliberately the last step, not skipped.
 
 ## Status
 
-Workspace builds and passes clippy clean across all three crates, 15 unit tests
-passing. Hardware detection was live-verified on this machine (Victus 16,
-i7-14650HX + RTX 4070): `Profile::detect()` produces
-`intel-raptorlake-nvidia-laptop`, an exact match against rank #3 of the
-real 304-kernel build.
+Workspace builds and passes clippy clean across all three crates, 26 unit/
+integration tests passing, including a `Partition→Format→Mount→Fstab`
+end-to-end run against `FakeCommandRunner` with no root and no real disk.
+Hardware detection was live-verified on this machine (Victus 16, i7-14650HX +
+RTX 4070): `Profile::detect()` produces `intel-raptorlake-nvidia-laptop`, an
+exact match against rank #3 of the real 304-kernel build.
 
-Implemented for real (not stubs): CPU/GPU/platform hardware detection,
-disk listing, stage3 resolve/download/verify/unpack, full partitioning
-(`parted`/`mkfs.*`/btrfs subvolumes) + mount, Limine deploy, iwd D-Bus network
-client (open networks only — see below), store repo/binhost config + chroot
-sync, fstab generation, and `install::run` tying all of it into one pipeline
-with progress events.
+CLI (`installer-cli`) and GUI (`installer-gui`) both drive the legacy
+`install.rs` orchestrator end to end: Network → DiskSelect → Confirm →
+Installing, with `GENTOO_INSTALLER_SIMULATE=1` for a real click-through with no
+disk/network/chroot access (fakes the `Progress` sequence with sleeps; hardware
+detection still runs for real). Requires `GENTOO_STORE_BINHOST_URL` /
+`GENTOO_STORE_OVERLAY_URL` in the environment for real runs — the store isn't
+published under a fixed URL yet (still a local overlay, see
+`~/portage-store-architecture.md`), so these are deliberately not hardcoded.
 
-CLI (`installer-cli`) wizard is fully wired end to end: Network → DiskSelect
-(live hardware profile + disk list) → Confirm → Installing, which spawns
-`install::run` in the background and streams its `Progress` into a live log.
-Requires `GENTOO_STORE_BINHOST_URL` / `GENTOO_STORE_OVERLAY_URL` in the
-environment — the store isn't published under a fixed URL yet (still a local
-overlay, see `~/portage-store-architecture.md`), so these are deliberately not
-hardcoded; Confirm shows a clear error instead of pointing at a URL that
-doesn't exist. GUI (`installer-gui`) has Welcome → disk-select wired and
-smoke-tested on a live niri session; Confirm/Installing pages not built yet.
+**Known gap**: `CommandRunner` covers shell-outs, not HTTP — `stage3::download`,
+`store::list_binhost_atoms`, and `kernel::deploy`'s fetches are real `reqwest`
+calls with no fake/injectable layer yet, so `Deploy`/`PortageConfig` phases
+can't be exercised in the no-network test environment spec §10 requires. The
+`phase::tests` integration test covers `Partition`→`Fstab` for exactly this
+reason — that's as far as the current fake goes.
 
-Not yet done: GUI's Confirm/Installing pages, wifi-connect UI in either
-frontend, the iwd passphrase agent (secured-network connect currently
-hangs/fails — open networks work), and real binhost/overlay URLs once the
-store is published externally. Package-set selection (what gets installed
-beyond base system — DE/WM flavors, etc.) is intentionally not designed yet.
+Not yet done (see spec for the full list): `installer-cli`/`installer-gui`
+driving the new phase/journal system instead of legacy `install.rs`; a
+non-interactive `installer-cli` plan-JSON driver (spec's step 4, the one that
+proves the installer works headless); `Locale`/`Users`/`Initramfs`/`PostHooks`
+phases (keymap/timezone application, useradd/passwd, dracut, machine-id/eix
+seeding — genuinely new territory, nothing here does this yet); the
+non-libadwaita `installer-gtk` rewrite and its 13-page flow; preset/edition
+integration from `portage_store`; the iwd passphrase agent (secured-network
+connect currently hangs/fails — open networks work); wifi-connect UI in either
+frontend; and real binhost/overlay URLs once the store is published
+externally.
