@@ -1,11 +1,17 @@
 //! Hardware detection used to pick a kernel profile and sane partition defaults.
 //!
-//! The kernel store's combo vocabulary (mirrors `kernel-configs/{cpu,gpu,platform,ec,modem}/`
-//! in the portage-store overlay, see `gen-popular-targets.py`) is five axes:
-//! `<cpu>-<gpu>-<platform>-<ec>-<modem>`. Only the top-N most popular *valid* combinations
-//! are actually built (147 as of the last matrix run, out of 1728 possible), so exact
-//! matches are the exception rather than the rule — `kernel::resolve` degrades through
-//! this struct's `candidates()` to find one that's actually in the store.
+//! The kernel store's combo vocabulary (mirrors `kernel-configs/{cpu,gpu,platform}/` in
+//! the portage-store overlay, see `gen-popular-targets.py`) is three axes:
+//! `<cpu>-<gpu>-<platform>`. EC/WMI vendor and modem support are *not* axes — every combo
+//! is built with `ec/all` + `modem/all` (all vendor drivers as modules; `--skip-modules`
+//! means they never affected the bzImage anyway, so splitting the matrix on them just
+//! produced identical kernels under different names). `server` isn't a platform value
+//! either — dropped as out of scope for this distro.
+//!
+//! Only the top-N most popular *valid* combinations are actually built (304 as of the
+//! last matrix run, out of 18×7×3=378 possible), so exact matches aren't guaranteed —
+//! `kernel::resolve` degrades through this struct's `candidates()` to find one that's
+//! actually in the store.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,12 +19,28 @@ use serde::{Deserialize, Serialize};
 pub enum CpuArch {
     IntelRaptorlake,
     IntelAlderlake,
+    IntelMeteorlake,
+    IntelArrowlake,
+    IntelRocketlake,
+    IntelIcelake,
+    IntelSkylake,
+    IntelHaswell,
+    IntelIvybridge,
+    IntelSandybridge,
+    AmdZnver5,
     AmdZnver4,
     AmdZnver3,
+    AmdZnver2,
+    AmdZnver1,
+    AmdBdver4,
+    AmdBtver2,
     /// x86-64-v3 baseline (AVX2/BMI2/FMA) — safe fallback for any CPU that supports it
     /// but isn't one of the specifically-tuned codenames above.
     GenericX86_64V3,
-    /// x86-64-v2 baseline (SSE4.2/POPCNT) — widest-compatibility fallback.
+    /// x86-64-v2 baseline (SSE4.2/POPCNT) — widest-compatibility fallback, and the
+    /// deliberate landing spot for CPUs we can *detect* but won't *guess* an exact
+    /// microarch for (see `detect_cpu_arch`'s doc comment on why a wrong specific
+    /// guess is worse than a correct generic one here).
     GenericX86_64V2,
 }
 
@@ -27,8 +49,21 @@ impl CpuArch {
         match self {
             CpuArch::IntelRaptorlake => "intel-raptorlake",
             CpuArch::IntelAlderlake => "intel-alderlake",
+            CpuArch::IntelMeteorlake => "intel-meteorlake",
+            CpuArch::IntelArrowlake => "intel-arrowlake",
+            CpuArch::IntelRocketlake => "intel-rocketlake",
+            CpuArch::IntelIcelake => "intel-icelake",
+            CpuArch::IntelSkylake => "intel-skylake",
+            CpuArch::IntelHaswell => "intel-haswell",
+            CpuArch::IntelIvybridge => "intel-ivybridge",
+            CpuArch::IntelSandybridge => "intel-sandybridge",
+            CpuArch::AmdZnver5 => "amd-znver5",
             CpuArch::AmdZnver4 => "amd-znver4",
             CpuArch::AmdZnver3 => "amd-znver3",
+            CpuArch::AmdZnver2 => "amd-znver2",
+            CpuArch::AmdZnver1 => "amd-znver1",
+            CpuArch::AmdBdver4 => "amd-bdver4",
+            CpuArch::AmdBtver2 => "amd-btver2",
             CpuArch::GenericX86_64V3 => "generic-x86-64-v3",
             CpuArch::GenericX86_64V2 => "generic-x86-64-v2",
         }
@@ -41,6 +76,15 @@ pub enum Gpu {
     Nvidia,
     Amd,
     None,
+    /// Intel Arc/Battlemage+ discrete GPUs (new `xe` kernel driver, distinct from `i915`).
+    Xe,
+    /// Open-source Nvidia driver — never auto-detected (hardware can't tell you which
+    /// driver a user *wants*), only reachable as a fallback candidate if the proprietary
+    /// `nvidia` combo isn't in the store.
+    Nouveau,
+    /// Pre-GCN AMD/ATI cards (`radeon` driver) — same reasoning as Nouveau: not
+    /// auto-detected, only a fallback candidate.
+    RadeonLegacy,
 }
 
 impl Gpu {
@@ -50,6 +94,9 @@ impl Gpu {
             Gpu::Nvidia => "nvidia",
             Gpu::Amd => "amd",
             Gpu::None => "none",
+            Gpu::Xe => "xe",
+            Gpu::Nouveau => "nouveau",
+            Gpu::RadeonLegacy => "radeon-legacy",
         }
     }
 }
@@ -58,7 +105,6 @@ impl Gpu {
 pub enum Platform {
     Laptop,
     Desktop,
-    Server,
     Handheld,
 }
 
@@ -67,61 +113,17 @@ impl Platform {
         match self {
             Platform::Laptop => "laptop",
             Platform::Desktop => "desktop",
-            Platform::Server => "server",
             Platform::Handheld => "handheld",
         }
     }
 
-    /// Server/handheld are real platform values in the matrix but scored so low
-    /// (see `gen-popular-targets.py`'s weights) that neither made the top-147 build.
-    /// A server boots fine on a desktop-profile kernel (superset of ACPI/thermal
-    /// handling, just with unused mobile bits); a handheld is close enough to laptop.
+    /// Handheld is real but scored low (see `gen-popular-targets.py`'s weights) and a
+    /// laptop-profile kernel is a close enough match (same mobile power/thermal handling)
+    /// if no handheld build exists for this cpu/gpu pair.
     fn degrade(self) -> Option<Platform> {
         match self {
-            Platform::Server => Some(Platform::Desktop),
             Platform::Handheld => Some(Platform::Laptop),
             Platform::Laptop | Platform::Desktop => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Ec {
-    Lenovo,
-    Hp,
-    Dell,
-    Asus,
-    System76,
-    None,
-}
-
-impl Ec {
-    fn as_str(self) -> &'static str {
-        match self {
-            Ec::Lenovo => "lenovo",
-            Ec::Hp => "hp",
-            Ec::Dell => "dell",
-            Ec::Asus => "asus",
-            Ec::System76 => "system76",
-            Ec::None => "none",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Modem {
-    /// PCIe/SoC modem (Snapdragon X-style MHI transport).
-    MhiSoc,
-    UsbWwanGeneric,
-    None,
-}
-
-impl Modem {
-    fn as_str(self) -> &'static str {
-        match self {
-            Modem::MhiSoc => "mhi-soc",
-            Modem::UsbWwanGeneric => "usb-wwan-generic",
-            Modem::None => "none",
         }
     }
 }
@@ -131,8 +133,6 @@ pub struct Profile {
     pub cpu: CpuArch,
     pub gpu: Gpu,
     pub platform: Platform,
-    pub ec: Ec,
-    pub modem: Modem,
     pub ram_bytes: u64,
 }
 
@@ -142,85 +142,54 @@ impl Profile {
     /// has a fallback path via `candidates()` and, ultimately, a manual override.
     pub fn detect() -> crate::Result<Self> {
         let raw = RawInfo::gather();
-        let (platform, ec) = sanitize_platform_ec(detect_platform(&raw), detect_ec(&raw));
+        let platform = detect_platform(&raw);
         let gpu = sanitize_gpu(platform, detect_gpu(&raw));
         Ok(Self {
             cpu: detect_cpu_arch(&raw),
             gpu,
             platform,
-            ec,
-            modem: detect_modem(&raw),
             ram_bytes: detect_ram_bytes(),
         })
     }
 
-    /// Full five-axis combo string matching the store's naming scheme, e.g.
-    /// "intel-raptorlake-nvidia-laptop-lenovo-none".
+    /// Three-axis combo string matching the store's naming scheme, e.g.
+    /// "intel-raptorlake-nvidia-laptop".
     pub fn combo(&self) -> String {
-        format!(
-            "{}-{}-{}-{}-{}",
-            self.cpu.as_str(),
-            self.gpu.as_str(),
-            self.platform.as_str(),
-            self.ec.as_str(),
-            self.modem.as_str()
-        )
+        format!("{}-{}-{}", self.cpu.as_str(), self.gpu.as_str(), self.platform.as_str())
     }
 
-    /// Degrades from most to least specific, mirroring `gen-popular-targets.py`'s own
-    /// `valid()` constraints (server implies ec=none, handheld implies ec in
-    /// {none,asus} and gpu in {amd,none}) and its popularity weighting — narrow axes
-    /// (modem, ec) degrade before broad ones (cpu, gpu). Yields the exact profile first,
-    /// then progressively more generic combos, ending at a combo virtually guaranteed to
-    /// exist in any reasonably-sized store: `generic-x86-64-v2-none-{laptop,desktop}-none-none`.
+    /// Degrades from most to least specific: platform first (handheld -> laptop, since
+    /// it's the narrowest axis by popularity weight), then cpu to a generic level, then
+    /// gpu to none, ending at combos virtually guaranteed to exist in any reasonably
+    /// sized store: `generic-x86-64-v2-none-{laptop,desktop}`.
     pub fn candidates(&self) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
-        let mut push = |cpu: CpuArch, gpu: Gpu, platform: Platform, ec: Ec, modem: Modem| {
-            let (platform, ec) = sanitize_platform_ec(platform, ec);
+        let mut push = |cpu: CpuArch, gpu: Gpu, platform: Platform| {
             let gpu = sanitize_gpu(platform, gpu);
-            let s = format!(
-                "{}-{}-{}-{}-{}",
-                cpu.as_str(),
-                gpu.as_str(),
-                platform.as_str(),
-                ec.as_str(),
-                modem.as_str()
-            );
+            let s = format!("{}-{}-{}", cpu.as_str(), gpu.as_str(), platform.as_str());
             if seen.insert(s.clone()) {
                 out.push(s);
             }
         };
 
-        push(self.cpu, self.gpu, self.platform, self.ec, self.modem);
-        push(self.cpu, self.gpu, self.platform, self.ec, Modem::None);
-        push(self.cpu, self.gpu, self.platform, Ec::None, Modem::None);
+        push(self.cpu, self.gpu, self.platform);
         if let Some(p) = self.platform.degrade() {
-            push(self.cpu, self.gpu, p, Ec::None, Modem::None);
+            push(self.cpu, self.gpu, p);
         }
-        push(CpuArch::GenericX86_64V3, self.gpu, self.platform, Ec::None, Modem::None);
-        push(CpuArch::GenericX86_64V3, Gpu::None, self.platform, Ec::None, Modem::None);
-        push(CpuArch::GenericX86_64V2, Gpu::None, self.platform, Ec::None, Modem::None);
-        push(CpuArch::GenericX86_64V2, Gpu::None, Platform::Laptop, Ec::None, Modem::None);
-        push(CpuArch::GenericX86_64V2, Gpu::None, Platform::Desktop, Ec::None, Modem::None);
+        push(CpuArch::GenericX86_64V3, self.gpu, self.platform);
+        push(CpuArch::GenericX86_64V3, Gpu::None, self.platform);
+        push(CpuArch::GenericX86_64V2, Gpu::None, self.platform);
+        push(CpuArch::GenericX86_64V2, Gpu::None, Platform::Laptop);
+        push(CpuArch::GenericX86_64V2, Gpu::None, Platform::Desktop);
 
         out
     }
 }
 
-/// Enforces the same cross-axis constraints as `gen-popular-targets.py`'s `valid()`:
-/// server implies no vendor EC, handheld implies EC in {none, asus}. Applied both to
-/// the detected profile and to every candidate generated during degradation, so we
-/// never propose a combo the store could never contain.
-fn sanitize_platform_ec(platform: Platform, ec: Ec) -> (Platform, Ec) {
-    match platform {
-        Platform::Server => (platform, Ec::None),
-        Platform::Handheld if !matches!(ec, Ec::None | Ec::Asus) => (platform, Ec::None),
-        _ => (platform, ec),
-    }
-}
-
-/// Handheld implies gpu in {amd, none} in the matrix's `valid()`.
+/// Handheld implies gpu in {amd, none} in the matrix's `valid()` — anything else (rare:
+/// handheld with Intel/Nvidia graphics) gets pulled to `amd`, the closer of the two
+/// permitted values for a discrete-GPU handheld.
 fn sanitize_gpu(platform: Platform, gpu: Gpu) -> Gpu {
     if platform == Platform::Handheld && !matches!(gpu, Gpu::Amd | Gpu::None) {
         Gpu::Amd
@@ -231,7 +200,6 @@ fn sanitize_gpu(platform: Platform, gpu: Gpu) -> Gpu {
 
 struct RawInfo {
     cpuinfo: String,
-    sys_vendor: String,
     product_name: String,
     chassis_type: String,
     lspci: String,
@@ -241,10 +209,6 @@ impl RawInfo {
     fn gather() -> Self {
         Self {
             cpuinfo: std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default(),
-            sys_vendor: std::fs::read_to_string("/sys/class/dmi/id/sys_vendor")
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
             product_name: std::fs::read_to_string("/sys/class/dmi/id/product_name")
                 .unwrap_or_default()
                 .trim()
@@ -263,10 +227,14 @@ impl RawInfo {
     }
 }
 
-/// Best-effort microarchitecture ID from `/proc/cpuinfo`'s "model name" string, since
-/// there's no clean libc/kernel API for "give me the marketing codename". Known-model
-/// substring matches take priority; unmatched CPUs fall back to the x86-64 psABI
-/// feature level computed from the advertised `flags`.
+/// Best-effort microarchitecture ID from `/proc/cpuinfo`'s "model name" string — there's
+/// no clean libc/kernel API for "give me the marketing codename". Only guesses a specific
+/// codename when the SKU pattern is unambiguous (current Intel Core i3/5/7/9 and Core
+/// Ultra generations, current AMD Ryzen number ranges); anything else — including the
+/// legacy AMD FX/APU families (bdver4/btver2), which have no reliable SKU-string
+/// signature — falls back to the x86-64 psABI feature level. That's a deliberate choice:
+/// a wrong *specific* guess risks a kernel built with instructions the CPU doesn't
+/// support (illegal instruction crash at boot); a correct *generic* fallback never does.
 fn detect_cpu_arch(raw: &RawInfo) -> CpuArch {
     let model_name = raw
         .cpuinfo
@@ -276,29 +244,39 @@ fn detect_cpu_arch(raw: &RawInfo) -> CpuArch {
         .unwrap_or_default()
         .trim();
 
-    // Older/mobile-focused kernel builds prefix the model name with "Nth Gen Intel" but
-    // most (especially desktop-class/HX chips, e.g. "Intel(R) Core(TM) i7-14650HX") don't —
-    // so match on the SKU's generation digits instead: for "i7-14650HX" the digits are
-    // "14650", and the leading two digits (14) are the generation.
+    if let Some(arch) = intel_core_ultra_arch(model_name) {
+        return arch;
+    }
     if model_name.contains("Intel") {
         if let Some(gen) = intel_generation(model_name) {
-            match gen {
-                13 | 14 => return CpuArch::IntelRaptorlake,
-                12 => return CpuArch::IntelAlderlake,
+            let has_g_suffix = model_name
+                .rsplit_once('-')
+                .map(|(_, sku)| sku.contains('G') && sku.chars().any(|c| c.is_ascii_digit()))
+                .unwrap_or(false);
+            match (gen, has_g_suffix) {
+                (13, _) | (14, _) => return CpuArch::IntelRaptorlake,
+                (12, _) => return CpuArch::IntelAlderlake,
+                (11, _) => return CpuArch::IntelRocketlake,
+                (10, true) => return CpuArch::IntelIcelake,
+                (6..=10, _) => return CpuArch::IntelSkylake,
+                (4, _) | (5, _) => return CpuArch::IntelHaswell,
+                (3, _) => return CpuArch::IntelIvybridge,
+                (2, _) => return CpuArch::IntelSandybridge,
                 _ => {}
             }
         }
     }
     if model_name.contains("AMD Ryzen") {
-        // Ryzen model numbers encode generation in the leading digit(s): 7xxx/8xxx = Zen4,
-        // 5xxx = Zen3. Good enough for the mainstream desktop/laptop SKUs this store targets;
-        // genuinely ambiguous/rare SKUs fall through to the generic x86-64 level below.
+        // Ryzen model numbers encode generation in the leading digit(s). Good enough for
+        // the mainstream desktop/laptop SKUs this store targets.
         if let Some(num) = first_number(model_name) {
-            if (7000..9000).contains(&num) {
-                return CpuArch::AmdZnver4;
-            }
-            if (5000..6000).contains(&num) {
-                return CpuArch::AmdZnver3;
+            match num {
+                9000..=9999 => return CpuArch::AmdZnver5,
+                7000..=8999 => return CpuArch::AmdZnver4,
+                5000..=6999 => return CpuArch::AmdZnver3,
+                3000..=4999 => return CpuArch::AmdZnver2,
+                1000..=2999 => return CpuArch::AmdZnver1,
+                _ => {}
             }
         }
     }
@@ -307,6 +285,29 @@ fn detect_cpu_arch(raw: &RawInfo) -> CpuArch {
         CpuArch::GenericX86_64V3
     } else {
         CpuArch::GenericX86_64V2
+    }
+}
+
+/// Meteor Lake / Arrow Lake use "Core(TM) Ultra N NNNsuffix" naming (e.g.
+/// "Core(TM) Ultra 7 155H") instead of the "iX-NNNNN" pattern — the leading digit of the
+/// 3-digit model number is the generation: 1xx = Meteor Lake (Core Ultra 1), 2xx = Arrow
+/// Lake (Core Ultra 2). Matches on "Ultra" alone since "(TM)"/"(R)" markers between
+/// "Core" and "Ultra" vary across kernel/vendor cpuinfo formatting.
+fn intel_core_ultra_arch(model_name: &str) -> Option<CpuArch> {
+    let idx = model_name.find("Ultra")?;
+    // " 7 155H" -> trim the leading space before the tier digit.
+    let rest = model_name[idx + "Ultra".len()..].trim_start();
+    // Skip the tier digit ("5"/"7"/"9") and the whitespace after it to reach the model number.
+    let digits: String = rest
+        .chars()
+        .skip_while(|c| !c.is_ascii_whitespace())
+        .skip_while(|c| c.is_ascii_whitespace())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    match digits.chars().next()? {
+        '1' => Some(CpuArch::IntelMeteorlake),
+        '2' => Some(CpuArch::IntelArrowlake),
+        _ => None,
     }
 }
 
@@ -367,8 +368,10 @@ fn x86_64_v3_supported(cpuinfo: &str) -> bool {
 
 /// Parses `lspci -nn` for VGA/3D/Display controller lines and matches the PCI vendor ID
 /// (`[10de:xxxx]` = Nvidia, `[1002:xxxx]` = AMD, `[8086:xxxx]` = Intel). If a machine has
-/// both an iGPU and a dGPU (e.g. Intel + Nvidia laptop), the discrete GPU wins, since that's
-/// the one that actually needs a matching kernel driver profile.
+/// both an iGPU and a dGPU (e.g. Intel + Nvidia laptop), the discrete GPU wins, since
+/// that's the one that actually needs a matching kernel driver profile. Intel Arc/
+/// Battlemage discrete GPUs (device IDs starting `56` or `e2`) map to `Xe` instead of
+/// plain `Intel`, since they need the newer `xe` driver rather than `i915`.
 fn detect_gpu(raw: &RawInfo) -> Gpu {
     let mut found: Vec<Gpu> = raw
         .lspci
@@ -381,7 +384,7 @@ fn detect_gpu(raw: &RawInfo) -> Gpu {
         .filter_map(vendor_from_pci_line)
         .collect();
 
-    found.sort_by_key(|v| !matches!(v, Gpu::Nvidia | Gpu::Amd));
+    found.sort_by_key(|v| !matches!(v, Gpu::Nvidia | Gpu::Amd | Gpu::Xe));
     found.into_iter().next().unwrap_or(Gpu::None)
 }
 
@@ -390,18 +393,25 @@ fn vendor_from_pci_line(line: &str) -> Option<Gpu> {
         Some(Gpu::Nvidia)
     } else if line.contains("[1002:") {
         Some(Gpu::Amd)
-    } else if line.contains("[8086:") {
-        Some(Gpu::Intel)
+    } else if let Some(idx) = line.find("[8086:") {
+        let device_id = &line[idx + "[8086:".len()..];
+        if device_id.starts_with("56") || device_id.starts_with("e2") {
+            Some(Gpu::Xe)
+        } else {
+            Some(Gpu::Intel)
+        }
     } else {
         None
     }
 }
 
-/// Chassis-type-based laptop/server detection (SMBIOS System Enclosure `Type` values:
-/// 8/9/10/14 = Portable/Laptop/Notebook/Sub-Notebook, 17/23/28 = server-class chassis).
-/// Handheld gaming PCs don't have a dedicated SMBIOS chassis type, so they're caught by
-/// matching known product names instead — the same reason `gen-popular-targets.py`
-/// treats handheld as its own axis rather than deriving it from chassis type.
+/// Chassis-type-based laptop/desktop detection (SMBIOS System Enclosure `Type` values:
+/// 8/9/10/14 = Portable/Laptop/Notebook/Sub-Notebook). Handheld gaming PCs don't have a
+/// dedicated SMBIOS chassis type, so they're caught by matching known product names
+/// instead — the same reason `gen-popular-targets.py` treats handheld as its own axis
+/// rather than deriving it from chassis type. Server-class chassis types fall through to
+/// Desktop, since `server` was dropped from the platform axis entirely (out of scope for
+/// this distro) and a desktop-profile kernel is the closer match anyway.
 fn detect_platform(raw: &RawInfo) -> Platform {
     const HANDHELD_PRODUCTS: &[&str] = &["ROG Ally", "Legion Go", "Steam Deck", "ONEXPLAYER", "GPD Win"];
     if HANDHELD_PRODUCTS
@@ -413,53 +423,8 @@ fn detect_platform(raw: &RawInfo) -> Platform {
 
     match raw.chassis_type.as_str() {
         "8" | "9" | "10" | "14" => Platform::Laptop,
-        "17" | "23" | "28" => Platform::Server,
         _ => Platform::Desktop,
     }
-}
-
-/// Matches `/sys/class/dmi/id/sys_vendor` against the store's supported EC vendors.
-/// Everything else (or a chassis with no vendor-specific WMI/EC driver) maps to `none`.
-fn detect_ec(raw: &RawInfo) -> Ec {
-    let vendor = raw.sys_vendor.to_lowercase();
-    if vendor.contains("lenovo") {
-        Ec::Lenovo
-    } else if vendor.contains("hp") || vendor.contains("hewlett") {
-        Ec::Hp
-    } else if vendor.contains("dell") {
-        Ec::Dell
-    } else if vendor.contains("asus") {
-        Ec::Asus
-    } else if vendor.contains("system76") {
-        Ec::System76
-    } else {
-        Ec::None
-    }
-}
-
-/// WWAN presence via `/sys/class/net/wwan*`; distinguishes the PCIe/MHI-SoC transport
-/// from a USB WWAN dongle by checking which bus the backing device sits on.
-fn detect_modem(_raw: &RawInfo) -> Modem {
-    let Ok(entries) = std::fs::read_dir("/sys/class/net") else {
-        return Modem::None;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if !name.starts_with("wwan") {
-            continue;
-        }
-        let subsystem = std::fs::read_link(entry.path().join("device/subsystem"))
-            .ok()
-            .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
-            .unwrap_or_default();
-        return if subsystem == "pci" {
-            Modem::MhiSoc
-        } else {
-            Modem::UsbWwanGeneric
-        };
-    }
-    Modem::None
 }
 
 fn detect_ram_bytes() -> u64 {
@@ -484,50 +449,56 @@ mod tests {
             cpu: CpuArch::IntelRaptorlake,
             gpu: Gpu::Nvidia,
             platform: Platform::Laptop,
-            ec: Ec::Lenovo,
-            modem: Modem::None,
             ram_bytes: 0,
         };
-        assert_eq!(p.combo(), "intel-raptorlake-nvidia-laptop-lenovo-none");
+        assert_eq!(p.combo(), "intel-raptorlake-nvidia-laptop");
     }
 
     #[test]
-    fn candidates_degrade_modem_then_ec_then_cpu() {
+    fn candidates_degrade_platform_then_cpu_then_gpu() {
         let p = Profile {
             cpu: CpuArch::AmdZnver4,
             gpu: Gpu::Amd,
-            platform: Platform::Laptop,
-            ec: Ec::System76,
-            modem: Modem::UsbWwanGeneric,
+            platform: Platform::Handheld,
             ram_bytes: 0,
         };
         let c = p.candidates();
-        assert_eq!(c[0], "amd-znver4-amd-laptop-system76-usb-wwan-generic");
-        assert!(c.contains(&"amd-znver4-amd-laptop-system76-none".to_string()));
-        assert!(c.contains(&"amd-znver4-amd-laptop-none-none".to_string()));
-        assert!(c.contains(&"generic-x86-64-v3-amd-laptop-none-none".to_string()));
+        assert_eq!(c[0], "amd-znver4-amd-handheld");
+        assert!(c.contains(&"amd-znver4-amd-laptop".to_string()));
+        assert!(c.contains(&"generic-x86-64-v3-amd-handheld".to_string()));
+        assert!(c.contains(&"generic-x86-64-v3-none-handheld".to_string()));
         assert!(c.last().unwrap().starts_with("generic-x86-64-v2-none-"));
     }
 
     #[test]
-    fn server_platform_forces_ec_none() {
-        let (platform, ec) = sanitize_platform_ec(Platform::Server, Ec::Dell);
-        assert_eq!(platform, Platform::Server);
-        assert_eq!(ec, Ec::None);
-    }
-
-    #[test]
-    fn handheld_forces_ec_and_gpu_constraints() {
-        let (_, ec) = sanitize_platform_ec(Platform::Handheld, Ec::Dell);
-        assert_eq!(ec, Ec::None);
+    fn handheld_forces_gpu_constraint() {
         assert_eq!(sanitize_gpu(Platform::Handheld, Gpu::Nvidia), Gpu::Amd);
         assert_eq!(sanitize_gpu(Platform::Handheld, Gpu::None), Gpu::None);
+        assert_eq!(sanitize_gpu(Platform::Desktop, Gpu::Nvidia), Gpu::Nvidia);
     }
 
     #[test]
-    fn server_degrades_to_desktop() {
-        assert_eq!(Platform::Server.degrade(), Some(Platform::Desktop));
+    fn handheld_degrades_to_laptop() {
         assert_eq!(Platform::Handheld.degrade(), Some(Platform::Laptop));
         assert_eq!(Platform::Laptop.degrade(), None);
+        assert_eq!(Platform::Desktop.degrade(), None);
+    }
+
+    #[test]
+    fn intel_generation_parses_hx_sku() {
+        assert_eq!(intel_generation("Intel(R) Core(TM) i7-14650HX"), Some(14));
+        assert_eq!(intel_generation("Intel(R) Core(TM) i5-1240P"), Some(12));
+    }
+
+    #[test]
+    fn core_ultra_naming_maps_to_meteor_or_arrow_lake() {
+        assert_eq!(
+            intel_core_ultra_arch("Intel(R) Core(TM) Ultra 7 155H"),
+            Some(CpuArch::IntelMeteorlake)
+        );
+        assert_eq!(
+            intel_core_ultra_arch("Intel(R) Core(TM) Ultra 9 285K"),
+            Some(CpuArch::IntelArrowlake)
+        );
     }
 }
