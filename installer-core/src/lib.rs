@@ -1,4 +1,5 @@
 pub mod bootloader;
+pub mod config;
 pub mod disk;
 pub mod fstab;
 pub mod hardware;

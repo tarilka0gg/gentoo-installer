@@ -5,7 +5,7 @@
 use crate::steps::Step;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
-use installer_core::{disk, hardware, install, network, partition, store};
+use installer_core::{config::StoreEnv, disk, hardware, install, network, partition, store};
 use ratatui::{
     layout::{Constraint, Layout as RtLayout},
     style::{Color, Style},
@@ -14,29 +14,6 @@ use ratatui::{
     DefaultTerminal,
 };
 use tokio::sync::mpsc;
-
-/// The store isn't published under a fixed URL yet (see `~/portage-store-architecture.md` —
-/// currently just a local overlay, `sync-uri`/binhost not set up). Rather than hardcode a
-/// URL that doesn't exist, these come from the environment; Confirm shows a clear error if
-/// they're unset instead of silently pointing at nothing.
-struct StoreEnv {
-    binhost_url: String,
-    overlay_git_url: String,
-    overlay_name: String,
-    kernel_base_name: String,
-}
-
-impl StoreEnv {
-    fn from_env() -> Result<Self, String> {
-        let get = |key: &str| std::env::var(key).map_err(|_| format!("{key} is not set"));
-        Ok(Self {
-            binhost_url: get("GENTOO_STORE_BINHOST_URL")?,
-            overlay_git_url: get("GENTOO_STORE_OVERLAY_URL")?,
-            overlay_name: std::env::var("GENTOO_STORE_OVERLAY_NAME").unwrap_or_else(|_| "localrepo".into()),
-            kernel_base_name: std::env::var("GENTOO_KERNEL_BASE_NAME").unwrap_or_else(|_| "gentoo-diy-kernel".into()),
-        })
-    }
-}
 
 pub struct AppState {
     pub step: Step,
