@@ -221,7 +221,17 @@ fn confirm_page_build(
         ])
         .halign(gtk::Align::Center)
         .build();
-    warning.set_child(Some(&install_button));
+
+    let confirm_content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(18)
+        .build();
+    let ram_bytes = profile.borrow().as_ref().map(|p| p.ram_bytes).unwrap_or(0);
+    if let Some(d) = selected_disk.borrow().as_ref() {
+        confirm_content.append(&partition_bar(d.size_bytes, ram_bytes));
+    }
+    confirm_content.append(&install_button);
+    warning.set_child(Some(&confirm_content));
 
     let page = adw::NavigationPage::builder()
         .title("Confirm")
@@ -280,6 +290,70 @@ fn confirm_page_build(
     }
 
     page
+}
+
+/// GParted-style layout preview: ESP/swap/root as proportioned colored segments. Real
+/// disks make ESP (512MiB) and swap effectively invisible if drawn strictly to scale, so
+/// each segment gets a minimum pixel width instead — legible over literally accurate,
+/// same tradeoff partitioning tools like GParted/gnome-disks make.
+fn partition_bar(disk_size_bytes: u64, ram_bytes: u64) -> gtk::Box {
+    use installer_core::partition::{swap_size_gib, ESP_SIZE_MIB};
+
+    let total_mib = (disk_size_bytes / 1024 / 1024).max(1);
+    let esp_mib = ESP_SIZE_MIB;
+    let swap_mib = swap_size_gib(ram_bytes) * 1024;
+    let root_mib = total_mib.saturating_sub(esp_mib + swap_mib);
+
+    const BAR_WIDTH: i32 = 480;
+    const MIN_SEG: i32 = 64;
+    let esp_px = MIN_SEG;
+    let swap_frac = swap_mib as f64 / total_mib as f64;
+    let swap_px = ((BAR_WIDTH as f64 * swap_frac) as i32).clamp(MIN_SEG, 160);
+    let root_px = (BAR_WIDTH - esp_px - swap_px).max(MIN_SEG);
+
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(
+        ".gentoo-part-esp { background-color: #3584e4; border-radius: 6px; }\n\
+         .gentoo-part-swap { background-color: #e5a50a; border-radius: 6px; }\n\
+         .gentoo-part-root { background-color: #26a269; border-radius: 6px; }\n\
+         .gentoo-part-label { color: white; font-weight: bold; }",
+    );
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+
+    let segment = |css_class: &str, width: i32, title: &str, size_bytes: u64| -> gtk::Box {
+        let b = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .valign(gtk::Align::Center)
+            .halign(gtk::Align::Center)
+            .width_request(width)
+            .height_request(48)
+            .css_classes(vec![css_class.to_string()])
+            .build();
+        let label = gtk::Label::builder()
+            .label(format!("{title}\n{}", disk::format_size(size_bytes)))
+            .css_classes(vec!["gentoo-part-label".to_string()])
+            .justify(gtk::Justification::Center)
+            .build();
+        b.append(&label);
+        b
+    };
+
+    let bar = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(3)
+        .halign(gtk::Align::Center)
+        .build();
+    bar.append(&segment("gentoo-part-esp", esp_px, "ESP", esp_mib * 1024 * 1024));
+    bar.append(&segment("gentoo-part-swap", swap_px, "swap", swap_mib * 1024 * 1024));
+    bar.append(&segment("gentoo-part-root", root_px, "root (btrfs)", root_mib * 1024 * 1024));
+
+    bar
 }
 
 fn installing_page_build() -> adw::NavigationPage {
