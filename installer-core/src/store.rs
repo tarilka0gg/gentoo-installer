@@ -1,7 +1,7 @@
 //! Wires the installed system to the distro's own Portage overlay + binhost
 //! (the "portage store" this installer exists to sit in front of).
 
-use crate::process::run;
+use crate::command::CommandRunner;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -12,12 +12,13 @@ pub struct StoreConfig {
 }
 
 /// Writes `/etc/portage/repos.conf/<overlay_name>.conf` and
-/// `/etc/portage/binrepos.conf/<overlay_name>.conf` into the target root (pre-chroot,
-/// path-prefixed), then syncs the overlay so the installed system can `emerge` immediately.
-/// Requires `target_root` to already have proc/sys/dev bind-mounted for the chroot'd
-/// `emerge --sync` to work — that's the caller's responsibility (done once, alongside the
-/// other chroot setup, not per-call here).
-pub async fn configure(target_root: &Path, cfg: &StoreConfig) -> crate::Result<()> {
+/// `/etc/portage/binrepos.conf/<overlay_name>.conf` into the target root, then clones the
+/// overlay directly with `git` — not `emerge --sync`. Per spec, the installer never
+/// invokes emerge; `auto-sync = yes` in the written repos.conf means Portage picks the
+/// overlay up and keeps it current on the *installed* system's own first sync, the
+/// installer just needs it present so the app store / first `emerge` on first boot has
+/// something to work with immediately.
+pub async fn configure(runner: &dyn CommandRunner, target_root: &Path, cfg: &StoreConfig) -> crate::Result<()> {
     let repos_conf_dir = target_root.join("etc/portage/repos.conf");
     let binrepos_conf_dir = target_root.join("etc/portage/binrepos.conf");
     tokio::fs::create_dir_all(&repos_conf_dir).await?;
@@ -46,14 +47,12 @@ pub async fn configure(target_root: &Path, cfg: &StoreConfig) -> crate::Result<(
     )
     .await?;
 
-    let target_str = target_root
+    let repo_dir = target_root.join(format!("var/db/repos/{}", cfg.overlay_name));
+    tokio::fs::create_dir_all(repo_dir.parent().expect("var/db/repos always has a parent")).await?;
+    let repo_dir_str = repo_dir
         .to_str()
-        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target root path")))?;
-    run(
-        "chroot",
-        &[target_str, "emerge", "--sync", "--repo", &cfg.overlay_name],
-    )
-    .await?;
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 overlay path")))?;
+    runner.run_status("git", &["clone", "--depth", "1", &cfg.overlay_git_url, repo_dir_str]).await?;
 
     Ok(())
 }

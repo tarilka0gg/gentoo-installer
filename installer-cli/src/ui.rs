@@ -126,7 +126,7 @@ async fn advance(state: &mut AppState) {
             state.step = Step::DiskSelect;
             state.status = "detecting hardware + listing disks...".into();
             state.profile = hardware::Profile::detect().ok();
-            match disk::list().await {
+            match disk::list(&installer_core::command::RealCommandRunner).await {
                 Ok(disks) => {
                     state.disks = disks;
                     state.status.clear();

@@ -1,6 +1,6 @@
 //! Lists candidate installation disks (whole block devices, not partitions/loop/rom).
 
-use crate::process::run;
+use crate::command::CommandRunner;
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -26,8 +26,8 @@ struct LsblkDevice {
     device_type: String,
 }
 
-pub async fn list() -> crate::Result<Vec<Disk>> {
-    let raw = run("lsblk", &["-J", "-b", "-o", "NAME,SIZE,MODEL,TYPE"]).await?;
+pub async fn list(runner: &dyn CommandRunner) -> crate::Result<Vec<Disk>> {
+    let raw = runner.run("lsblk", &["-J", "-b", "-o", "NAME,SIZE,MODEL,TYPE"]).await?;
     let parsed: LsblkOutput =
         serde_json::from_str(&raw).map_err(|e| crate::Error::Other(e.into()))?;
 

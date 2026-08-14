@@ -1,10 +1,14 @@
-//! Orchestrates the actual install: partition -> stage3 -> store -> kernel -> fstab ->
-//! bootloader. Both frontends drive this the same way — call `run` with an
-//! `mpsc::UnboundedSender<Progress>`, drain the receiver on their own event loop to
-//! render status, and the returned `Result` says whether the whole run succeeded.
+//! Legacy monolithic orchestrator, still what `installer-cli`/`installer-gui` (the
+//! current libadwaita-based frontends) drive. The spec-aligned replacement is the
+//! `phase/` state machine + `journal` + `Ctx` — this function calls the exact same
+//! underlying step functions (`partition`, `stage3`, `store`, `kernel`, `fstab`,
+//! `bootloader`) those phases do, just without the journal/resume machinery, so nothing
+//! about *what* an install does diverges between the two orchestration layers while
+//! `installer-gtk` (spec §2, non-libadwaita) doesn't exist yet.
 
-use crate::{bootloader, fstab, hardware, kernel, partition, process, stage3, store};
-use std::path::{Path, PathBuf};
+use crate::command::{CommandRunner, RealCommandRunner};
+use crate::{bootloader, fstab, hardware, kernel, partition, stage3, store};
+use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Clone)]
@@ -43,13 +47,16 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
         return run_simulated(opts, tx).await;
     }
 
+    let runner: &dyn CommandRunner = &RealCommandRunner;
+
     let _ = tx.send(Progress::Partitioning);
-    let parts = partition::apply(&opts.layout).await?;
+    let parts = partition::create_partitions(runner, &opts.layout).await?;
+    partition::format_partitions(runner, &opts.layout, &parts).await?;
     let target_str = opts
         .target
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
-    partition::mount_target(&opts.layout, &parts, target_str).await?;
+    partition::mount_target(runner, &opts.layout, &parts, target_str).await?;
 
     let _ = tx.send(Progress::DownloadingStage3);
     let source = stage3::resolve_latest().await?;
@@ -57,13 +64,11 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     stage3::download(&source, &tarball_path).await?;
 
     let _ = tx.send(Progress::UnpackingStage3);
-    stage3::unpack(&tarball_path, &opts.target).await?;
+    stage3::unpack(runner, &tarball_path, &opts.target).await?;
     tokio::fs::remove_file(&tarball_path).await.ok();
 
-    bind_mount_chroot_dirs(&opts.target).await?;
-
     let _ = tx.send(Progress::ConfiguringStore);
-    store::configure(&opts.target, &opts.store).await?;
+    store::configure(runner, &opts.target, &opts.store).await?;
 
     let atoms = store::list_binhost_atoms(&opts.store.binhost_url).await?;
     let profile = hardware::Profile::detect()?;
@@ -72,17 +77,15 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
         atom: kernel_pkg.atom.clone(),
         degraded_by: kernel_pkg.degraded_by,
     });
-    process::run(
-        "chroot",
-        &[target_str, "emerge", "--usepkgonly", "--getbinpkg", &kernel_pkg.atom],
-    )
-    .await?;
+    // No emerge: the kernel is a direct file copy, not a package install (matches
+    // installer-core::phase::deploy's DeployPhase — see its doc comment for why).
+    kernel::deploy(runner, &opts.store.binhost_url, &kernel_pkg.combo, &opts.target).await?;
 
     let _ = tx.send(Progress::WritingFstab);
-    fstab::generate(&opts.target, &opts.layout, &parts).await?;
+    fstab::generate(runner, &opts.target, &opts.layout, &parts).await?;
 
     let _ = tx.send(Progress::InstallingBootloader);
-    bootloader::install(&opts.target, &opts.layout.disk).await?;
+    bootloader::install(runner, &opts.target, &opts.layout.disk).await?;
 
     let _ = tx.send(Progress::Done);
     Ok(())
@@ -121,19 +124,5 @@ async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> c
     sleep(Duration::from_millis(700)).await;
 
     let _ = tx.send(Progress::Done);
-    Ok(())
-}
-
-/// The chroot'd `emerge --sync`/kernel install need a working /proc, /sys, /dev inside
-/// the target — otherwise Portage's own sandboxing and device access break immediately.
-async fn bind_mount_chroot_dirs(target: &Path) -> crate::Result<()> {
-    for dir in ["proc", "sys", "dev"] {
-        let target_dir = target.join(dir);
-        tokio::fs::create_dir_all(&target_dir).await?;
-        let target_str = target_dir
-            .to_str()
-            .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 path")))?;
-        process::run("mount", &["--rbind", &format!("/{dir}"), target_str]).await?;
-    }
     Ok(())
 }

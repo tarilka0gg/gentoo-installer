@@ -1,13 +1,18 @@
 pub mod bootloader;
+pub mod command;
 pub mod config;
+pub mod detect;
 pub mod disk;
+pub mod event;
 pub mod fstab;
 pub mod hardware;
+mod http;
 pub mod install;
+pub mod journal;
 pub mod kernel;
 pub mod network;
 pub mod partition;
-mod process;
+pub mod phase;
 pub mod stage3;
 pub mod store;
 

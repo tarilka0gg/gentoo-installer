@@ -180,7 +180,7 @@ fn disk_select_page(
     let disks = std::thread::spawn(|| {
         tokio::runtime::Runtime::new()
             .expect("tokio runtime")
-            .block_on(disk::list())
+            .block_on(disk::list(&installer_core::command::RealCommandRunner))
     })
     .join()
     .unwrap_or_else(|_| Ok(Vec::new()));

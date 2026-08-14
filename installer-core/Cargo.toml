@@ -15,3 +15,4 @@ zbus.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 hex.workspace = true
+async-trait.workspace = true

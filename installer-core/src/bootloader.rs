@@ -1,6 +1,6 @@
 //! Limine install/config — the only bootloader this distro supports.
 
-use crate::process::run_status;
+use crate::command::CommandRunner;
 use std::path::Path;
 
 /// Writes a minimal `limine.conf` for the installed system: single entry booting
@@ -28,7 +28,7 @@ fn firmware_is_uefi() -> bool {
 /// boot entry or writes the legacy MBR/BIOS stage via `limine bios-install`.
 /// Assumes the Limine binaries shipped in the live environment/store are available
 /// under `/usr/share/limine` (the standard Gentoo `sys-boot/limine` install path).
-pub async fn install(target: &Path, disk: &str) -> crate::Result<()> {
+pub async fn install(runner: &dyn CommandRunner, target: &Path, disk: &str) -> crate::Result<()> {
     let boot = target.join("boot");
     let limine_dir = boot.join("limine");
     tokio::fs::create_dir_all(&limine_dir).await?;
@@ -52,7 +52,7 @@ pub async fn install(target: &Path, disk: &str) -> crate::Result<()> {
         let target_str = target
             .to_str()
             .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
-        run_status("limine", &["bios-install", "--target-root", target_str, disk]).await?;
+        runner.run_status("limine", &["bios-install", "--target-root", target_str, disk]).await?;
     }
 
     Ok(())

@@ -1,5 +1,6 @@
 //! Fetches and unpacks an official Gentoo stage3 tarball (amd64, openrc, multilib, non-hardened).
 
+use crate::command::CommandRunner;
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -94,10 +95,11 @@ pub async fn download(source: &Stage3Source, dest: &Path) -> crate::Result<()> {
 
 /// Unpacks the tarball into `root` (typically the mounted target `@` subvolume),
 /// preserving ownership/xattrs.
-pub async fn unpack(tarball: &Path, root: &Path) -> crate::Result<()> {
-    crate::process::run(
-        "tar",
-        &[
+pub async fn unpack(runner: &dyn CommandRunner, tarball: &Path, root: &Path) -> crate::Result<()> {
+    runner
+        .run(
+            "tar",
+            &[
             "--numeric-owner",
             "--xattrs-include=*.*",
             "-xpf",
