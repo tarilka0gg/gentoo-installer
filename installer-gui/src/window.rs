@@ -1,6 +1,11 @@
 //! Main window: an Adwaita ToolbarView wrapping a NavigationView, one page per wizard step:
 //! Welcome -> disk-select -> confirm -> installing. Network step for the GUI ISO (main niri
 //! image) still needs its iwd-backed page.
+//!
+//! Visual patterns (card-style disk picker, bar-with-separate-legend partitioning preview,
+//! progress bar + collapsible log) are ported from elementary's GTK installer
+//! (github.com/elementary/installer — `Widgets/DiskGrid.vala`, `Widgets/DiskBar.vala`,
+//! `Views/ProgressView.vala`), adapted to libadwaita idioms.
 
 use adw::prelude::*;
 use gtk::glib;
@@ -17,6 +22,8 @@ fn simulate_mode() -> bool {
 }
 
 pub fn build(app: &adw::Application) {
+    install_css();
+
     let nav = adw::NavigationView::new();
     let selected_disk: Rc<RefCell<Option<disk::Disk>>> = Rc::new(RefCell::new(None));
     let profile: Rc<RefCell<Option<hardware::Profile>>> = Rc::new(RefCell::new(None));
@@ -38,6 +45,31 @@ pub fn build(app: &adw::Application) {
         .build();
 
     window.present();
+}
+
+/// One shared stylesheet for the whole app — disk-card selection state and the
+/// partition-bar/legend swatch colors, which libadwaita has no ready-made classes for.
+fn install_css() {
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(
+        "\
+        .gentoo-disk-card:checked { \
+            border: 2px solid @accent_bg_color; \
+            background-color: alpha(@accent_bg_color, 0.08); \
+        }\n\
+        .gentoo-disk-card { border: 2px solid transparent; border-radius: 12px; }\n\
+        .gentoo-part-esp { background-color: #3584e4; border-radius: 6px; }\n\
+        .gentoo-part-swap { background-color: #e5a50a; border-radius: 6px; }\n\
+        .gentoo-part-root { background-color: #26a269; border-radius: 6px; }\n\
+        ",
+    );
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
 }
 
 fn welcome_page(nav: &adw::NavigationView, disk_page: &adw::NavigationPage) -> adw::NavigationPage {
@@ -73,22 +105,62 @@ fn welcome_page(nav: &adw::NavigationView, disk_page: &adw::NavigationPage) -> a
     page
 }
 
+/// Card-style disk picker (ported from elementary installer's `DiskGrid`/`DiskButton`):
+/// a radio-grouped `ToggleButton` per disk with an icon, bold name, and path/size
+/// subtitle, instead of a plain row list — the selected card gets an accent border via
+/// the `:checked` CSS above.
+fn disk_card(disk: &disk::Disk, group_with: Option<&gtk::ToggleButton>) -> gtk::ToggleButton {
+    let icon = gtk::Image::builder().icon_name("drive-harddisk-symbolic").pixel_size(32).build();
+
+    let name_label = gtk::Label::builder()
+        .label(&disk.path)
+        .halign(gtk::Align::Start)
+        .css_classes(vec!["heading".to_string()])
+        .build();
+    let subtitle_label = gtk::Label::builder()
+        .label(format!("{}  {}", disk::format_size(disk.size_bytes), disk.model))
+        .halign(gtk::Align::Start)
+        .css_classes(vec!["dim-label".to_string()])
+        .ellipsize(gtk::pango::EllipsizeMode::Middle)
+        .build();
+
+    let text_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).build();
+    text_box.append(&name_label);
+    text_box.append(&subtitle_label);
+
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(10)
+        .margin_bottom(10)
+        .build();
+    content.append(&icon);
+    content.append(&text_box);
+
+    let button = gtk::ToggleButton::builder()
+        .child(&content)
+        .css_classes(vec!["card".to_string(), "gentoo-disk-card".to_string()])
+        .build();
+    if let Some(g) = group_with {
+        button.set_group(Some(g));
+    }
+    button
+}
+
 fn disk_select_page(
     nav: adw::NavigationView,
     selected_disk: Rc<RefCell<Option<disk::Disk>>>,
     profile: Rc<RefCell<Option<hardware::Profile>>>,
 ) -> adw::NavigationPage {
-    let list = gtk::ListBox::builder()
-        .selection_mode(gtk::SelectionMode::Single)
-        .css_classes(vec!["boxed-list".to_string()])
-        .build();
+    let cards_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
 
     let profile_label = gtk::Label::builder()
         .halign(gtk::Align::Start)
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(12)
+        .margin_bottom(4)
         .wrap(true)
+        .css_classes(vec!["dim-label".to_string()])
         .build();
 
     match hardware::Profile::detect() {
@@ -112,47 +184,46 @@ fn disk_select_page(
     })
     .join()
     .unwrap_or_else(|_| Ok(Vec::new()));
-
     let disks = disks.unwrap_or_default();
-    let disks_rc = Rc::new(disks.clone());
-    if disks.is_empty() {
-        list.append(&adw::ActionRow::builder().title("No disks found").build());
-    } else {
-        for d in &disks {
-            let row = adw::ActionRow::builder()
-                .title(d.path.clone())
-                .subtitle(format!("{}  {}", disk::format_size(d.size_bytes), d.model))
-                .activatable(true)
-                .build();
-            list.append(&row);
-        }
-        list.select_row(list.row_at_index(0).as_ref());
-    }
 
     let next_button = gtk::Button::builder()
         .label("Next")
-        .css_classes(vec!["suggested-action".to_string()])
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
         .halign(gtk::Align::End)
         .sensitive(!disks.is_empty())
         .build();
 
+    if disks.is_empty() {
+        cards_box.append(&adw::ActionRow::builder().title("No disks found").build());
+    } else {
+        let mut first_button: Option<gtk::ToggleButton> = None;
+        for d in &disks {
+            let button = disk_card(d, first_button.as_ref());
+            if first_button.is_none() {
+                button.set_active(true);
+                *selected_disk.borrow_mut() = Some(d.clone());
+                first_button = Some(button.clone());
+            }
+
+            let selected_disk = selected_disk.clone();
+            let d = d.clone();
+            button.connect_toggled(move |b| {
+                if b.is_active() {
+                    *selected_disk.borrow_mut() = Some(d.clone());
+                }
+            });
+
+            cards_box.append(&button);
+        }
+    }
+
     let confirm_page = Rc::new(RefCell::new(None::<adw::NavigationPage>));
     {
         let nav = nav.clone();
-        let list = list.clone();
-        let disks_rc = disks_rc.clone();
         let selected_disk = selected_disk.clone();
         let profile = profile.clone();
         let confirm_page = confirm_page.clone();
         next_button.connect_clicked(move |_| {
-            let Some(row) = list.selected_row() else { return };
-            let idx = row.index();
-            if idx < 0 {
-                return;
-            }
-            let Some(disk) = disks_rc.get(idx as usize) else { return };
-            *selected_disk.borrow_mut() = Some(disk.clone());
-
             if confirm_page.borrow().is_none() {
                 let page = confirm_page_build(nav.clone(), selected_disk.clone(), profile.clone());
                 nav.add(&page);
@@ -173,7 +244,7 @@ fn disk_select_page(
         .margin_bottom(24)
         .build();
     content.append(&profile_label);
-    content.append(&list);
+    content.append(&cards_box);
     content.append(&next_button);
 
     let clamp = adw::Clamp::builder().child(&content).maximum_size(700).build();
@@ -203,12 +274,7 @@ fn confirm_page_build(
             d.path,
             disk::format_size(d.size_bytes)
         ),
-        Some(d) => format!(
-            "About to WIPE {} ({}) and install: ESP 512MiB, swap, btrfs root with \
-             @/@home/@var/@log subvolumes, Limine bootloader.",
-            d.path,
-            disk::format_size(d.size_bytes)
-        ),
+        Some(d) => format!("About to WIPE {} ({}) with the layout below.", d.path, disk::format_size(d.size_bytes)),
         None => "No disk selected.".to_string(),
     };
     warning.set_description(Some(&text));
@@ -239,12 +305,12 @@ fn confirm_page_build(
         .build();
     page.set_tag(Some("confirm"));
 
-    let installing_page = Rc::new(RefCell::new(None::<adw::NavigationPage>));
+    let installing: Rc<RefCell<Option<InstallingWidgets>>> = Rc::new(RefCell::new(None));
     {
         let nav = nav.clone();
         let selected_disk = selected_disk.clone();
         let profile = profile.clone();
-        let installing_page = installing_page.clone();
+        let installing = installing.clone();
         let warning = warning.clone();
         install_button.connect_clicked(move |btn| {
             let simulate = simulate_mode();
@@ -278,24 +344,25 @@ fn confirm_page_build(
                 simulate,
             };
 
-            if installing_page.borrow().is_none() {
-                let page = installing_page_build();
-                nav.add(&page);
-                *installing_page.borrow_mut() = Some(page);
+            if installing.borrow().is_none() {
+                let widgets = installing_page_build();
+                nav.add(&widgets.page);
+                *installing.borrow_mut() = Some(widgets);
             }
-            let page = installing_page.borrow().as_ref().unwrap().clone();
-            nav.push(&page);
-            spawn_install(opts, page);
+            let widgets = installing.borrow().as_ref().unwrap().clone();
+            nav.push(&widgets.page);
+            spawn_install(opts, widgets);
         });
     }
 
     page
 }
 
-/// GParted-style layout preview: ESP/swap/root as proportioned colored segments. Real
-/// disks make ESP (512MiB) and swap effectively invisible if drawn strictly to scale, so
-/// each segment gets a minimum pixel width instead — legible over literally accurate,
-/// same tradeoff partitioning tools like GParted/gnome-disks make.
+/// GParted/elementary-style layout preview: ESP/swap/root as proportioned colored
+/// segments, with size/label text moved into a legend list below the bar rather than
+/// crammed inside the (often very narrow) segments themselves — real disks make ESP
+/// (512MiB) and swap tiny relative to root, so text has to live outside the bar to stay
+/// legible. Each segment still gets a minimum pixel width so it stays visible at all.
 fn partition_bar(disk_size_bytes: u64, ram_bytes: u64) -> gtk::Box {
     use installer_core::partition::{swap_size_gib, ESP_SIZE_MIB};
 
@@ -305,75 +372,106 @@ fn partition_bar(disk_size_bytes: u64, ram_bytes: u64) -> gtk::Box {
     let root_mib = total_mib.saturating_sub(esp_mib + swap_mib);
 
     const BAR_WIDTH: i32 = 480;
-    const MIN_SEG: i32 = 64;
+    const MIN_SEG: i32 = 48;
     let esp_px = MIN_SEG;
     let swap_frac = swap_mib as f64 / total_mib as f64;
     let swap_px = ((BAR_WIDTH as f64 * swap_frac) as i32).clamp(MIN_SEG, 160);
     let root_px = (BAR_WIDTH - esp_px - swap_px).max(MIN_SEG);
-
-    let provider = gtk::CssProvider::new();
-    provider.load_from_data(
-        ".gentoo-part-esp { background-color: #3584e4; border-radius: 6px; }\n\
-         .gentoo-part-swap { background-color: #e5a50a; border-radius: 6px; }\n\
-         .gentoo-part-root { background-color: #26a269; border-radius: 6px; }\n\
-         .gentoo-part-label { color: white; font-weight: bold; }",
-    );
-    if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
-
-    let segment = |css_class: &str, width: i32, title: &str, size_bytes: u64| -> gtk::Box {
-        let b = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .valign(gtk::Align::Center)
-            .halign(gtk::Align::Center)
-            .width_request(width)
-            .height_request(48)
-            .css_classes(vec![css_class.to_string()])
-            .build();
-        let label = gtk::Label::builder()
-            .label(format!("{title}\n{}", disk::format_size(size_bytes)))
-            .css_classes(vec!["gentoo-part-label".to_string()])
-            .justify(gtk::Justification::Center)
-            .build();
-        b.append(&label);
-        b
-    };
 
     let bar = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .spacing(3)
         .halign(gtk::Align::Center)
         .build();
-    bar.append(&segment("gentoo-part-esp", esp_px, "ESP", esp_mib * 1024 * 1024));
-    bar.append(&segment("gentoo-part-swap", swap_px, "swap", swap_mib * 1024 * 1024));
-    bar.append(&segment("gentoo-part-root", root_px, "root (btrfs)", root_mib * 1024 * 1024));
+    let segment = |css_class: &str, width: i32| -> gtk::Box {
+        gtk::Box::builder()
+            .width_request(width)
+            .height_request(28)
+            .css_classes(vec![css_class.to_string()])
+            .build()
+    };
+    bar.append(&segment("gentoo-part-esp", esp_px));
+    bar.append(&segment("gentoo-part-swap", swap_px));
+    bar.append(&segment("gentoo-part-root", root_px));
 
-    bar
+    let legend = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).halign(gtk::Align::Center).build();
+    let legend_row = |css_class: &str, title: &str, size_bytes: u64, fs: &str| -> gtk::Box {
+        let swatch = gtk::Box::builder()
+            .width_request(14)
+            .height_request(14)
+            .valign(gtk::Align::Center)
+            .css_classes(vec![css_class.to_string()])
+            .build();
+        let label = gtk::Label::builder()
+            .label(format!("{title} — {} ({fs})", disk::format_size(size_bytes)))
+            .halign(gtk::Align::Start)
+            .build();
+        let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
+        row.append(&swatch);
+        row.append(&label);
+        row
+    };
+    legend.append(&legend_row("gentoo-part-esp", "ESP", esp_mib * 1024 * 1024, "vfat"));
+    legend.append(&legend_row("gentoo-part-swap", "swap", swap_mib * 1024 * 1024, "swap"));
+    legend.append(&legend_row("gentoo-part-root", "root", root_mib * 1024 * 1024, "btrfs"));
+
+    let wrapper = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
+    wrapper.append(&bar);
+    wrapper.append(&legend);
+    wrapper
 }
 
-fn installing_page_build() -> adw::NavigationPage {
+#[derive(Clone)]
+struct InstallingWidgets {
+    page: adw::NavigationPage,
+    progress: gtk::ProgressBar,
+    status_label: gtk::Label,
+    log_label: gtk::Label,
+}
+
+/// Ported from elementary installer's `ProgressView`: a determinate progress bar with a
+/// short status line by default, and the full step-by-step log tucked behind a
+/// collapsed `Expander` — most users never need to open it, but it's there for anyone
+/// debugging a failed install.
+fn installing_page_build() -> InstallingWidgets {
+    let status_label = gtk::Label::builder()
+        .label("Starting install...")
+        .css_classes(vec!["title-2".to_string()])
+        .wrap(true)
+        .build();
+
+    let progress = gtk::ProgressBar::builder().hexpand(true).show_text(false).build();
+
     let log_label = gtk::Label::builder()
         .halign(gtk::Align::Start)
         .valign(gtk::Align::Start)
         .wrap(true)
         .selectable(true)
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(12)
-        .margin_bottom(12)
         .build();
-    log_label.set_widget_name("install-log");
+    let log_scroller = gtk::ScrolledWindow::builder()
+        .child(&log_label)
+        .min_content_height(160)
+        .build();
+    let details = gtk::Expander::builder().label("Show details").child(&log_scroller).build();
 
-    let scroller = gtk::ScrolledWindow::builder().child(&log_label).vexpand(true).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
+    content.append(&status_label);
+    content.append(&progress);
+    content.append(&details);
 
-    let page = adw::NavigationPage::builder().title("Installing").child(&scroller).build();
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(600).build();
+
+    let page = adw::NavigationPage::builder().title("Installing").child(&clamp).build();
     page.set_tag(Some("installing"));
-    page
+
+    InstallingWidgets { page, progress, status_label, log_label }
 }
 
 /// Bridges `install::run`'s tokio-channel progress into the GTK main loop: the install
@@ -381,7 +479,7 @@ fn installing_page_build() -> adw::NavigationPage {
 /// async), and progress is relayed through a `std::sync::mpsc` channel that a
 /// `glib::timeout_add_local` on the main thread drains every 200ms — the same
 /// non-blocking-poll approach the CLI uses per ratatui frame.
-fn spawn_install(opts: install::InstallOptions, page: adw::NavigationPage) {
+fn spawn_install(opts: install::InstallOptions, widgets: InstallingWidgets) {
     #[derive(Debug)]
     enum Event {
         Progress(install::Progress),
@@ -409,29 +507,51 @@ fn spawn_install(opts: install::InstallOptions, page: adw::NavigationPage) {
         });
     });
 
-    let log_label = page
-        .child()
-        .and_downcast::<gtk::ScrolledWindow>()
-        .and_then(|s| s.child())
-        .and_downcast::<gtk::Label>()
-        .expect("installing page always has a Label child");
-
     glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
-        let mut current = log_label.label().to_string();
+        let mut log = widgets.log_label.label().to_string();
         while let Ok(event) = rx.try_recv() {
-            let line = match event {
-                Event::Progress(p) => describe(&p),
-                Event::Finished(Ok(())) => "Install complete.".to_string(),
-                Event::Finished(Err(e)) => format!("ERROR: {e}"),
-            };
-            if !current.is_empty() {
-                current.push('\n');
+            match event {
+                Event::Progress(p) => {
+                    widgets.progress.set_fraction(progress_fraction(&p));
+                    let line = describe(&p);
+                    widgets.status_label.set_label(&line);
+                    if !log.is_empty() {
+                        log.push('\n');
+                    }
+                    log.push_str(&line);
+                }
+                Event::Finished(Ok(())) => {
+                    widgets.status_label.set_label("Install complete.");
+                    widgets.progress.set_fraction(1.0);
+                }
+                Event::Finished(Err(e)) => {
+                    widgets.status_label.set_label(&format!("Install failed: {e}"));
+                    if !log.is_empty() {
+                        log.push('\n');
+                    }
+                    log.push_str(&format!("ERROR: {e}"));
+                }
             }
-            current.push_str(&line);
         }
-        log_label.set_label(&current);
+        widgets.log_label.set_label(&log);
         glib::ControlFlow::Continue
     });
+}
+
+const TOTAL_STEPS: f64 = 7.0;
+
+fn progress_fraction(p: &install::Progress) -> f64 {
+    let step = match p {
+        install::Progress::Partitioning => 0.0,
+        install::Progress::DownloadingStage3 => 1.0,
+        install::Progress::UnpackingStage3 => 2.0,
+        install::Progress::ConfiguringStore => 3.0,
+        install::Progress::InstallingKernel { .. } => 4.0,
+        install::Progress::WritingFstab => 5.0,
+        install::Progress::InstallingBootloader => 6.0,
+        install::Progress::Done => 7.0,
+    };
+    step / TOTAL_STEPS
 }
 
 fn describe(p: &install::Progress) -> String {
