@@ -15,14 +15,20 @@ frontends over one shared core:
   lives in the overlay/binhost and in the installer itself, not the base tarball.
 - **Kernel**: no on-device compilation. Precompiled binary kernel packages, built
   ahead of time by `kernel-configs/matrix-build.sh` (real script, `../kernel-releases/`)
-  across a 5-axis matrix — `<cpu>-<gpu>-<platform>-<ec>-<modem>` — e.g.
-  `intel-raptorlake-nvidia-laptop-hp-none`. 1728 possible combinations exist but only
-  the top-147 by popularity are actually built (`gen-popular-targets.py`'s scoring),
+  across a 3-axis matrix — `<cpu>-<gpu>-<platform>` — e.g.
+  `intel-raptorlake-nvidia-laptop`. EC/WMI vendor and modem support are *not* axes:
+  every build always includes all vendor EC/modem drivers as modules (`ec/all` +
+  `modem/all`), since `--skip-modules` means they never affected the bzImage anyway —
+  splitting on them just produced identical kernels under different names, so that was
+  dropped. `server` was also dropped from the platform axis (out of scope for this
+  distro). 378 possible cpu×gpu×platform combinations exist (18 CPU codenames × 7 GPU ×
+  3 platform), 304 are actually built by popularity (`gen-popular-targets.py`'s scoring),
   so `installer-core::kernel::resolve` degrades through `hardware::Profile::candidates()`
-  (drop modem → drop ec → generalize cpu → drop gpu) rather than requiring an exact
-  match. Detection (`installer-core::hardware`) is real CPU/GPU/platform/EC-vendor/modem
-  sensing, sanitized against the same cross-axis constraints as the build script's own
-  `valid()` (e.g. handheld implies ec ∈ {none, asus}).
+  (generalize platform → cpu → gpu) rather than requiring an exact match. Detection
+  (`installer-core::hardware`) is real CPU-microarch/GPU/platform sensing — deliberately
+  conservative on CPU: an unrecognized SKU falls back to the generic x86-64-v2/v3
+  feature-level build rather than guessing a specific codename wrong, since a wrong
+  guess risks a kernel using instructions the CPU doesn't actually support.
 - **Bootloader**: Limine only. No GRUB.
 - **Partitioning**: automatic, no manual step.
   - ESP: 512 MiB, vfat (required for Limine on UEFI)
@@ -40,7 +46,7 @@ frontends over one shared core:
 
 ```
 installer-core/   lib crate — all real logic, no UI code
-  hardware.rs      CPU/GPU/platform/EC/modem detection -> Profile (5-axis combo)
+  hardware.rs      CPU/GPU/platform detection -> Profile (3-axis combo)
   kernel.rs        Profile -> matching store atom, with popularity-aware fallback
   disk.rs          lsblk-backed disk enumeration
   partition.rs     layout planning + swap sizing + apply() + mount_target()
@@ -60,13 +66,13 @@ between them.
 
 ## Status
 
-Workspace builds and passes clippy clean across all three crates, 14 unit tests
+Workspace builds and passes clippy clean across all three crates, 15 unit tests
 passing. Hardware detection was live-verified on this machine (Victus 16,
 i7-14650HX + RTX 4070): `Profile::detect()` produces
-`intel-raptorlake-nvidia-laptop-hp-none`, an exact match against row #12 of the
-real 147-kernel build.
+`intel-raptorlake-nvidia-laptop`, an exact match against rank #3 of the
+real 304-kernel build.
 
-Implemented for real (not stubs): CPU/GPU/platform/EC/modem hardware detection,
+Implemented for real (not stubs): CPU/GPU/platform hardware detection,
 disk listing, stage3 resolve/download/verify/unpack, full partitioning
 (`parted`/`mkfs.*`/btrfs subvolumes) + mount, Limine deploy, iwd D-Bus network
 client (open networks only — see below), store repo/binhost config + chroot
