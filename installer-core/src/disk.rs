@@ -18,7 +18,9 @@ struct LsblkOutput {
 #[derive(Deserialize)]
 struct LsblkDevice {
     name: String,
-    size: Option<String>,
+    // `lsblk -b` (bytes, no human-readable suffix) emits SIZE as a JSON number, not a
+    // string — only the human-readable form (no -b) quotes it.
+    size: Option<u64>,
     model: Option<String>,
     #[serde(rename = "type")]
     device_type: String,
@@ -32,10 +34,11 @@ pub async fn list() -> crate::Result<Vec<Disk>> {
     Ok(parsed
         .blockdevices
         .into_iter()
-        .filter(|d| d.device_type == "disk")
+        // zram/loop show up as type "disk" too but aren't real install targets.
+        .filter(|d| d.device_type == "disk" && !d.name.starts_with("zram") && !d.name.starts_with("loop"))
         .map(|d| Disk {
             path: format!("/dev/{}", d.name),
-            size_bytes: d.size.and_then(|s| s.parse().ok()).unwrap_or(0),
+            size_bytes: d.size.unwrap_or(0),
             model: d.model.unwrap_or_default().trim().to_string(),
         })
         .collect())
