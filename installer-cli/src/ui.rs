@@ -115,6 +115,9 @@ fn describe(p: &install::Progress) -> String {
             }
         }
         install::Progress::WritingFstab => "Writing fstab...".into(),
+        install::Progress::SettingKeyboard => "Setting keyboard layout...".into(),
+        install::Progress::SettingTimezone => "Setting time zone...".into(),
+        install::Progress::CreatingAccount => "Creating your account...".into(),
         install::Progress::InstallingBootloader => "Installing Limine...".into(),
         install::Progress::Done => "Install complete.".into(),
     }
@@ -171,6 +174,23 @@ fn start_install(state: &mut AppState) {
         }
     };
 
+    // No account-creation screen in the minimal ISO's TUI yet — same "don't hardcode a
+    // real destructive default" reasoning as GENTOO_STORE_BINHOST_URL. Simulate mode
+    // doesn't need real credentials at all.
+    let account = if simulate {
+        installer_core::account::Account { username: "gentoo".into(), password: String::new() }
+    } else {
+        let username = std::env::var("GENTOO_INSTALLER_USERNAME");
+        let password = std::env::var("GENTOO_INSTALLER_PASSWORD");
+        match (username, password) {
+            (Ok(username), Ok(password)) => installer_core::account::Account { username, password },
+            _ => {
+                state.status = "set GENTOO_INSTALLER_USERNAME / GENTOO_INSTALLER_PASSWORD (no account screen in this TUI yet)".into();
+                return;
+            }
+        }
+    };
+
     let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
     let opts = install::InstallOptions {
         layout,
@@ -183,6 +203,9 @@ fn start_install(state: &mut AppState) {
         kernel_base_name: store_env
             .map(|e| e.kernel_base_name)
             .unwrap_or_else(|| "gentoo-diy-kernel".into()),
+        keyboard_layout: installer_core::keyboard::detect_current(),
+        timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
+        account,
         simulate,
     };
 

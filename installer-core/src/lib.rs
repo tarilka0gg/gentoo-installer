@@ -1,3 +1,4 @@
+pub mod account;
 pub mod bootloader;
 pub mod command;
 pub mod config;
@@ -10,11 +11,13 @@ mod http;
 pub mod install;
 pub mod journal;
 pub mod kernel;
+pub mod keyboard;
 pub mod network;
 pub mod partition;
 pub mod phase;
 pub mod stage3;
 pub mod store;
+pub mod timezone;
 
 pub use error::{Error, Result};
 

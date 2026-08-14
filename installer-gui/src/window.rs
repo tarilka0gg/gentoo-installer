@@ -1,6 +1,7 @@
 //! Main window: an Adwaita ToolbarView wrapping a NavigationView, one page per wizard step:
-//! Welcome -> disk-select -> confirm -> installing. Network step for the GUI ISO (main niri
-//! image) still needs its iwd-backed page.
+//! Welcome -> [Keyboard -> Timezone, if Advanced] -> Disk -> Account -> Confirm ->
+//! Installing -> Done. Network step for the GUI ISO (main niri image) still needs its
+//! iwd-backed page.
 //!
 //! Visual patterns (card-style disk picker, bar-with-separate-legend partitioning preview,
 //! progress bar + collapsible log) are ported from elementary's GTK installer
@@ -9,12 +10,19 @@
 //! libadwaita look (HeaderBar, NavigationView, boxed cards), matching this system's own
 //! apps (e.g. `../portage-store`), not the stripped-down non-adwaita design from the
 //! formal build spec's §9 — that direction didn't match what was actually wanted here.
+//!
+//! The screen script's "⋯" menu (§0) is one `gtk::MenuButton` in the shared header whose
+//! popover content is swapped per page: Welcome gets the "Advanced setup" switch, Disk
+//! gets "Manual partitioning…" (enabled only once Advanced is on). Other pages hide the
+//! button entirely rather than showing an empty menu.
 
 use adw::prelude::*;
 use gtk::glib;
-use installer_core::{config::StoreEnv, disk, hardware, install, partition, store};
+use installer_core::{
+    account::Account, config::StoreEnv, disk, hardware, install, keyboard, partition, store, timezone as tz,
+};
 use libadwaita as adw;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc as std_mpsc;
 
@@ -24,13 +32,51 @@ fn simulate_mode() -> bool {
     std::env::var("GENTOO_INSTALLER_SIMULATE").is_ok()
 }
 
+/// Everything pages need to hand off to each other. One shared struct instead of a
+/// growing pile of individually-threaded `Rc<RefCell<T>>` args — this used to be three
+/// separate ones before Keyboard/Timezone/Account/manual-partitioning added five more.
+struct WizardState {
+    selected_disk: RefCell<Option<disk::Disk>>,
+    profile: RefCell<Option<hardware::Profile>>,
+    existing_os: RefCell<Option<String>>,
+    advanced: Cell<bool>,
+    keyboard_layout: RefCell<String>,
+    timezone: RefCell<String>,
+    manual_root_fs: Cell<partition::RootFs>,
+    /// `None` means "use the automatic RAM-based size" — set only if the user actually
+    /// changes it on the manual-partitioning page.
+    manual_swap_gib: RefCell<Option<u64>>,
+    username: RefCell<String>,
+    password: RefCell<String>,
+}
+
+impl WizardState {
+    fn new() -> Rc<Self> {
+        Rc::new(Self {
+            selected_disk: RefCell::new(None),
+            profile: RefCell::new(None),
+            existing_os: RefCell::new(None),
+            advanced: Cell::new(false),
+            keyboard_layout: RefCell::new(keyboard::detect_current()),
+            timezone: RefCell::new(tz::detect_current().unwrap_or_else(|| "UTC".to_string())),
+            manual_root_fs: Cell::new(partition::RootFs::Btrfs),
+            manual_swap_gib: RefCell::new(None),
+            username: RefCell::new(String::new()),
+            password: RefCell::new(String::new()),
+        })
+    }
+
+    fn swap_gib(&self) -> u64 {
+        let ram_bytes = self.profile.borrow().as_ref().map(|p| p.ram_bytes).unwrap_or(0);
+        self.manual_swap_gib.borrow().unwrap_or_else(|| partition::swap_size_gib(ram_bytes))
+    }
+}
+
 pub fn build(app: &adw::Application) {
     install_css();
 
     let nav = adw::NavigationView::new();
-    let selected_disk: Rc<RefCell<Option<disk::Disk>>> = Rc::new(RefCell::new(None));
-    let profile: Rc<RefCell<Option<hardware::Profile>>> = Rc::new(RefCell::new(None));
-    let existing_os: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let state = WizardState::new();
 
     let back_button = gtk::Button::from_icon_name("go-previous-symbolic");
     back_button.set_tooltip_text(Some("Back"));
@@ -42,27 +88,41 @@ pub fn build(app: &adw::Application) {
         });
     }
 
+    let menu_button = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text("More").build();
+
     let header = adw::HeaderBar::new();
     header.pack_start(&back_button);
+    header.pack_end(&menu_button);
 
-    let disk_page = disk_select_page(nav.clone(), selected_disk.clone(), profile.clone(), existing_os.clone());
-    nav.add(&welcome_page(&nav, &disk_page));
+    let disk_page = disk_select_page(nav.clone(), state.clone());
+    let keyboard_page = keyboard_select_page(nav.clone(), state.clone(), disk_page.clone());
+    let timezone_page = timezone_select_page(nav.clone(), state.clone(), disk_page.clone());
+    nav.add(&welcome_page(&nav, state.clone(), keyboard_page.clone(), disk_page.clone()));
+    nav.add(&keyboard_page);
+    nav.add(&timezone_page);
     nav.add(&disk_page);
 
     // Screen script §0: back arrow hidden on Welcome and from Confirm onward (destructive
     // point of no return — Confirm's own footer `Back` button is the only way backward
     // from there). Driven off the navigation stack itself rather than toggled at each
     // transition site, so it also does the right thing when the user pops back manually.
+    // The "⋯" menu follows the same visible-page signal: content swapped per page,
+    // hidden entirely on pages with nothing real to put in it.
     {
         let back_button = back_button.clone();
+        let menu_button = menu_button.clone();
+        let state = state.clone();
         nav.connect_visible_page_notify(move |nav| {
+            let tag = nav.visible_page().and_then(|p| p.tag()).map(|t| t.to_string());
             let hidden = matches!(
-                nav.visible_page().and_then(|p| p.tag()).as_deref(),
+                tag.as_deref(),
                 Some("welcome") | Some("confirm") | Some("installing") | Some("done") | None
             );
             back_button.set_visible(!hidden);
+            update_page_menu(&menu_button, tag.as_deref(), &state);
         });
     }
+    update_page_menu(&menu_button, Some("welcome"), &state);
 
     let toolbar_view = adw::ToolbarView::new();
     toolbar_view.add_top_bar(&header);
@@ -104,7 +164,58 @@ fn install_css() {
     }
 }
 
-fn welcome_page(nav: &adw::NavigationView, disk_page: &adw::NavigationPage) -> adw::NavigationPage {
+/// Rebuilds the "⋯" popover for the page the user just landed on. Menu is hidden
+/// entirely (not shown empty/greyed) on pages with no real page-specific options.
+fn update_page_menu(menu_button: &gtk::MenuButton, tag: Option<&str>, state: &Rc<WizardState>) {
+    match tag {
+        Some("welcome") => {
+            menu_button.set_visible(true);
+            menu_button.set_popover(Some(&advanced_setup_popover(state.clone())));
+        }
+        Some("disk-select") => {
+            menu_button.set_visible(true);
+            menu_button.set_popover(Some(&disk_menu_popover(state.clone())));
+        }
+        _ => {
+            menu_button.set_visible(false);
+        }
+    }
+}
+
+fn advanced_setup_popover(state: Rc<WizardState>) -> gtk::Popover {
+    let label = gtk::Label::builder().label("Advanced setup").halign(gtk::Align::Start).hexpand(true).build();
+    let switch = gtk::Switch::builder().active(state.advanced.get()).valign(gtk::Align::Center).build();
+    switch.connect_state_set(move |_, active| {
+        state.advanced.set(active);
+        glib::Propagation::Proceed
+    });
+
+    let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(6).margin_bottom(6).margin_start(6).margin_end(6).build();
+    row.append(&label);
+    row.append(&switch);
+
+    gtk::Popover::builder().child(&row).build()
+}
+
+fn disk_menu_popover(state: Rc<WizardState>) -> gtk::Popover {
+    let manual_button = gtk::Button::builder()
+        .label("Manual partitioning…")
+        .css_classes(vec!["flat".to_string()])
+        .sensitive(state.advanced.get())
+        .build();
+    // Only meaningful once Manual partitioning has somewhere to navigate to; wired by
+    // the Disk page itself (it owns the nav handle), see `disk_select_page`.
+    manual_button.set_widget_name("gentoo-manual-partitioning-trigger");
+
+    gtk::Popover::builder().child(&manual_button).build()
+}
+
+fn welcome_page(
+    nav: &adw::NavigationView,
+    state: Rc<WizardState>,
+    keyboard_page: adw::NavigationPage,
+    disk_page: adw::NavigationPage,
+) -> adw::NavigationPage {
     let description = if simulate_mode() {
         "SIMULATION MODE — GENTOO_INSTALLER_SIMULATE is set, no real changes will be made. \
          Automated btrfs partitioning, kernel profile detection, Limine boot setup."
@@ -131,9 +242,100 @@ fn welcome_page(nav: &adw::NavigationView, disk_page: &adw::NavigationPage) -> a
     page.set_tag(Some("welcome"));
 
     let nav = nav.clone();
-    let disk_page = disk_page.clone();
-    button.connect_clicked(move |_| nav.push(&disk_page));
+    button.connect_clicked(move |_| {
+        if state.advanced.get() {
+            nav.push(&keyboard_page);
+        } else {
+            nav.push(&disk_page);
+        }
+    });
 
+    page
+}
+
+/// Advanced-setup only: keyboard layout, auto-detected default via `keyboard::detect_current`.
+fn keyboard_select_page(nav: adw::NavigationView, state: Rc<WizardState>, disk_page: adw::NavigationPage) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Keyboard layout").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let body = gtk::Label::builder().label("Type below to check it's right.").css_classes(vec!["dim-label".to_string()]).halign(gtk::Align::Start).build();
+
+    let layouts = keyboard::list_layouts();
+    let current = state.keyboard_layout.borrow().clone();
+    let display_strings: Vec<String> = layouts.iter().map(|l| format!("{} — {}", l.code, l.description)).collect();
+    let selected_index = layouts.iter().position(|l| l.code == current).unwrap_or(0) as u32;
+
+    let model = gtk::StringList::new(&display_strings.iter().map(String::as_str).collect::<Vec<_>>());
+    let dropdown = gtk::DropDown::builder().model(&model).selected(selected_index).build();
+    dropdown.set_enable_search(true);
+
+    {
+        let state = state.clone();
+        let layouts = layouts.clone();
+        dropdown.connect_selected_notify(move |dd| {
+            if let Some(l) = layouts.get(dd.selected() as usize) {
+                *state.keyboard_layout.borrow_mut() = l.code.clone();
+            }
+        });
+    }
+
+    let test_field = gtk::Entry::builder().placeholder_text("Type here to test").build();
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&dropdown);
+    content.append(&test_field);
+
+    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&next_button);
+    {
+        let nav = nav.clone();
+        next_button.connect_clicked(move |_| nav.push(&disk_page));
+    }
+
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Keyboard").child(&clamp).build();
+    page.set_tag(Some("keyboard"));
+    page
+}
+
+/// Advanced-setup only: time zone, auto-detected default via `timezone::detect_current`.
+fn timezone_select_page(nav: adw::NavigationView, state: Rc<WizardState>, disk_page: adw::NavigationPage) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Where are you?").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let body = gtk::Label::builder().label("This sets your time zone and clock.").css_classes(vec!["dim-label".to_string()]).halign(gtk::Align::Start).build();
+
+    let zones = tz::list_zones();
+    let current = state.timezone.borrow().clone();
+    let selected_index = zones.iter().position(|z| *z == current).unwrap_or(0) as u32;
+
+    let model = gtk::StringList::new(&zones.iter().map(String::as_str).collect::<Vec<_>>());
+    let dropdown = gtk::DropDown::builder().model(&model).selected(selected_index).build();
+    dropdown.set_enable_search(true);
+
+    {
+        let state = state.clone();
+        let zones = zones.clone();
+        dropdown.connect_selected_notify(move |dd| {
+            if let Some(z) = zones.get(dd.selected() as usize) {
+                *state.timezone.borrow_mut() = z.clone();
+            }
+        });
+    }
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&dropdown);
+
+    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&next_button);
+    {
+        let nav = nav.clone();
+        next_button.connect_clicked(move |_| nav.push(&disk_page));
+    }
+
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Time zone").child(&clamp).build();
+    page.set_tag(Some("timezone"));
     page
 }
 
@@ -188,12 +390,7 @@ fn min_disk_bytes() -> u64 {
     (ESP_SIZE_MIB + SWAP_MIN_GIB * 1024 + 8 * 1024) * 1024 * 1024
 }
 
-fn disk_select_page(
-    nav: adw::NavigationView,
-    selected_disk: Rc<RefCell<Option<disk::Disk>>>,
-    profile: Rc<RefCell<Option<hardware::Profile>>>,
-    existing_os: Rc<RefCell<Option<String>>>,
-) -> adw::NavigationPage {
+fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
         .label("Where should Gentoo go?")
         .css_classes(vec!["title-1".to_string()])
@@ -223,7 +420,7 @@ fn disk_select_page(
                 p.ram_bytes / 1024 / 1024 / 1024,
                 p.combo()
             ));
-            *profile.borrow_mut() = Some(p);
+            *state.profile.borrow_mut() = Some(p);
         }
         Err(e) => profile_label.set_label(&format!("hardware detection failed: {e}")),
     }
@@ -242,7 +439,7 @@ fn disk_select_page(
     .join()
     .unwrap_or_default();
 
-    *existing_os.borrow_mut() = existing_os_found.clone();
+    *state.existing_os.borrow_mut() = existing_os_found.clone();
     if let Some(os) = &existing_os_found {
         let note = gtk::Label::builder()
             .label(format!("{os} was found on this machine."))
@@ -276,16 +473,16 @@ fn disk_select_page(
             if eligible {
                 if first_button.is_none() {
                     button.set_active(true);
-                    *selected_disk.borrow_mut() = Some(d.clone());
+                    *state.selected_disk.borrow_mut() = Some(d.clone());
                     next_button.set_sensitive(true);
                     first_button = Some(button.clone());
                 }
 
-                let selected_disk = selected_disk.clone();
+                let state = state.clone();
                 let d = d.clone();
                 button.connect_toggled(move |b| {
                     if b.is_active() {
-                        *selected_disk.borrow_mut() = Some(d.clone());
+                        *state.selected_disk.borrow_mut() = Some(d.clone());
                     }
                 });
             }
@@ -303,20 +500,18 @@ fn disk_select_page(
         }
     }
 
-    let confirm_page = Rc::new(RefCell::new(None::<adw::NavigationPage>));
+    let account_page = Rc::new(RefCell::new(None::<adw::NavigationPage>));
     {
         let nav = nav.clone();
-        let selected_disk = selected_disk.clone();
-        let profile = profile.clone();
-        let existing_os = existing_os.clone();
-        let confirm_page = confirm_page.clone();
+        let state = state.clone();
+        let account_page = account_page.clone();
         next_button.connect_clicked(move |_| {
-            if confirm_page.borrow().is_none() {
-                let page = confirm_page_build(nav.clone(), selected_disk.clone(), profile.clone(), existing_os.clone());
+            if account_page.borrow().is_none() {
+                let page = account_page_build(nav.clone(), state.clone());
                 nav.add(&page);
-                *confirm_page.borrow_mut() = Some(page);
+                *account_page.borrow_mut() = Some(page);
             }
-            if let Some(page) = confirm_page.borrow().as_ref() {
+            if let Some(page) = account_page.borrow().as_ref() {
                 nav.push(page);
             }
         });
@@ -343,19 +538,206 @@ fn disk_select_page(
         .child(&clamp)
         .build();
     page.set_tag(Some("disk-select"));
+
+    // The Disk page's own "⋯" item ("Manual partitioning…", see `disk_menu_popover`)
+    // needs a nav target; wired here once, on `map`, rather than threaded through the
+    // popover-building code (which doesn't have `nav`).
+    {
+        let nav = nav.clone();
+        let state = state.clone();
+        let manual_page: Rc<RefCell<Option<adw::NavigationPage>>> = Rc::new(RefCell::new(None));
+        page.connect_map(move |page| {
+            let Some(root) = page.root() else { return };
+            let Some(button) = find_widget_by_name(&root, "gentoo-manual-partitioning-trigger") else { return };
+            let Ok(button) = button.downcast::<gtk::Button>() else { return };
+            button.set_sensitive(state.advanced.get());
+            let nav = nav.clone();
+            let state = state.clone();
+            let manual_page = manual_page.clone();
+            button.connect_clicked(move |_| {
+                if manual_page.borrow().is_none() {
+                    let page = manual_partition_page_build(nav.clone(), state.clone());
+                    nav.add(&page);
+                    *manual_page.borrow_mut() = Some(page);
+                }
+                if let Some(page) = manual_page.borrow().as_ref() {
+                    nav.push(page);
+                }
+            });
+        });
+    }
+
+    page
+}
+
+/// Depth-first search for a widget by `widget-name` — used to reach into the "⋯"
+/// popover's contents from outside, since the popover is built generically in
+/// `disk_menu_popover` without a `nav` handle to wire the click to.
+fn find_widget_by_name(root: &gtk::Root, name: &str) -> Option<gtk::Widget> {
+    fn walk(widget: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
+        if widget.widget_name() == name {
+            return Some(widget.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            if let Some(found) = walk(&c, name) {
+                return Some(found);
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+    walk(root.upcast_ref::<gtk::Widget>(), name)
+}
+
+/// Advanced-setup only, reached from the Disk page's "⋯" menu: the only manual control
+/// our partitioning backend actually supports is root filesystem + swap size — it
+/// creates exactly ESP+swap+root, not an arbitrary partition table, so that's the honest
+/// scope of "manual" here rather than a full GParted-style editor this codebase can't
+/// back.
+fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Partitions").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let body = gtk::Label::builder()
+        .label("Gentoo needs a root partition, and an EFI system partition on this machine.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build();
+
+    let btrfs_toggle = gtk::ToggleButton::builder().label("btrfs").active(state.manual_root_fs.get() == partition::RootFs::Btrfs).build();
+    let ext4_toggle = gtk::ToggleButton::builder().label("ext4").group(&btrfs_toggle).active(state.manual_root_fs.get() == partition::RootFs::Ext4).build();
+    let fs_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
+    fs_row.append(&gtk::Label::builder().label("Root filesystem").halign(gtk::Align::Start).hexpand(true).build());
+    fs_row.append(&btrfs_toggle);
+    fs_row.append(&ext4_toggle);
+    {
+        let state = state.clone();
+        btrfs_toggle.connect_toggled(move |b| {
+            if b.is_active() {
+                state.manual_root_fs.set(partition::RootFs::Btrfs);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        ext4_toggle.connect_toggled(move |b| {
+            if b.is_active() {
+                state.manual_root_fs.set(partition::RootFs::Ext4);
+            }
+        });
+    }
+
+    let swap_adjustment = gtk::Adjustment::new(state.swap_gib() as f64, 8.0, 96.0, 1.0, 4.0, 0.0);
+    let swap_spin = gtk::SpinButton::new(Some(&swap_adjustment), 1.0, 0);
+    let swap_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
+    swap_row.append(&gtk::Label::builder().label("Swap size (GiB)").halign(gtk::Align::Start).hexpand(true).build());
+    swap_row.append(&swap_spin);
+    {
+        let state = state.clone();
+        swap_spin.connect_value_changed(move |s| {
+            *state.manual_swap_gib.borrow_mut() = Some(s.value() as u64);
+        });
+    }
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(20).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&fs_row);
+    content.append(&swap_row);
+
+    let save_button = gtk::Button::builder().label("Use these partitions").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&save_button);
+    {
+        let nav = nav.clone();
+        save_button.connect_clicked(move |_| {
+            nav.pop();
+        });
+    }
+
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Partitions").child(&clamp).build();
+    page.set_tag(Some("manual-partition"));
+    page
+}
+
+/// Screen script §9: username + password, before Confirm. Root stays locked; this
+/// account gets `wheel` (see `installer_core::account::create`).
+fn account_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Create your account").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let body = gtk::Label::builder()
+        .label("This account can install software and change system settings.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
+
+    let username_entry = gtk::Entry::builder().placeholder_text("Username").text(state.username.borrow().as_str()).build();
+    let password_entry = gtk::PasswordEntry::builder().placeholder_text("Password").show_peek_icon(true).build();
+    let confirm_entry = gtk::PasswordEntry::builder().placeholder_text("Confirm password").show_peek_icon(true).build();
+
+    let error_label = gtk::Label::builder().halign(gtk::Align::Start).wrap(true).visible(false).css_classes(vec!["error".to_string()]).build();
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&username_entry);
+    content.append(&password_entry);
+    content.append(&confirm_entry);
+    content.append(&error_label);
+
+    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&next_button);
+
+    let confirm_page = Rc::new(RefCell::new(None::<adw::NavigationPage>));
+    {
+        let nav = nav.clone();
+        let state = state.clone();
+        let confirm_page = confirm_page.clone();
+        next_button.connect_clicked(move |_| {
+            let username = username_entry.text().to_string();
+            let password = password_entry.text().to_string();
+            let confirm = confirm_entry.text().to_string();
+
+            if username.trim().is_empty() {
+                error_label.set_label("Enter a username.");
+                error_label.set_visible(true);
+                return;
+            }
+            if password.len() < 8 {
+                error_label.set_label("Password needs to be at least 8 characters.");
+                error_label.set_visible(true);
+                return;
+            }
+            if password != confirm {
+                error_label.set_label("Passwords don't match.");
+                error_label.set_visible(true);
+                return;
+            }
+            error_label.set_visible(false);
+
+            *state.username.borrow_mut() = username;
+            *state.password.borrow_mut() = password;
+
+            if confirm_page.borrow().is_none() {
+                let page = confirm_page_build(nav.clone(), state.clone());
+                nav.add(&page);
+                *confirm_page.borrow_mut() = Some(page);
+            }
+            if let Some(page) = confirm_page.borrow().as_ref() {
+                nav.push(page);
+            }
+        });
+    }
+
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Account").child(&clamp).build();
+    page.set_tag(Some("account"));
     page
 }
 
 /// Screen script §10: "styled deliberately plainer and denser than every other page —
 /// no tiles, no large heading, tighter leading. Reading it is the point." Plain sentence
-/// lines instead of a StatusPage; only lines backed by something real are shown (no
-/// account/timezone/encryption lines yet — those pages don't exist).
-fn confirm_page_build(
-    nav: adw::NavigationView,
-    selected_disk: Rc<RefCell<Option<disk::Disk>>>,
-    profile: Rc<RefCell<Option<hardware::Profile>>>,
-    existing_os: Rc<RefCell<Option<String>>>,
-) -> adw::NavigationPage {
+/// lines instead of a StatusPage; only lines backed by something real are shown.
+fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
         .label("Review before installing")
         .css_classes(vec!["title-1".to_string()])
@@ -363,7 +745,7 @@ fn confirm_page_build(
         .build();
 
     let simulate = simulate_mode();
-    let disk = selected_disk.borrow().clone();
+    let disk = state.selected_disk.borrow().clone();
     let sentences = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).margin_top(20).build();
 
     let sentence = |text: &str, destructive: bool| {
@@ -384,11 +766,17 @@ fn confirm_page_build(
     } else if let Some(d) = &disk {
         sentences.append(&sentence(&format!("Install Gentoo on {} ({}).", d.path, disk::format_size(d.size_bytes)), false));
 
-        let erase_line = match existing_os.borrow().as_ref() {
+        let erase_line = match state.existing_os.borrow().as_ref() {
             Some(os) => format!("Erase everything on this disk, including {os}."),
             None => "Erase everything on this disk.".to_string(),
         };
         sentences.append(&sentence(&erase_line, true));
+
+        let username = state.username.borrow().clone();
+        if !username.is_empty() {
+            sentences.append(&sentence(&format!("Create an account for {username}."), false));
+        }
+        sentences.append(&sentence(&format!("Set the time zone to {}.", state.timezone.borrow()), false));
     }
 
     sentences.append(&sentence("This takes about 15\u{2013}20 minutes.", false));
@@ -404,9 +792,8 @@ fn confirm_page_build(
     content.append(&heading);
     content.append(&sentences);
 
-    let ram_bytes = profile.borrow().as_ref().map(|p| p.ram_bytes).unwrap_or(0);
     if let Some(d) = &disk {
-        content.append(&partition_bar(d.size_bytes, ram_bytes));
+        content.append(&partition_bar(d.size_bytes, state.swap_gib(), state.manual_root_fs.get()));
     }
 
     let error_label = gtk::Label::builder().halign(gtk::Align::Start).wrap(true).visible(false).css_classes(vec!["error".to_string()]).build();
@@ -439,8 +826,7 @@ fn confirm_page_build(
     let installing: Rc<RefCell<Option<InstallingWidgets>>> = Rc::new(RefCell::new(None));
     {
         let nav = nav.clone();
-        let selected_disk = selected_disk.clone();
-        let profile = profile.clone();
+        let state = state.clone();
         let installing = installing.clone();
         let error_label = error_label.clone();
         install_button.connect_clicked(move |btn| {
@@ -457,11 +843,15 @@ fn confirm_page_build(
                     }
                 }
             };
-            let Some(disk) = selected_disk.borrow().clone() else { return };
-            let Some(prof) = profile.borrow().clone() else { return };
+            let Some(disk) = state.selected_disk.borrow().clone() else { return };
             btn.set_sensitive(false);
 
-            let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, prof.ram_bytes);
+            let layout = partition::plan_with_swap(&disk.path, state.manual_root_fs.get(), state.swap_gib());
+            let account = if simulate {
+                Account { username: "gentoo".into(), password: String::new() }
+            } else {
+                Account { username: state.username.borrow().clone(), password: state.password.borrow().clone() }
+            };
             let opts = install::InstallOptions {
                 layout,
                 target: "/mnt/gentoo".into(),
@@ -473,6 +863,9 @@ fn confirm_page_build(
                 kernel_base_name: store_env
                     .map(|e| e.kernel_base_name)
                     .unwrap_or_else(|| "gentoo-diy-kernel".into()),
+                keyboard_layout: state.keyboard_layout.borrow().clone(),
+                timezone: state.timezone.borrow().clone(),
+                account,
                 simulate,
             };
 
@@ -495,12 +888,12 @@ fn confirm_page_build(
 /// crammed inside the (often very narrow) segments themselves — real disks make ESP
 /// (512MiB) and swap tiny relative to root, so text has to live outside the bar to stay
 /// legible. Each segment still gets a minimum pixel width so it stays visible at all.
-fn partition_bar(disk_size_bytes: u64, ram_bytes: u64) -> gtk::Box {
-    use installer_core::partition::{swap_size_gib, ESP_SIZE_MIB};
+fn partition_bar(disk_size_bytes: u64, swap_gib: u64, root_fs: partition::RootFs) -> gtk::Box {
+    use installer_core::partition::ESP_SIZE_MIB;
 
     let total_mib = (disk_size_bytes / 1024 / 1024).max(1);
     let esp_mib = ESP_SIZE_MIB;
-    let swap_mib = swap_size_gib(ram_bytes) * 1024;
+    let swap_mib = swap_gib * 1024;
     let root_mib = total_mib.saturating_sub(esp_mib + swap_mib);
 
     const BAR_WIDTH: i32 = 480;
@@ -526,6 +919,11 @@ fn partition_bar(disk_size_bytes: u64, ram_bytes: u64) -> gtk::Box {
     bar.append(&segment("gentoo-part-swap", swap_px));
     bar.append(&segment("gentoo-part-root", root_px));
 
+    let root_fs_name = match root_fs {
+        partition::RootFs::Btrfs => "btrfs",
+        partition::RootFs::Ext4 => "ext4",
+    };
+
     let legend = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).halign(gtk::Align::Center).build();
     let legend_row = |css_class: &str, title: &str, size_bytes: u64, fs: &str| -> gtk::Box {
         let swatch = gtk::Box::builder()
@@ -545,7 +943,7 @@ fn partition_bar(disk_size_bytes: u64, ram_bytes: u64) -> gtk::Box {
     };
     legend.append(&legend_row("gentoo-part-esp", "ESP", esp_mib * 1024 * 1024, "vfat"));
     legend.append(&legend_row("gentoo-part-swap", "swap", swap_mib * 1024 * 1024, "swap"));
-    legend.append(&legend_row("gentoo-part-root", "root", root_mib * 1024 * 1024, "btrfs"));
+    legend.append(&legend_row("gentoo-part-root", "root", root_mib * 1024 * 1024, root_fs_name));
 
     let wrapper = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
     wrapper.append(&bar);
@@ -717,7 +1115,7 @@ fn done_page_build() -> adw::NavigationPage {
     page
 }
 
-const TOTAL_STEPS: f64 = 7.0;
+const TOTAL_STEPS: f64 = 10.0;
 
 fn progress_fraction(p: &install::Progress) -> f64 {
     let step = match p {
@@ -727,18 +1125,21 @@ fn progress_fraction(p: &install::Progress) -> f64 {
         install::Progress::ConfiguringStore => 3.0,
         install::Progress::InstallingKernel { .. } => 4.0,
         install::Progress::WritingFstab => 5.0,
-        install::Progress::InstallingBootloader => 6.0,
-        install::Progress::Done => 7.0,
+        install::Progress::SettingKeyboard => 6.0,
+        install::Progress::SettingTimezone => 7.0,
+        install::Progress::CreatingAccount => 8.0,
+        install::Progress::InstallingBootloader => 9.0,
+        install::Progress::Done => 10.0,
     };
     step / TOTAL_STEPS
 }
 
 /// Screen script §11 phase labels, applied to the phases this codebase actually
-/// performs — the doc's own list (Setting your language and time, Creating your
-/// account, Building the startup image, ...) includes steps nothing here does yet, so
-/// those aren't claimed. Where our mechanism differs from the doc's assumed squashfs
-/// image copy (we download+unpack an official stage3 instead), the label says what's
-/// actually happening rather than borrowing the doc's phrase for a different mechanism.
+/// performs — the doc's own list includes steps nothing here does yet (building a
+/// startup image), so those aren't claimed. Where our mechanism differs from the doc's
+/// assumed squashfs image copy (we download+unpack an official stage3 instead), the
+/// label says what's actually happening rather than borrowing the doc's phrase for a
+/// different mechanism.
 fn describe(p: &install::Progress) -> String {
     match p {
         install::Progress::Partitioning => "Preparing the disk".into(),
@@ -753,6 +1154,9 @@ fn describe(p: &install::Progress) -> String {
             }
         }
         install::Progress::WritingFstab => "Setting up the file system".into(),
+        install::Progress::SettingKeyboard => "Setting your keyboard layout".into(),
+        install::Progress::SettingTimezone => "Setting your time zone".into(),
+        install::Progress::CreatingAccount => "Creating your account".into(),
         install::Progress::InstallingBootloader => "Installing the bootloader".into(),
         install::Progress::Done => "Finishing up".into(),
     }

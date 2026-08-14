@@ -6,8 +6,9 @@
 //! about *what* an install does diverges between the two orchestration layers while
 //! `installer-gtk` (spec §2, non-libadwaita) doesn't exist yet.
 
+use crate::account::Account;
 use crate::command::{CommandRunner, RealCommandRunner};
-use crate::{bootloader, fstab, hardware, kernel, partition, stage3, store};
+use crate::{account, bootloader, fstab, hardware, keyboard, kernel, partition, stage3, store, timezone};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -20,6 +21,13 @@ pub struct InstallOptions {
     /// Base package name for kernel atoms in the store, e.g. "mykernel" for
     /// `sys-kernel/mykernel-bin-<combo>`.
     pub kernel_base_name: String,
+    /// XKB layout code (e.g. "us", "ua") — auto-detected default, or an Advanced-setup
+    /// manual choice.
+    pub keyboard_layout: String,
+    /// IANA zone name (e.g. "Europe/Kyiv") — auto-detected default, or an Advanced-setup
+    /// manual choice.
+    pub timezone: String,
+    pub account: Account,
     /// UI dry-run: walks through the same `Progress` sequence with the same timing
     /// shape, but never touches a disk, the network, or a chroot — for clicking through
     /// the wizard while iterating on the frontend. Hardware detection still runs for
@@ -38,6 +46,9 @@ pub enum Progress {
     /// can show *which* profile got selected (and whether it had to degrade).
     InstallingKernel { atom: String, degraded_by: usize },
     WritingFstab,
+    SettingKeyboard,
+    SettingTimezone,
+    CreatingAccount,
     InstallingBootloader,
     Done,
 }
@@ -84,6 +95,15 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     let _ = tx.send(Progress::WritingFstab);
     fstab::generate(runner, &opts.target, &opts.layout, &parts).await?;
 
+    let _ = tx.send(Progress::SettingKeyboard);
+    keyboard::apply(&opts.target, &opts.keyboard_layout).await?;
+
+    let _ = tx.send(Progress::SettingTimezone);
+    timezone::apply(&opts.target, &opts.timezone).await?;
+
+    let _ = tx.send(Progress::CreatingAccount);
+    account::create(runner, &opts.target, &opts.account).await?;
+
     let _ = tx.send(Progress::InstallingBootloader);
     bootloader::install(runner, &opts.target, &opts.layout.disk).await?;
 
@@ -117,8 +137,15 @@ async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> c
     });
     sleep(Duration::from_millis(700)).await;
 
-    let _ = tx.send(Progress::WritingFstab);
-    sleep(Duration::from_millis(500)).await;
+    for step in [
+        Progress::WritingFstab,
+        Progress::SettingKeyboard,
+        Progress::SettingTimezone,
+        Progress::CreatingAccount,
+    ] {
+        let _ = tx.send(step);
+        sleep(Duration::from_millis(400)).await;
+    }
 
     let _ = tx.send(Progress::InstallingBootloader);
     sleep(Duration::from_millis(700)).await;

@@ -35,10 +35,18 @@ pub fn swap_size_gib(ram_bytes: u64) -> u64 {
 }
 
 pub fn plan(disk: &str, root_fs: RootFs, ram_bytes: u64) -> Layout {
+    plan_with_swap(disk, root_fs, swap_size_gib(ram_bytes))
+}
+
+/// Manual-partitioning entry point (Advanced setup): same ESP+swap+root shape, but the
+/// swap size is whatever the user chose instead of the RAM-based default. Still clamped
+/// to [`SWAP_MIN_GIB`, `SWAP_MAX_GIB`] — those floors/ceilings aren't about RAM, they're
+/// about what's actually a sane swap size at all.
+pub fn plan_with_swap(disk: &str, root_fs: RootFs, swap_gib: u64) -> Layout {
     Layout {
         disk: disk.to_string(),
         esp_size_mib: ESP_SIZE_MIB,
-        swap_gib: swap_size_gib(ram_bytes),
+        swap_gib: swap_gib.clamp(SWAP_MIN_GIB, SWAP_MAX_GIB),
         root_fs,
     }
 }
