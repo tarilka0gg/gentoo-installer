@@ -1316,7 +1316,7 @@ fn done_page_build() -> adw::NavigationPage {
     page
 }
 
-const TOTAL_STEPS: f64 = 10.0;
+const TOTAL_STEPS: f64 = 11.0;
 
 fn progress_fraction(p: &install::Progress) -> f64 {
     let step = match p {
@@ -1325,12 +1325,13 @@ fn progress_fraction(p: &install::Progress) -> f64 {
         install::Progress::UnpackingStage3 => 2.0,
         install::Progress::ConfiguringStore => 3.0,
         install::Progress::InstallingKernel { .. } => 4.0,
-        install::Progress::WritingFstab => 5.0,
-        install::Progress::SettingKeyboard => 6.0,
-        install::Progress::SettingTimezone => 7.0,
-        install::Progress::CreatingAccount => 8.0,
-        install::Progress::InstallingBootloader => 9.0,
-        install::Progress::Done => 10.0,
+        install::Progress::InstallingGpuDriver => 5.0,
+        install::Progress::WritingFstab => 6.0,
+        install::Progress::SettingKeyboard => 7.0,
+        install::Progress::SettingTimezone => 8.0,
+        install::Progress::CreatingAccount => 9.0,
+        install::Progress::InstallingBootloader => 10.0,
+        install::Progress::Done => 11.0,
     };
     step / TOTAL_STEPS
 }
@@ -1354,6 +1355,7 @@ fn describe(p: &install::Progress) -> String {
                 format!("Installing your kernel ({atom}, closest available match)")
             }
         }
+        install::Progress::InstallingGpuDriver => "Building your Nvidia driver".into(),
         install::Progress::WritingFstab => "Setting up the file system".into(),
         install::Progress::SettingKeyboard => "Setting your keyboard layout".into(),
         install::Progress::SettingTimezone => "Setting your time zone".into(),

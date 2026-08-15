@@ -114,6 +114,7 @@ fn describe(p: &install::Progress) -> String {
                 format!("Installing kernel: {atom} (generalized, degraded {degraded_by} step(s))")
             }
         }
+        install::Progress::InstallingGpuDriver => "Building the Nvidia driver for your kernel...".into(),
         install::Progress::WritingFstab => "Writing fstab...".into(),
         install::Progress::SettingKeyboard => "Setting keyboard layout...".into(),
         install::Progress::SettingTimezone => "Setting time zone...".into(),

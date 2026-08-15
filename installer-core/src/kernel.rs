@@ -70,6 +70,30 @@ pub async fn deploy(runner: &dyn CommandRunner, binhost_url: &str, combo: &str, 
     runner.run_status("tar", &["-xpf", modules_tarball_str, "-C", modules_dir_str]).await?;
     tokio::fs::remove_file(&modules_tarball).await.ok();
 
+    // Optional: a prepared kernel source tree (headers + Module.symvers, i.e. the
+    // output of `make modules_prepare` against this exact build) — not fetched for
+    // every combo, only ones that need an out-of-tree module compiled against them at
+    // install time (see `gpu_driver::install`). A missing file here just means this
+    // combo doesn't need one; not an install-blocking error.
+    let devel_url = format!("{}/kernels/{combo}-devel.tar.xz", binhost_url.trim_end_matches('/'));
+    let devel_tarball = std::env::temp_dir().join(format!("gentoo-installer-{combo}-devel.tar.xz"));
+    if http::download_to_file(&devel_url, &devel_tarball).await.is_ok() {
+        let src_dir = target.join(format!("usr/src/linux-{combo}"));
+        tokio::fs::create_dir_all(&src_dir).await?;
+        let src_dir_str = src_dir
+            .to_str()
+            .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 kernel src dir path")))?;
+        let devel_tarball_str = devel_tarball
+            .to_str()
+            .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 devel tarball path")))?;
+        runner.run_status("tar", &["-xpf", devel_tarball_str, "-C", src_dir_str]).await?;
+        tokio::fs::remove_file(&devel_tarball).await.ok();
+
+        let linux_symlink = target.join("usr/src/linux");
+        tokio::fs::remove_file(&linux_symlink).await.ok();
+        tokio::fs::symlink(format!("linux-{combo}"), &linux_symlink).await?;
+    }
+
     Ok(())
 }
 

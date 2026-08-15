@@ -8,7 +8,8 @@
 
 use crate::account::Account;
 use crate::command::{CommandRunner, RealCommandRunner};
-use crate::{account, bootloader, fstab, hardware, keyboard, kernel, partition, stage3, store, timezone};
+use crate::hardware::Gpu;
+use crate::{account, bootloader, fstab, gpu_driver, hardware, keyboard, kernel, partition, stage3, store, timezone};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -45,6 +46,9 @@ pub enum Progress {
     /// Carries the resolved atom once hardware/kernel matching picks one, so the UI
     /// can show *which* profile got selected (and whether it had to degrade).
     InstallingKernel { atom: String, degraded_by: usize },
+    /// Only sent when the detected GPU actually needs one (currently: Nvidia). See
+    /// `gpu_driver`'s doc comment for why this is the one step that still uses `emerge`.
+    InstallingGpuDriver,
     WritingFstab,
     SettingKeyboard,
     SettingTimezone,
@@ -92,6 +96,11 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     // installer-core::phase::deploy's DeployPhase — see its doc comment for why).
     kernel::deploy(runner, &opts.store.binhost_url, &kernel_pkg.combo, &opts.target).await?;
 
+    if profile.gpu == Gpu::Nvidia {
+        let _ = tx.send(Progress::InstallingGpuDriver);
+        gpu_driver::install(runner, &opts.target).await?;
+    }
+
     let _ = tx.send(Progress::WritingFstab);
     fstab::generate(runner, &opts.target, &opts.layout, &parts).await?;
 
@@ -128,14 +137,18 @@ async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> c
         sleep(Duration::from_millis(700)).await;
     }
 
-    let combo = hardware::Profile::detect()
-        .map(|p| p.combo())
-        .unwrap_or_else(|_| "unknown".to_string());
+    let detected_profile = hardware::Profile::detect().ok();
+    let combo = detected_profile.as_ref().map(|p| p.combo()).unwrap_or_else(|| "unknown".to_string());
     let _ = tx.send(Progress::InstallingKernel {
         atom: format!("sys-kernel/{}-bin-{combo}", opts.kernel_base_name),
         degraded_by: 0,
     });
     sleep(Duration::from_millis(700)).await;
+
+    if detected_profile.map(|p| p.gpu) == Some(Gpu::Nvidia) {
+        let _ = tx.send(Progress::InstallingGpuDriver);
+        sleep(Duration::from_millis(700)).await;
+    }
 
     for step in [
         Progress::WritingFstab,
