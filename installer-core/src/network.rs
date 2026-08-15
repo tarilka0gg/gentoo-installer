@@ -3,13 +3,16 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue};
+use std::sync::{Arc, Mutex};
+use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue};
 
 const IWD_DEST: &str = "net.connman.iwd";
 const STATION_IFACE: &str = "net.connman.iwd.Station";
 const NETWORK_IFACE: &str = "net.connman.iwd.Network";
+const AGENT_MANAGER_IFACE: &str = "net.connman.iwd.AgentManager";
 const PROPERTIES_IFACE: &str = "org.freedesktop.DBus.Properties";
 const OBJECT_MANAGER_IFACE: &str = "org.freedesktop.DBus.ObjectManager";
+const AGENT_PATH: &str = "/net/connman/iwd/agent/gentoo_installer";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Network {
@@ -21,16 +24,61 @@ pub struct Network {
 
 pub struct IwdClient {
     conn: zbus::Connection,
+    /// Set by `connect_to` right before it asks iwd to connect, read back by `Agent`
+    /// when iwd calls `RequestPassphrase` as part of that same connection attempt — the
+    /// GUI collects the passphrase inline (per screen script §4, in the row itself)
+    /// before ever calling `connect_to`, so the answer is always ready when iwd asks.
+    pending_passphrase: Arc<Mutex<Option<String>>>,
 }
 
 type ManagedObjects = HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>>;
 
+/// `net.connman.iwd.Agent`: the interface iwd calls back into for credentials it needs
+/// mid-connection. Only `RequestPassphrase` is implemented — the WPA-PSK case covers the
+/// overwhelming majority of home/office networks this installer will see; enterprise
+/// (802.1X username+password) and WEP-key setups aren't handled.
+#[derive(Clone)]
+struct Agent {
+    pending_passphrase: Arc<Mutex<Option<String>>>,
+}
+
+#[zbus::interface(name = "net.connman.iwd.Agent")]
+impl Agent {
+    async fn request_passphrase(&self, _network: ObjectPath<'_>) -> zbus::fdo::Result<String> {
+        self.pending_passphrase
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or_else(|| zbus::fdo::Error::Failed("no passphrase was provided before connecting".into()))
+    }
+
+    async fn cancel(&self, _reason: &str) {}
+
+    async fn release(&self) {}
+}
+
 impl IwdClient {
+    /// Connects to the system bus and registers our `Agent` with iwd's AgentManager —
+    /// from this point on, iwd will call back into this process for passphrases on any
+    /// secured-network connect attempt for the lifetime of `conn`.
     pub async fn connect() -> crate::Result<Self> {
         let conn = zbus::Connection::system()
             .await
             .map_err(|e| crate::Error::Network(e.to_string()))?;
-        Ok(Self { conn })
+
+        let pending_passphrase = Arc::new(Mutex::new(None));
+        let agent = Agent { pending_passphrase: pending_passphrase.clone() };
+        conn.object_server()
+            .at(AGENT_PATH, agent)
+            .await
+            .map_err(|e| crate::Error::Network(e.to_string()))?;
+
+        let agent_path = ObjectPath::try_from(AGENT_PATH).map_err(|e| crate::Error::Network(e.to_string()))?;
+        conn.call_method(Some(IWD_DEST), "/net/connman/iwd", Some(AGENT_MANAGER_IFACE), "RegisterAgent", &(agent_path,))
+            .await
+            .map_err(|e| crate::Error::Network(e.to_string()))?;
+
+        Ok(Self { conn, pending_passphrase })
     }
 
     /// The first `net.connman.iwd.Station` object exposed by iwd — in practice the sole
@@ -131,13 +179,11 @@ impl IwdClient {
     }
 
     /// Connects to an already-scanned network by its D-Bus object path (`Network::path`).
-    /// Open networks connect with no further input. Secured networks require an iwd
-    /// Agent registered on the bus to supply the passphrase when iwd calls back into it
-    /// (`net.connman.iwd.Agent.RequestPassphrase`) — that agent object isn't implemented
-    /// yet, so `passphrase` is accepted but not wired through; secured-network connect
-    /// will currently hang/fail waiting on an agent that was never registered.
+    /// Open networks connect with no further input. For secured networks, `passphrase`
+    /// is stashed for our registered `Agent` to hand back the moment iwd asks for it as
+    /// part of this same `Connect` call.
     pub async fn connect_to(&self, network_path: &str, passphrase: Option<&str>) -> crate::Result<()> {
-        let _ = passphrase; // see doc comment: agent plumbing not implemented yet
+        *self.pending_passphrase.lock().unwrap() = passphrase.map(str::to_string);
         self.conn
             .call_method(Some(IWD_DEST), network_path, Some(NETWORK_IFACE), "Connect", &())
             .await
