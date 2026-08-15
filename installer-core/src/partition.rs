@@ -115,6 +115,15 @@ pub async fn format_partitions(runner: &dyn CommandRunner, layout: &Layout, part
             runner.run_status("mkfs.ext4", &["-L", "root", "-F", &parts.root]).await?;
         }
     }
+
+    // `mkfs.vfat` in particular doesn't guarantee its writes reach the block device
+    // before returning — live-tested against a loopback device, mounting the ESP right
+    // after formatting failed with "wrong fs type, bad superblock" despite `blkid`
+    // showing a perfectly valid vfat filesystem moments later. A `sync` here (cheap,
+    // always safe) closes that race instead of leaving `mount_target` to hit it
+    // nondeterministically depending on how much other work happens in between.
+    runner.run_status("sync", &[]).await.ok();
+
     Ok(())
 }
 
@@ -159,7 +168,14 @@ pub async fn mount_target(runner: &dyn CommandRunner, layout: &Layout, parts: &P
 
     let boot = format!("{target}/boot");
     runner.run_status("mkdir", &["-p", &boot]).await?;
-    runner.run_status("mount", &[&parts.esp, &boot]).await?;
+    // `iocharset=utf8` avoids a real, live-tested failure mode: the kernel's FAT driver
+    // defaults to iso8859-1 for filename charset conversion, which needs the
+    // `nls_iso8859-1` module built — plenty of minimal/custom kernel configs don't build
+    // it (confirmed on this dev machine's own kernel), and the resulting mount failure
+    // ("wrong fs type, bad option, bad superblock") gives no hint that charset support is
+    // the actual cause; `dmesg` says "IO charset iso8859-1 not found", `mount(8)` doesn't.
+    // utf8 needs no NLS module at all.
+    runner.run_status("mount", &["-o", "iocharset=utf8", &parts.esp, &boot]).await?;
 
     runner.run_status("swapon", &[&parts.swap]).await?;
 
