@@ -8,6 +8,9 @@ pub struct StoreEnv {
     pub overlay_git_url: String,
     pub overlay_name: String,
     pub kernel_base_name: String,
+    /// Git URL of the wm-configs preset repo `wm::install` clones — same "not published
+    /// under a fixed URL yet" situation as the store itself.
+    pub wm_configs_git_url: String,
 }
 
 impl StoreEnv {
@@ -19,6 +22,7 @@ impl StoreEnv {
             overlay_name: std::env::var("GENTOO_STORE_OVERLAY_NAME").unwrap_or_else(|_| "localrepo".into()),
             kernel_base_name: std::env::var("GENTOO_KERNEL_BASE_NAME")
                 .unwrap_or_else(|_| "gentoo-diy-kernel".into()),
+            wm_configs_git_url: get("GENTOO_WM_CONFIGS_URL")?,
         })
     }
 }

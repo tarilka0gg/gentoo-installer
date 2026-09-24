@@ -84,6 +84,10 @@ installer-core/     lib crate — all real logic, no UI code
   bootloader.rs      Limine config generation + install
   store.rs           writes repos.conf/binrepos.conf, git-clones the overlay
   fstab.rs           UUID-based /etc/fstab generation
+  make_conf.rs       hardware-tuned /etc/portage/make.conf (-march=, MAKEOPTS, ...)
+  gpu_driver.rs       on-target Nvidia driver build against the exact kernel
+  wm.rs              compositor + Noctalia install, preset config from wm-configs
+  chroot_emerge.rs   shared chroot/emerge bootstrap (resolv.conf, tree sync, bind mounts)
   http.rs            tiny shared download helper
   network.rs         iwd client (zbus) + ethernet link check
   config.rs          StoreEnv (env-var-sourced store config, shared by frontends)
@@ -110,12 +114,27 @@ interaction model). Rewriting it is deliberately the last step, not skipped.
 
 ## Status
 
-Workspace builds and passes clippy clean across all three crates, 26 unit/
+Workspace builds and passes clippy clean across all three crates, 55 unit/
 integration tests passing, including a `Partition→Format→Mount→Fstab`
 end-to-end run against `FakeCommandRunner` with no root and no real disk.
 Hardware detection was live-verified on this machine (Victus 16, i7-14650HX +
 RTX 4070): `Profile::detect()` produces `intel-raptorlake-nvidia-laptop`, an
 exact match against rank #3 of the real 304-kernel build.
+
+`make.conf` generation (`make_conf`) and desktop install (`wm`) are both real
+and wired into `install::run`: `make.conf` gets a hardware-real `-march=`,
+`MAKEOPTS` sized to core count, and `CPU_FLAGS_X86`/`VIDEO_CARDS` from
+`detect::gather`, with `Advanced` setup choosing `-O2`/`-O3` and
+binary-vs-source packages (`GENTOO_INSTALLER_OPT_LEVEL`/`_PACKAGE_MODE` env
+vars in the CLI, dedicated pages in the GUI). `wm` installs Noctalia plus one
+of niri (default)/Hyprland/Sway/Labwc/MangoWC — every atom/overlay/keyword
+requirement live-verified against a real synced tree, GURU, and hyproverlay —
+then clones and applies `wm_configs_git_url`'s preset for the chosen
+compositor. Both share new `chroot_emerge` bootstrap plumbing (resolv.conf,
+Portage tree sync, bind mounts) with `gpu_driver`, which itself gained real
+`package.license`/`package.accept_keywords`/`package.use` overrides — emerging
+`nvidia-drivers` unconditionally failed before this, since Portage never
+auto-accepts its license or resolves its USE deps without them.
 
 CLI (`installer-cli`) and GUI (`installer-gui`) both drive the legacy
 `install.rs` orchestrator end to end: Network → DiskSelect → Confirm →
@@ -140,7 +159,9 @@ proves the installer works headless); `Locale`/`Users`/`Initramfs`/`PostHooks`
 phases (keymap/timezone application, useradd/passwd, dracut, machine-id/eix
 seeding — genuinely new territory, nothing here does this yet); the
 non-libadwaita `installer-gtk` rewrite and its 13-page flow; preset/edition
-integration from `portage_store`; the iwd passphrase agent (secured-network
+integration from `portage_store`; a WM picker in `installer-cli`'s TUI (it
+reads `GENTOO_INSTALLER_WM`/`_WM_CONFIGS_URL` env vars instead — same gap
+already true for account creation); the iwd passphrase agent (secured-network
 connect currently hangs/fails — open networks work); wifi-connect UI in either
 frontend; and real binhost/overlay URLs once the store is published
 externally.

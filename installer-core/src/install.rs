@@ -9,7 +9,8 @@
 use crate::account::Account;
 use crate::command::{CommandRunner, RealCommandRunner};
 use crate::hardware::Gpu;
-use crate::{account, bootloader, fstab, gpu_driver, hardware, keyboard, kernel, partition, stage3, store, timezone};
+use crate::wm::WmChoice;
+use crate::{account, bootloader, detect, fstab, gpu_driver, hardware, keyboard, kernel, make_conf, partition, stage3, store, timezone, wm};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -29,6 +30,20 @@ pub struct InstallOptions {
     /// manual choice.
     pub timezone: String,
     pub account: Account,
+    /// Compositor to install alongside Noctalia — auto-detected-default shape (same as
+    /// `keyboard_layout`/`timezone`): `WmChoice::default()` (niri) unless Advanced setup
+    /// picked something else.
+    pub wm: WmChoice,
+    /// `make.conf`'s `-O2`/`-O3` — `OptLevel::default()` (O2) unless Advanced setup
+    /// picked O3.
+    pub opt_level: make_conf::OptLevel,
+    /// Whether large main-tree packages come down as prebuilt binaries or get compiled
+    /// from source — `PackageMode::default()` (Binary) unless Advanced setup picked
+    /// Source.
+    pub package_mode: make_conf::PackageMode,
+    /// Git URL of the wm-configs preset repo `wm::install` clones for the chosen
+    /// compositor's config + Noctalia's shared config + tty1-autostart template.
+    pub wm_configs_git_url: String,
     /// UI dry-run: walks through the same `Progress` sequence with the same timing
     /// shape, but never touches a disk, the network, or a chroot — for clicking through
     /// the wizard while iterating on the frontend. Hardware detection still runs for
@@ -42,6 +57,9 @@ pub enum Progress {
     Partitioning,
     DownloadingStage3,
     UnpackingStage3,
+    /// Writes `/etc/portage/make.conf` tuned to the detected hardware — see
+    /// `make_conf`'s doc comment.
+    WritingMakeConf,
     ConfiguringStore,
     /// Carries the resolved atom once hardware/kernel matching picks one, so the UI
     /// can show *which* profile got selected (and whether it had to degrade).
@@ -53,6 +71,9 @@ pub enum Progress {
     SettingKeyboard,
     SettingTimezone,
     CreatingAccount,
+    /// Always sent — the compositor may just be the silent niri default. Same
+    /// "always runs, may just be the default" shape as `SettingKeyboard`/`SettingTimezone`.
+    InstallingDesktop,
     InstallingBootloader,
     Done,
 }
@@ -82,11 +103,17 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     stage3::unpack(runner, &tarball_path, &opts.target).await?;
     tokio::fs::remove_file(&tarball_path).await.ok();
 
+    let profile = hardware::Profile::detect()?;
+
+    let _ = tx.send(Progress::WritingMakeConf);
+    let detected = detect::gather(runner).await;
+    let jobs = make_conf::nproc(runner).await;
+    make_conf::generate(&opts.target, profile.cpu, &detected, jobs, opts.opt_level, opts.package_mode).await?;
+
     let _ = tx.send(Progress::ConfiguringStore);
     store::configure(runner, &opts.target, &opts.store).await?;
 
     let atoms = store::list_binhost_atoms(&opts.store.binhost_url).await?;
-    let profile = hardware::Profile::detect()?;
     let kernel_pkg = kernel::resolve(&opts.kernel_base_name, &profile, &atoms)?;
     let _ = tx.send(Progress::InstallingKernel {
         atom: kernel_pkg.atom.clone(),
@@ -113,6 +140,9 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     let _ = tx.send(Progress::CreatingAccount);
     account::create(runner, &opts.target, &opts.account).await?;
 
+    let _ = tx.send(Progress::InstallingDesktop);
+    wm::install(runner, &opts.target, opts.wm, &opts.wm_configs_git_url, &opts.account.username).await?;
+
     let _ = tx.send(Progress::InstallingBootloader);
     bootloader::install(runner, &opts.target, &opts.layout.disk).await?;
 
@@ -131,6 +161,7 @@ async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> c
         Progress::Partitioning,
         Progress::DownloadingStage3,
         Progress::UnpackingStage3,
+        Progress::WritingMakeConf,
         Progress::ConfiguringStore,
     ] {
         let _ = tx.send(step);
@@ -155,6 +186,7 @@ async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> c
         Progress::SettingKeyboard,
         Progress::SettingTimezone,
         Progress::CreatingAccount,
+        Progress::InstallingDesktop,
     ] {
         let _ = tx.send(step);
         sleep(Duration::from_millis(400)).await;

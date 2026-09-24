@@ -1,5 +1,6 @@
 pub mod account;
 pub mod bootloader;
+mod chroot_emerge;
 pub mod command;
 pub mod config;
 pub mod detect;
@@ -13,12 +14,14 @@ pub mod install;
 pub mod journal;
 pub mod kernel;
 pub mod keyboard;
+pub mod make_conf;
 pub mod network;
 pub mod partition;
 pub mod phase;
 pub mod stage3;
 pub mod store;
 pub mod timezone;
+pub mod wm;
 
 pub use error::{Error, Result};
 

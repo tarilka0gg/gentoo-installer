@@ -7,6 +7,8 @@
 //! Usage: cargo run --example real_install_test -p installer-cli -- /dev/loopN
 
 use installer_core::account::Account;
+use installer_core::make_conf::{OptLevel, PackageMode};
+use installer_core::wm::WmChoice;
 use installer_core::{hardware, install, partition, store};
 
 #[tokio::main]
@@ -31,6 +33,10 @@ async fn main() {
         keyboard_layout: installer_core::keyboard::detect_current(),
         timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
         account: Account { username: "tester".into(), password: "testpassword123".into() },
+        wm: WmChoice::Niri,
+        wm_configs_git_url: "file:///home/tarilka0gg/projects/gentoo-wm-configs".into(),
+        opt_level: OptLevel::O2,
+        package_mode: PackageMode::Binary,
         simulate: false,
     };
 

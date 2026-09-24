@@ -5,7 +5,12 @@
 use crate::steps::Step;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
-use installer_core::{config::StoreEnv, disk, hardware, install, network, partition, store};
+use installer_core::{
+    config::StoreEnv, disk, hardware, install,
+    make_conf::{OptLevel, PackageMode},
+    network, partition, store,
+    wm::WmChoice,
+};
 use ratatui::{
     layout::{Constraint, Layout as RtLayout},
     style::{Color, Style},
@@ -106,6 +111,7 @@ fn describe(p: &install::Progress) -> String {
         install::Progress::Partitioning => "Partitioning disk...".into(),
         install::Progress::DownloadingStage3 => "Downloading stage3...".into(),
         install::Progress::UnpackingStage3 => "Unpacking stage3...".into(),
+        install::Progress::WritingMakeConf => "Tuning make.conf for your hardware...".into(),
         install::Progress::ConfiguringStore => "Configuring portage store...".into(),
         install::Progress::InstallingKernel { atom, degraded_by } => {
             if *degraded_by == 0 {
@@ -119,6 +125,7 @@ fn describe(p: &install::Progress) -> String {
         install::Progress::SettingKeyboard => "Setting keyboard layout...".into(),
         install::Progress::SettingTimezone => "Setting time zone...".into(),
         install::Progress::CreatingAccount => "Creating your account...".into(),
+        install::Progress::InstallingDesktop => "Installing desktop environment...".into(),
         install::Progress::InstallingBootloader => "Installing Limine...".into(),
         install::Progress::Done => "Install complete.".into(),
     }
@@ -192,6 +199,27 @@ fn start_install(state: &mut AppState) {
         }
     };
 
+    // No Advanced-setup picker in this TUI yet (same gap already true for account
+    // creation, immediately above) — mirrors the GENTOO_INSTALLER_USERNAME/_PASSWORD
+    // env-var pattern instead of a screen. Unset/unrecognized defaults to niri, the
+    // same silent-default shape the GUI uses when Advanced setup is off.
+    let wm = match std::env::var("GENTOO_INSTALLER_WM").as_deref() {
+        Ok("hyprland") => WmChoice::Hyprland,
+        Ok("sway") => WmChoice::Sway,
+        Ok("labwc") => WmChoice::Labwc,
+        Ok("mangowc") => WmChoice::MangoWc,
+        _ => WmChoice::default(),
+    };
+    let wm_configs_git_url = std::env::var("GENTOO_INSTALLER_WM_CONFIGS_URL").unwrap_or_default();
+    let opt_level = match std::env::var("GENTOO_INSTALLER_OPT_LEVEL").as_deref() {
+        Ok("O3") | Ok("o3") => OptLevel::O3,
+        _ => OptLevel::default(),
+    };
+    let package_mode = match std::env::var("GENTOO_INSTALLER_PACKAGE_MODE").as_deref() {
+        Ok("source") => PackageMode::Source,
+        _ => PackageMode::default(),
+    };
+
     let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
     let opts = install::InstallOptions {
         layout,
@@ -207,6 +235,10 @@ fn start_install(state: &mut AppState) {
         keyboard_layout: installer_core::keyboard::detect_current(),
         timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
         account,
+        wm,
+        wm_configs_git_url,
+        opt_level,
+        package_mode,
         simulate,
     };
 

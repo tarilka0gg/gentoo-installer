@@ -1,0 +1,297 @@
+//! Generates `/etc/portage/make.conf` tuned to the detected hardware — `CFLAGS`/`CXXFLAGS`
+//! with a real `-march=` for this exact CPU (not the generic `-march=x86-64-v2` stage3
+//! ships), `MAKEOPTS` sized to the machine's own core count, and `CPU_FLAGS_X86`/
+//! `VIDEO_CARDS` from `detect::DetectedSystem` — the two fields that module's own doc
+//! comment already promised would end up here (nothing wrote them anywhere before this).
+
+use crate::command::CommandRunner;
+use crate::detect::DetectedSystem;
+use crate::hardware::CpuArch;
+use std::path::Path;
+
+/// GCC's own `-march=` target name for each `CpuArch` — live-tested against this
+/// machine's real GCC (15.3.0): every codename accepted as-is *except* Ice Lake, which
+/// GCC splits into `icelake-client`/`icelake-server` (no bare `icelake`) — this distro's
+/// matrix only targets client hardware, so `-client` is the correct, permanent choice
+/// here, not a placeholder.
+fn gcc_march(cpu: CpuArch) -> &'static str {
+    match cpu {
+        CpuArch::IntelRaptorlake => "raptorlake",
+        CpuArch::IntelAlderlake => "alderlake",
+        CpuArch::IntelMeteorlake => "meteorlake",
+        CpuArch::IntelArrowlake => "arrowlake",
+        CpuArch::IntelRocketlake => "rocketlake",
+        CpuArch::IntelIcelake => "icelake-client",
+        CpuArch::IntelSkylake => "skylake",
+        CpuArch::IntelHaswell => "haswell",
+        CpuArch::IntelIvybridge => "ivybridge",
+        CpuArch::IntelSandybridge => "sandybridge",
+        CpuArch::AmdZnver5 => "znver5",
+        CpuArch::AmdZnver4 => "znver4",
+        CpuArch::AmdZnver3 => "znver3",
+        CpuArch::AmdZnver2 => "znver2",
+        CpuArch::AmdZnver1 => "znver1",
+        CpuArch::AmdBdver4 => "bdver4",
+        CpuArch::AmdBtver2 => "btver2",
+        CpuArch::GenericX86_64V3 => "x86-64-v3",
+        CpuArch::GenericX86_64V2 => "x86-64-v2",
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OptLevel {
+    /// The silent default (auto-detected-default shape, same as `WmChoice`) — Gentoo's
+    /// and CachyOS's own recommendation for system-wide flags: `-O3` rarely earns a
+    /// measurable win outside numeric/HPC-shaped code, while it grows binaries (worse
+    /// I-cache behavior), lengthens build times, and occasionally exposes UB that `-O2`
+    /// doesn't provoke. Advanced setup is the only way to reach `O3`.
+    #[default]
+    O2,
+    O3,
+}
+
+impl OptLevel {
+    fn gcc_flag(self) -> &'static str {
+        match self {
+            OptLevel::O2 => "-O2",
+            OptLevel::O3 => "-O3",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            OptLevel::O2 => "-O2 (recommended)",
+            OptLevel::O3 => "-O3",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PackageMode {
+    /// The silent default — large main-tree packages (llvm, mesa, the gtk stack, and
+    /// friends: exactly the kind of build a desktop-environment install like `wm::install`
+    /// pulls in) come down as prebuilt binaries from Gentoo's own official binhost
+    /// instead of compiling from source, live-tested to cut what was a
+    /// multi-hour from-source chain (llvm -> mesa -> gtk+ -> ...) down to a download.
+    /// A fresh stage3 already ships a working, signature-verified `[gentoo]` entry in
+    /// `binrepos.conf` pointing at this binhost (confirmed by reading a real unpacked
+    /// stage3's own file) — this mode only needs to flip `FEATURES="getbinpkg"` to make
+    /// Portage actually use it. Doesn't cover overlay-only packages (GURU/hyproverlay:
+    /// niri, Hyprland, Noctalia, MangoWC...) — the official binhost only builds the main
+    /// tree, so those still compile from source regardless of this setting, same as
+    /// today.
+    #[default]
+    Binary,
+    /// Advanced setup only: build everything from source, including what `Binary` would
+    /// have pulled as a prebuilt package — for anyone who specifically wants every
+    /// dependency compiled with this machine's own `-march=`/opt-level flags rather than
+    /// the binhost's generic `x86-64-v3`-ish baseline build.
+    Source,
+}
+
+impl PackageMode {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            PackageMode::Binary => "Use prebuilt binary packages (recommended)",
+            PackageMode::Source => "Build everything from source",
+        }
+    }
+}
+
+/// Keys this module owns in make.conf — any pre-existing line setting one of these
+/// (stage3 ships `COMMON_FLAGS`/`MAKEOPTS`/`CFLAGS`/`CXXFLAGS` with generic defaults) is
+/// stripped before appending our detected values, so the file doesn't end up with two
+/// conflicting assignments of the same variable.
+const OWNED_KEYS: &[&str] = &["COMMON_FLAGS", "CFLAGS", "CXXFLAGS", "MAKEOPTS", "CPU_FLAGS_X86", "VIDEO_CARDS", "FEATURES"];
+
+/// Generates and writes make.conf. `jobs` is the target's own core count (`nproc`,
+/// passed in rather than read from `num_cpus`/`std::thread::available_parallelism` here
+/// so callers on the live installer medium and tests can both control it explicitly —
+/// the installer environment and the machine being installed to are the same physical
+/// hardware, but going through `CommandRunner` keeps this testable like every other
+/// shell-out in this codebase).
+pub async fn generate(
+    target: &Path,
+    cpu: CpuArch,
+    detected: &DetectedSystem,
+    jobs: u32,
+    opt_level: OptLevel,
+    package_mode: PackageMode,
+) -> crate::Result<()> {
+    let path = target.join("etc/portage/make.conf");
+    let existing = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+    let content = render(&existing, cpu, detected, jobs, opt_level, package_mode);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(path, content).await?;
+    Ok(())
+}
+
+/// `nproc`'s real output, as a `CommandRunner` call so it's mockable — see `generate`'s
+/// doc comment for why this isn't just read directly from the host.
+pub async fn nproc(runner: &dyn CommandRunner) -> u32 {
+    runner
+        .run("nproc", &[])
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(1)
+}
+
+/// Pure string transform — strips any existing line assigning one of `OWNED_KEYS`
+/// (stage3's own make.conf sets generic `COMMON_FLAGS`/`MAKEOPTS`), then appends this
+/// machine's detected values. Split out from `generate` so the interesting logic is
+/// testable without touching a filesystem.
+fn render(existing: &str, cpu: CpuArch, detected: &DetectedSystem, jobs: u32, opt_level: OptLevel, package_mode: PackageMode) -> String {
+    let mut out = String::new();
+    for line in existing.lines() {
+        let is_owned = OWNED_KEYS.iter().any(|key| {
+            line.trim_start()
+                .strip_prefix(key)
+                .is_some_and(|rest| rest.trim_start().starts_with('='))
+        });
+        if !is_owned {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    out.push_str("\n# Generated by gentoo-installer, tuned to detected hardware\n");
+    out.push_str(&format!("COMMON_FLAGS=\"-march={} {} -pipe\"\n", gcc_march(cpu), opt_level.gcc_flag()));
+    out.push_str("CFLAGS=\"${COMMON_FLAGS}\"\n");
+    out.push_str("CXXFLAGS=\"${COMMON_FLAGS}\"\n");
+    out.push_str(&format!("MAKEOPTS=\"-j{jobs}\"\n"));
+    if let Some(flags) = &detected.cpu_flags {
+        if !flags.is_empty() {
+            out.push_str(&format!("CPU_FLAGS_X86=\"{flags}\"\n"));
+        }
+    }
+    if let Some(cards) = &detected.video_cards {
+        if !cards.is_empty() {
+            out.push_str(&format!("VIDEO_CARDS=\"{cards}\"\n"));
+        }
+    }
+    if package_mode == PackageMode::Binary {
+        // Stage3 already ships a working, signature-verified `[gentoo]` binrepos.conf
+        // entry (confirmed by reading a real unpacked stage3) — this is the only flip
+        // needed for Portage to actually prefer it over building from source.
+        out.push_str("FEATURES=\"getbinpkg\"\n");
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::FakeCommandRunner;
+
+    fn detected(cpu_flags: Option<&str>, video_cards: Option<&str>) -> DetectedSystem {
+        DetectedSystem {
+            cpu_flags: cpu_flags.map(String::from),
+            video_cards: video_cards.map(String::from),
+            firmware: crate::detect::Firmware::Uefi,
+            disks: vec![],
+            existing_os: None,
+            timezone: None,
+            locale: None,
+            ram_mb: None,
+            on_battery: None,
+            network_up: false,
+        }
+    }
+
+    #[test]
+    fn icelake_uses_the_client_variant_gcc_actually_accepts() {
+        assert_eq!(gcc_march(CpuArch::IntelIcelake), "icelake-client");
+    }
+
+    #[test]
+    fn writes_march_makeopts_cpu_flags_and_video_cards() {
+        let out = render("", CpuArch::AmdZnver4, &detected(Some("aes avx avx2 sse4_2"), Some("amdgpu")), 16, OptLevel::O2, PackageMode::Binary);
+        assert!(out.contains("-march=znver4"));
+        assert!(out.contains("MAKEOPTS=\"-j16\""));
+        assert!(out.contains("CPU_FLAGS_X86=\"aes avx avx2 sse4_2\""));
+        assert!(out.contains("VIDEO_CARDS=\"amdgpu\""));
+    }
+
+    #[test]
+    fn strips_stage3s_generic_defaults_instead_of_leaving_a_conflicting_second_assignment() {
+        let stage3_default = "COMMON_FLAGS=\"-O2 -pipe\"\nCFLAGS=\"${COMMON_FLAGS}\"\nCXXFLAGS=\"${COMMON_FLAGS}\"\nMAKEOPTS=\"-j1\"\nACCEPT_LICENSE=\"*\"\n";
+        let out = render(stage3_default, CpuArch::IntelRaptorlake, &detected(None, None), 8, OptLevel::O2, PackageMode::Binary);
+
+        // stage3's generic COMMON_FLAGS/MAKEOPTS are gone, not just shadowed by a later one.
+        assert_eq!(out.matches("COMMON_FLAGS=").count(), 1);
+        assert_eq!(out.matches("MAKEOPTS=").count(), 1);
+        assert!(out.contains("-march=raptorlake"));
+        assert!(out.contains("MAKEOPTS=\"-j8\""));
+        // Unrelated lines survive untouched.
+        assert!(out.contains("ACCEPT_LICENSE=\"*\""));
+    }
+
+    #[test]
+    fn omits_cpu_flags_and_video_cards_when_detection_found_nothing() {
+        let out = render("", CpuArch::GenericX86_64V2, &detected(None, None), 4, OptLevel::O2, PackageMode::Binary);
+        assert!(!out.contains("CPU_FLAGS_X86"));
+        assert!(!out.contains("VIDEO_CARDS"));
+    }
+
+    #[test]
+    fn o2_is_the_default_and_o3_is_only_reachable_explicitly() {
+        assert_eq!(OptLevel::default(), OptLevel::O2);
+        let out_default = render("", CpuArch::IntelSkylake, &detected(None, None), 4, OptLevel::default(), PackageMode::Binary);
+        assert!(out_default.contains("-O2"));
+        assert!(!out_default.contains("-O3"));
+
+        let out_o3 = render("", CpuArch::IntelSkylake, &detected(None, None), 4, OptLevel::O3, PackageMode::Binary);
+        assert!(out_o3.contains("-O3"));
+        assert!(!out_o3.contains("-O2"));
+    }
+
+    #[test]
+    fn binary_is_the_default_and_writes_getbinpkg_source_mode_does_not() {
+        assert_eq!(PackageMode::default(), PackageMode::Binary);
+        let out_binary = render("", CpuArch::IntelSkylake, &detected(None, None), 4, OptLevel::O2, PackageMode::default());
+        assert!(out_binary.contains("FEATURES=\"getbinpkg\""));
+
+        let out_source = render("", CpuArch::IntelSkylake, &detected(None, None), 4, OptLevel::O2, PackageMode::Source);
+        assert!(!out_source.contains("FEATURES"));
+    }
+
+    #[test]
+    fn strips_a_pre_existing_features_line_instead_of_leaving_two() {
+        let existing = "FEATURES=\"sandbox\"\n";
+        let out = render(existing, CpuArch::IntelSkylake, &detected(None, None), 4, OptLevel::O2, PackageMode::Binary);
+        assert_eq!(out.matches("FEATURES=").count(), 1);
+        assert!(out.contains("getbinpkg"));
+        assert!(!out.contains("sandbox"));
+    }
+
+    #[tokio::test]
+    async fn nproc_parses_real_command_output() {
+        let runner = FakeCommandRunner::new();
+        runner.respond("nproc", "12\n");
+        assert_eq!(nproc(&runner).await, 12);
+    }
+
+    #[tokio::test]
+    async fn nproc_falls_back_to_one_when_the_command_is_unavailable() {
+        let runner = FakeCommandRunner::new();
+        runner.fail("nproc", "not found");
+        assert_eq!(nproc(&runner).await, 1);
+    }
+
+    #[tokio::test]
+    async fn generate_writes_the_file_into_target() {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-make-conf-test-{}", std::process::id()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+
+        generate(&dir, CpuArch::IntelSkylake, &detected(None, None), 4, OptLevel::O2, PackageMode::Binary).await.unwrap();
+
+        let written = tokio::fs::read_to_string(dir.join("etc/portage/make.conf")).await.unwrap();
+        assert!(written.contains("-march=skylake"));
+
+        tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+}

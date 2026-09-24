@@ -1,0 +1,383 @@
+//! Installs a compositor + Noctalia shell on the target, with a working preset config
+//! for the new user — the other place besides `gpu_driver` that this codebase still
+//! runs `emerge` during install (same documented exception, same `chroot_emerge`
+//! plumbing). Niri is the silent default (auto-detected-default shape, same as
+//! `keyboard`/`timezone`): Advanced setup is the only way to reach any other choice.
+//!
+//! Noctalia natively supports Niri, Hyprland, Sway, Labwc, and MangoWC — confirmed
+//! against the upstream project — which is exactly this module's `WmChoice` list.
+//!
+//! Every atom/overlay/keyword requirement below was live-verified against a real synced
+//! Portage tree + GURU + hyproverlay during implementation (not assumed):
+//! - `gui-wm/niri`, `gui-wm/mangowm`, `gui-apps/noctalia` — GURU overlay
+//!   (`https://github.com/gentoo-mirror/guru.git`), all `~amd64`.
+//! - `gui-wm/hyprland` — its own dedicated overlay, hyproverlay
+//!   (`https://codeberg.org/hyproverlay/hyproverlay.git`), `~amd64`.
+//! - `gui-wm/sway` — main tree, has a genuinely stable amd64 version (1.9-r1 at the
+//!   time of writing); no override needed.
+//! - `gui-wm/labwc` — main tree, `~amd64`.
+//! - `gui-apps/noctalia`'s current 5.x releases ship with no `KEYWORDS` at all (not
+//!   even `~amd64` — fully unkeyworded betas), so it needs `**`, not `~amd64`, matching
+//!   what this exact machine's own working Noctalia install already needed (see
+//!   `noctalia-v5-niri` memory). Its `dev-cpp/sdbus-c++` dependency needs `~amd64`.
+
+use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs, write_portage_entry};
+use crate::command::CommandRunner;
+use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WmChoice {
+    #[default]
+    Niri,
+    Hyprland,
+    Sway,
+    Labwc,
+    MangoWc,
+}
+
+impl WmChoice {
+    /// All choices, in the order the Advanced-setup picker lists them — niri first,
+    /// matching its role as the silent default.
+    pub const ALL: [WmChoice; 5] = [WmChoice::Niri, WmChoice::Hyprland, WmChoice::Sway, WmChoice::Labwc, WmChoice::MangoWc];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            WmChoice::Niri => "niri",
+            WmChoice::Hyprland => "Hyprland",
+            WmChoice::Sway => "Sway",
+            WmChoice::Labwc => "Labwc",
+            WmChoice::MangoWc => "MangoWC",
+        }
+    }
+}
+
+const GURU_URL: &str = "https://github.com/gentoo-mirror/guru.git";
+const HYPROVERLAY_URL: &str = "https://codeberg.org/hyproverlay/hyproverlay.git";
+
+struct WmSpec {
+    /// Portage atom for the compositor itself (Noctalia is emerged alongside every
+    /// choice, added separately below — it isn't part of this list).
+    atom: &'static str,
+    /// Extra overlay this atom needs beyond GURU (which is always cloned, since
+    /// Noctalia itself lives there), or `None` if it's in the main tree.
+    extra_overlay: Option<(&'static str, &'static str)>,
+    /// `None` means the atom resolves to a real stable keyword already — no override
+    /// needed.
+    accept_keywords: Option<&'static str>,
+    /// `dbus-run-session --`-prefixed launch command written into the new user's
+    /// `.bash_profile` tty1-autostart line.
+    launch_cmd: &'static str,
+    /// Matches a subdirectory name in the wm-configs preset repo.
+    preset_dir: &'static str,
+    /// Real XDG config directory name the compositor itself expects — not always the
+    /// same as `preset_dir`/the WM's own name (Hyprland reads `~/.config/hypr`, not
+    /// `~/.config/hyprland`; MangoWC reads `~/.config/mango`, matching its upstream
+    /// project/binary name "mango" rather than "mangowc").
+    config_dest_dir: &'static str,
+}
+
+fn spec(choice: WmChoice) -> WmSpec {
+    match choice {
+        WmChoice::Niri => WmSpec {
+            atom: "gui-wm/niri",
+            extra_overlay: None,
+            accept_keywords: Some("gui-wm/niri ~amd64"),
+            launch_cmd: "niri --session",
+            preset_dir: "niri",
+            config_dest_dir: "niri",
+        },
+        WmChoice::Hyprland => WmSpec {
+            atom: "gui-wm/hyprland",
+            extra_overlay: Some(("hyproverlay", HYPROVERLAY_URL)),
+            accept_keywords: Some("gui-wm/hyprland ~amd64"),
+            launch_cmd: "Hyprland",
+            preset_dir: "hyprland",
+            config_dest_dir: "hypr",
+        },
+        WmChoice::Sway => WmSpec {
+            atom: "gui-wm/sway",
+            extra_overlay: None,
+            accept_keywords: None,
+            launch_cmd: "sway",
+            preset_dir: "sway",
+            config_dest_dir: "sway",
+        },
+        WmChoice::Labwc => WmSpec {
+            atom: "gui-wm/labwc",
+            extra_overlay: None,
+            accept_keywords: Some("gui-wm/labwc ~amd64"),
+            launch_cmd: "labwc",
+            preset_dir: "labwc",
+            config_dest_dir: "labwc",
+        },
+        WmChoice::MangoWc => WmSpec {
+            atom: "gui-wm/mangowm",
+            extra_overlay: None,
+            accept_keywords: Some("gui-wm/mangowm ~amd64"),
+            launch_cmd: "mangowc",
+            preset_dir: "mangowc",
+            config_dest_dir: "mango",
+        },
+    }
+}
+
+/// Emerges the chosen compositor + Noctalia, then applies the matching preset config
+/// (compositor config, shared Noctalia config, tty1-autostart `.bash_profile`) to
+/// `username`'s home directory. Requires `account::create` to have already run —
+/// the home directory and `/etc/passwd`/`/etc/group` entries must exist.
+pub async fn install(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    choice: WmChoice,
+    configs_git_url: &str,
+    username: &str,
+) -> crate::Result<()> {
+    let spec = spec(choice);
+    emerge_wm_packages(runner, target, &spec).await?;
+
+    let staging = std::env::temp_dir().join(format!("gentoo-installer-wm-configs-{}", std::process::id()));
+    if staging.exists() {
+        tokio::fs::remove_dir_all(&staging).await?;
+    }
+    let staging_str = staging
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 staging path")))?;
+    runner.run_status("git", &["clone", "--depth", "1", configs_git_url, staging_str]).await?;
+
+    let result = apply_preset_from_dir(runner, target, &staging, &spec, username).await;
+    tokio::fs::remove_dir_all(&staging).await.ok();
+    result
+}
+
+/// Bind-mounts, bootstraps network/tree/overlays, writes portage overrides, and emerges
+/// `spec.atom` + Noctalia — split out from `install` so tests can assert exact emerge
+/// argv per `WmChoice` without needing `git` to actually clone anything (see
+/// `apply_preset_from_dir` for the other half).
+async fn emerge_wm_packages(runner: &dyn CommandRunner, target: &Path, spec: &WmSpec) -> crate::Result<()> {
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
+
+    bind_mount_chroot_dirs(runner, target).await?;
+
+    let result = async {
+        ensure_network_resolves(target).await?;
+        ensure_portage_tree(runner, target, target_str).await?;
+        ensure_overlay(runner, target, "guru", GURU_URL).await?;
+        if let Some((name, url)) = spec.extra_overlay {
+            ensure_overlay(runner, target, name, url).await?;
+        }
+        configure_wm_portage_overrides(target, spec).await?;
+        runner
+            .run_status("chroot", &[target_str, "emerge", spec.atom, "gui-apps/noctalia"])
+            .await
+    }
+    .await;
+
+    unmount_chroot_dirs(runner, target).await;
+    result?;
+    Ok(())
+}
+
+/// Same shape as `store::configure`'s overlay clone (repos.conf entry + host-side `git
+/// clone`, no chroot needed for the clone itself) — generalized here since this module
+/// needs it for up to two overlays (GURU always, plus a WM-specific one), not just the
+/// distro's own.
+async fn ensure_overlay(runner: &dyn CommandRunner, target: &Path, name: &str, url: &str) -> crate::Result<()> {
+    let repo_dir = target.join(format!("var/db/repos/{name}"));
+    if repo_dir.exists() {
+        return Ok(());
+    }
+    let repos_conf_dir = target.join("etc/portage/repos.conf");
+    tokio::fs::create_dir_all(&repos_conf_dir).await?;
+    let repos_conf = format!(
+        "[{name}]\n\
+         location = /var/db/repos/{name}\n\
+         sync-type = git\n\
+         sync-uri = {url}\n\
+         auto-sync = yes\n"
+    );
+    tokio::fs::write(repos_conf_dir.join(format!("{name}.conf")), repos_conf).await?;
+
+    tokio::fs::create_dir_all(repo_dir.parent().expect("var/db/repos always has a parent")).await?;
+    let repo_dir_str = repo_dir
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 overlay path")))?;
+    runner.run_status("git", &["clone", "--depth", "1", url, repo_dir_str]).await?;
+    Ok(())
+}
+
+async fn configure_wm_portage_overrides(target: &Path, spec: &WmSpec) -> crate::Result<()> {
+    let portage_dir = target.join("etc/portage");
+    tokio::fs::create_dir_all(&portage_dir).await?;
+
+    let mut keywords = String::new();
+    if let Some(line) = spec.accept_keywords {
+        keywords.push_str(line);
+        keywords.push('\n');
+    }
+    // Noctalia's 5.x releases ship with no KEYWORDS at all (see module doc comment) —
+    // `**` accepts them; `dev-cpp/sdbus-c++` is its one real-tree dependency that needs
+    // a plain ~amd64 bump.
+    keywords.push_str("gui-apps/noctalia **\ndev-cpp/sdbus-c++ ~amd64\n");
+    write_portage_entry(&portage_dir.join("package.accept_keywords"), "gentoo-installer-wm", &keywords).await?;
+
+    // Live-tested: niri/hyprland/mangowm/labwc/noctalia each have a "-9999" live-git
+    // ebuild carrying the exact same KEYWORDS as their numbered releases (confirmed by
+    // reading each ebuild directly), and 9999 always sorts as the highest version — so
+    // once any of them is keyword-accepted at all, Portage picks the live checkout over
+    // the real release. Masking each -9999 explicitly, unconditionally (regardless of
+    // which WmChoice is running), keeps every choice on a real numbered release instead
+    // of a live-git build with unpredictable, untested state.
+    write_portage_entry(
+        &portage_dir.join("package.mask"),
+        "gentoo-installer-wm",
+        "=gui-wm/niri-9999\n=gui-wm/hyprland-9999\n=gui-wm/mangowm-9999\n=gui-wm/labwc-9999\n=gui-apps/noctalia-9999\n",
+    )
+    .await?;
+
+    // Live-tested: Noctalia's secret-service integration (gnome-keyring, a genuine
+    // feature here, not an optional extra like nvidia-drivers' GUI tool was — this step
+    // is installing an actual desktop) pulls in a GTK/X dependency chain the base
+    // profile's default USE flags don't satisfy. Applying exactly what emerge's own
+    // autounmask output named as blocking, same approach as the nvidia driver step's
+    // libglvnd fix.
+    write_portage_entry(
+        &portage_dir.join("package.use"),
+        "gentoo-installer-wm",
+        ">=media-libs/freetype-2.14.3 harfbuzz\n>=app-crypt/gcr-3.41.2-r2 gtk\n>=x11-libs/cairo-1.18.4-r1 X\n",
+    )
+    .await?;
+    Ok(())
+}
+
+/// Copies the matching `<wm>/` + `noctalia/` subdirectories of an already-cloned preset
+/// repo (`preset_root`) into the new user's home, renders `bash_profile.tmpl`, and fixes
+/// ownership. Split out from `install` so tests can point it at a plain local directory
+/// instead of relying on `FakeCommandRunner` to have actually run `git clone` (it never
+/// does — it only records the call). `chroot ... chown` at the end fixes ownership to
+/// the target's own uid/gid for `username` — the host and target don't necessarily agree
+/// on uid numbers, so a plain host-side `chown` isn't safe here (same reasoning
+/// `account::create` documents for why it uses `useradd -R` instead of chroot).
+async fn apply_preset_from_dir(runner: &dyn CommandRunner, target: &Path, preset_root: &Path, spec: &WmSpec, username: &str) -> crate::Result<()> {
+    let home = target.join("home").join(username);
+    let config_dir = home.join(".config");
+    tokio::fs::create_dir_all(&config_dir).await?;
+
+    copy_dir(&preset_root.join(spec.preset_dir), &config_dir.join(spec.config_dest_dir)).await?;
+    copy_dir(&preset_root.join("noctalia"), &config_dir.join("noctalia")).await?;
+
+    let tmpl = tokio::fs::read_to_string(preset_root.join("bash_profile.tmpl")).await?;
+    let rendered = tmpl.replace("{{LAUNCH_CMD}}", &format!("dbus-run-session -- {}", spec.launch_cmd));
+    tokio::fs::write(home.join(".bash_profile"), rendered).await?;
+
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
+    let home_in_target = format!("/home/{username}");
+    runner
+        .run_status("chroot", &[target_str, "chown", "-R", &format!("{username}:{username}"), &home_in_target])
+        .await?;
+
+    Ok(())
+}
+
+fn copy_dir<'a>(src: &'a Path, dest: &'a Path) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + Send + 'a>> {
+    Box::pin(async move {
+        tokio::fs::create_dir_all(dest).await?;
+        let mut entries = tokio::fs::read_dir(src).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let file_type = entry.file_type().await?;
+            let src_path = entry.path();
+            let dest_path = dest.join(entry.file_name());
+            if file_type.is_dir() {
+                copy_dir(&src_path, &dest_path).await?;
+            } else {
+                tokio::fs::copy(&src_path, &dest_path).await?;
+            }
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::FakeCommandRunner;
+
+    fn make_preset_repo(root: &Path, wm_dir: &str) {
+        std::fs::create_dir_all(root.join(wm_dir)).unwrap();
+        std::fs::write(root.join(wm_dir).join("config"), "wm config\n").unwrap();
+        std::fs::create_dir_all(root.join("noctalia")).unwrap();
+        std::fs::write(root.join("noctalia").join("config.toml"), "noctalia config\n").unwrap();
+        std::fs::write(root.join("bash_profile.tmpl"), "exec {{LAUNCH_CMD}}\n").unwrap();
+    }
+
+    #[tokio::test]
+    async fn each_wm_choice_emerges_its_own_atom_plus_noctalia() {
+        for (choice, atom) in [
+            (WmChoice::Niri, "gui-wm/niri"),
+            (WmChoice::Hyprland, "gui-wm/hyprland"),
+            (WmChoice::Sway, "gui-wm/sway"),
+            (WmChoice::Labwc, "gui-wm/labwc"),
+            (WmChoice::MangoWc, "gui-wm/mangowm"),
+        ] {
+            let target_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-test-{choice:?}-{}", std::process::id()));
+            tokio::fs::create_dir_all(&target_dir).await.unwrap();
+            let runner = FakeCommandRunner::new();
+
+            emerge_wm_packages(&runner, &target_dir, &spec(choice)).await.unwrap();
+
+            let calls = runner.calls();
+            assert!(calls.iter().any(|(cmd, args)| cmd == "chroot"
+                && args.contains(&"emerge".to_string())
+                && args.contains(&atom.to_string())
+                && args.contains(&"gui-apps/noctalia".to_string())));
+
+            tokio::fs::remove_dir_all(&target_dir).await.ok();
+        }
+    }
+
+    #[tokio::test]
+    async fn copies_preset_config_into_the_new_users_home_and_chowns_it() {
+        let target_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-test-copy-{}", std::process::id()));
+        tokio::fs::create_dir_all(target_dir.join("home/tester")).await.unwrap();
+        let repo_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-repo-copy-{}", std::process::id()));
+        make_preset_repo(&repo_dir, "niri");
+        let runner = FakeCommandRunner::new();
+
+        apply_preset_from_dir(&runner, &target_dir, &repo_dir, &spec(WmChoice::Niri), "tester").await.unwrap();
+
+        let wm_config = tokio::fs::read_to_string(target_dir.join("home/tester/.config/niri/config")).await.unwrap();
+        assert_eq!(wm_config, "wm config\n");
+        let noctalia_config = tokio::fs::read_to_string(target_dir.join("home/tester/.config/noctalia/config.toml")).await.unwrap();
+        assert_eq!(noctalia_config, "noctalia config\n");
+        let bash_profile = tokio::fs::read_to_string(target_dir.join("home/tester/.bash_profile")).await.unwrap();
+        assert_eq!(bash_profile, "exec dbus-run-session -- niri --session\n");
+
+        let calls = runner.calls();
+        assert!(calls.iter().any(|(cmd, args)| cmd == "chroot" && args.contains(&"chown".to_string()) && args.contains(&"tester:tester".to_string())));
+
+        tokio::fs::remove_dir_all(&target_dir).await.ok();
+        tokio::fs::remove_dir_all(&repo_dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn sway_needs_no_accept_keywords_override_but_noctalia_still_does() {
+        let target_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-test-sway-{}", std::process::id()));
+        tokio::fs::create_dir_all(&target_dir).await.unwrap();
+        let runner = FakeCommandRunner::new();
+
+        emerge_wm_packages(&runner, &target_dir, &spec(WmChoice::Sway)).await.unwrap();
+
+        // This synthetic target has no pre-existing package.accept_keywords directory
+        // (real stage3 ships one — see chroot_emerge's own directory-vs-file tests), so
+        // write_portage_entry falls to its "write straight to the path" branch here.
+        let written = tokio::fs::read_to_string(target_dir.join("etc/portage/package.accept_keywords")).await.unwrap();
+        assert!(!written.contains("gui-wm/sway"));
+        assert!(written.contains("gui-apps/noctalia **"));
+        assert!(written.contains("dev-cpp/sdbus-c++ ~amd64"));
+
+        tokio::fs::remove_dir_all(&target_dir).await.ok();
+    }
+}

@@ -1,6 +1,6 @@
 //! Main window: an Adwaita ToolbarView wrapping a NavigationView, one page per wizard step:
-//! Welcome -> [Keyboard -> Timezone, if Advanced] -> [Network, if no ethernet link] ->
-//! Disk -> Account -> Confirm -> Installing -> Done.
+//! Welcome -> [Keyboard -> Timezone -> Desktop -> Optimization, if Advanced] -> [Network,
+//! if no ethernet link] -> Disk -> Account -> Confirm -> Installing -> Done.
 //!
 //! Visual patterns (card-style disk picker, bar-with-separate-legend partitioning preview,
 //! progress bar + collapsible log) are ported from elementary's GTK installer
@@ -18,8 +18,10 @@
 use adw::prelude::*;
 use gtk::glib;
 use installer_core::{
-    account::Account, config::StoreEnv, disk, hardware, install, keyboard, network, partition, store,
-    timezone as tz,
+    account::Account, config::StoreEnv, disk, hardware, install, keyboard,
+    make_conf::{OptLevel, PackageMode},
+    network, partition, store, timezone as tz,
+    wm::WmChoice,
 };
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
@@ -50,6 +52,9 @@ struct WizardState {
     advanced: Cell<bool>,
     keyboard_layout: RefCell<String>,
     timezone: RefCell<String>,
+    wm: Cell<WmChoice>,
+    opt_level: Cell<OptLevel>,
+    package_mode: Cell<PackageMode>,
     manual_root_fs: Cell<partition::RootFs>,
     /// `None` means "use the automatic RAM-based size" — set only if the user actually
     /// changes it on the manual-partitioning page.
@@ -67,6 +72,9 @@ impl WizardState {
             advanced: Cell::new(false),
             keyboard_layout: RefCell::new(keyboard::detect_current()),
             timezone: RefCell::new(tz::detect_current().unwrap_or_else(|| "UTC".to_string())),
+            wm: Cell::new(WmChoice::default()),
+            opt_level: Cell::new(OptLevel::default()),
+            package_mode: Cell::new(PackageMode::default()),
             manual_root_fs: Cell::new(partition::RootFs::Btrfs),
             manual_swap_gib: RefCell::new(None),
             username: RefCell::new(String::new()),
@@ -111,11 +119,15 @@ pub fn build(app: &adw::Application) {
     // startup, not re-checked live, since link state genuinely won't change mid-wizard
     // on installer hardware.
     let target_after_prelude = if network::IwdClient::ethernet_link_up() { disk_page.clone() } else { network_page.clone() };
-    let timezone_page = timezone_select_page(nav.clone(), state.clone(), target_after_prelude.clone());
+    let opt_level_page = opt_level_select_page(nav.clone(), state.clone(), target_after_prelude.clone());
+    let wm_page = wm_select_page(nav.clone(), state.clone(), opt_level_page.clone());
+    let timezone_page = timezone_select_page(nav.clone(), state.clone(), wm_page.clone());
     let keyboard_page = keyboard_select_page(nav.clone(), state.clone(), timezone_page.clone());
     nav.add(&welcome_page(&nav, state.clone(), keyboard_page.clone(), target_after_prelude));
     nav.add(&keyboard_page);
     nav.add(&timezone_page);
+    nav.add(&wm_page);
+    nav.add(&opt_level_page);
     nav.add(&network_page);
     nav.add(&disk_page);
 
@@ -336,6 +348,122 @@ fn timezone_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_p
     let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
     let page = adw::NavigationPage::builder().title("Time zone").child(&clamp).build();
     page.set_tag(Some("timezone"));
+    page
+}
+
+/// Advanced-setup only: compositor choice, niri preselected (the silent default when
+/// Advanced setup is off entirely). `next_page` is Disk directly if there's already an
+/// ethernet link, else Network — same choice `timezone_select_page` makes.
+fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Desktop").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let body = gtk::Label::builder()
+        .label("Pick a compositor. Noctalia (the shell/bar) is installed alongside any of these.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
+
+    let display_strings: Vec<String> = WmChoice::ALL.iter().map(|c| c.display_name().to_string()).collect();
+    let current = state.wm.get();
+    let selected_index = WmChoice::ALL.iter().position(|c| *c == current).unwrap_or(0) as u32;
+
+    let model = gtk::StringList::new(&display_strings.iter().map(String::as_str).collect::<Vec<_>>());
+    let dropdown = gtk::DropDown::builder().model(&model).selected(selected_index).build();
+
+    {
+        let state = state.clone();
+        dropdown.connect_selected_notify(move |dd| {
+            if let Some(choice) = WmChoice::ALL.get(dd.selected() as usize) {
+                state.wm.set(*choice);
+            }
+        });
+    }
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&dropdown);
+
+    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&next_button);
+    {
+        let nav = nav.clone();
+        next_button.connect_clicked(move |_| nav.push(&next_page));
+    }
+
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Desktop").child(&clamp).build();
+    page.set_tag(Some("wm"));
+    page
+}
+
+/// Advanced-setup only: `-O2`/`-O3` for `make.conf`, O2 preselected (the silent default
+/// when Advanced setup is off entirely — see `make_conf::OptLevel`'s doc comment for why
+/// O2 is the recommended choice, not just an arbitrary default).
+fn opt_level_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Build optimization").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let body = gtk::Label::builder()
+        .label("-O3 rarely measurably outperforms -O2 outside numeric-heavy code, and makes builds slower and binaries larger. Leave this off unless you have a specific reason.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build();
+
+    let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
+    let switch_label = gtk::Label::builder().label("Use -O3").halign(gtk::Align::Start).hexpand(true).build();
+    let switch = gtk::Switch::builder().active(state.opt_level.get() == OptLevel::O3).valign(gtk::Align::Center).build();
+    {
+        let state = state.clone();
+        switch.connect_state_set(move |_, active| {
+            state.opt_level.set(if active { OptLevel::O3 } else { OptLevel::O2 });
+            glib::Propagation::Proceed
+        });
+    }
+    row.append(&switch_label);
+    row.append(&switch);
+
+    let pkg_body = gtk::Label::builder()
+        .label(
+            "By default, large packages (compilers, graphics libraries, desktop toolkits — \
+             exactly what pulls in the longest build times) come down as prebuilt binaries from \
+             Gentoo's own official package host instead of compiling from source. Overlay-only \
+             packages (niri, Hyprland, Noctalia...) always compile from source regardless — only \
+             the official Gentoo tree has prebuilt binaries.",
+        )
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build();
+
+    let pkg_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(12).build();
+    let pkg_switch_label = gtk::Label::builder().label("Build everything from source").halign(gtk::Align::Start).hexpand(true).build();
+    let pkg_switch = gtk::Switch::builder().active(state.package_mode.get() == PackageMode::Source).valign(gtk::Align::Center).build();
+    {
+        let state = state.clone();
+        pkg_switch.connect_state_set(move |_, active| {
+            state.package_mode.set(if active { PackageMode::Source } else { PackageMode::default() });
+            glib::Propagation::Proceed
+        });
+    }
+    pkg_row.append(&pkg_switch_label);
+    pkg_row.append(&pkg_switch);
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&row);
+    content.append(&pkg_body);
+    content.append(&pkg_row);
+
+    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&next_button);
+    {
+        let nav = nav.clone();
+        next_button.connect_clicked(move |_| nav.push(&next_page));
+    }
+
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Optimization").child(&clamp).build();
+    page.set_tag(Some("opt-level"));
     page
 }
 
@@ -978,6 +1106,13 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
             sentences.append(&sentence(&format!("Create an account for {username}."), false));
         }
         sentences.append(&sentence(&format!("Set the time zone to {}.", state.timezone.borrow()), false));
+        sentences.append(&sentence(&format!("Install {} as your desktop.", state.wm.get().display_name()), false));
+        if state.opt_level.get() == OptLevel::O3 {
+            sentences.append(&sentence("Build with -O3 instead of -O2.", false));
+        }
+        if state.package_mode.get() == PackageMode::Source {
+            sentences.append(&sentence("Build everything from source instead of using prebuilt binary packages.", false));
+        }
     }
 
     sentences.append(&sentence("This takes about 15\u{2013}20 minutes.", false));
@@ -1061,12 +1196,16 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                     overlay_git_url: store_env.as_ref().map(|e| e.overlay_git_url.clone()).unwrap_or_default(),
                     overlay_name: store_env.as_ref().map(|e| e.overlay_name.clone()).unwrap_or_default(),
                 },
+                wm_configs_git_url: store_env.as_ref().map(|e| e.wm_configs_git_url.clone()).unwrap_or_default(),
                 kernel_base_name: store_env
                     .map(|e| e.kernel_base_name)
                     .unwrap_or_else(|| "gentoo-diy-kernel".into()),
                 keyboard_layout: state.keyboard_layout.borrow().clone(),
                 timezone: state.timezone.borrow().clone(),
                 account,
+                wm: state.wm.get(),
+                opt_level: state.opt_level.get(),
+                package_mode: state.package_mode.get(),
                 simulate,
             };
 
@@ -1316,22 +1455,24 @@ fn done_page_build() -> adw::NavigationPage {
     page
 }
 
-const TOTAL_STEPS: f64 = 11.0;
+const TOTAL_STEPS: f64 = 13.0;
 
 fn progress_fraction(p: &install::Progress) -> f64 {
     let step = match p {
         install::Progress::Partitioning => 0.0,
         install::Progress::DownloadingStage3 => 1.0,
         install::Progress::UnpackingStage3 => 2.0,
-        install::Progress::ConfiguringStore => 3.0,
-        install::Progress::InstallingKernel { .. } => 4.0,
-        install::Progress::InstallingGpuDriver => 5.0,
-        install::Progress::WritingFstab => 6.0,
-        install::Progress::SettingKeyboard => 7.0,
-        install::Progress::SettingTimezone => 8.0,
-        install::Progress::CreatingAccount => 9.0,
-        install::Progress::InstallingBootloader => 10.0,
-        install::Progress::Done => 11.0,
+        install::Progress::WritingMakeConf => 3.0,
+        install::Progress::ConfiguringStore => 4.0,
+        install::Progress::InstallingKernel { .. } => 5.0,
+        install::Progress::InstallingGpuDriver => 6.0,
+        install::Progress::WritingFstab => 7.0,
+        install::Progress::SettingKeyboard => 8.0,
+        install::Progress::SettingTimezone => 9.0,
+        install::Progress::CreatingAccount => 10.0,
+        install::Progress::InstallingDesktop => 11.0,
+        install::Progress::InstallingBootloader => 12.0,
+        install::Progress::Done => 13.0,
     };
     step / TOTAL_STEPS
 }
@@ -1347,6 +1488,7 @@ fn describe(p: &install::Progress) -> String {
         install::Progress::Partitioning => "Preparing the disk".into(),
         install::Progress::DownloadingStage3 => "Downloading the base system".into(),
         install::Progress::UnpackingStage3 => "Setting up the base system".into(),
+        install::Progress::WritingMakeConf => "Tuning build settings for your hardware".into(),
         install::Progress::ConfiguringStore => "Setting up package sources".into(),
         install::Progress::InstallingKernel { atom, degraded_by } => {
             if *degraded_by == 0 {
@@ -1360,6 +1502,7 @@ fn describe(p: &install::Progress) -> String {
         install::Progress::SettingKeyboard => "Setting your keyboard layout".into(),
         install::Progress::SettingTimezone => "Setting your time zone".into(),
         install::Progress::CreatingAccount => "Creating your account".into(),
+        install::Progress::InstallingDesktop => "Setting up your desktop".into(),
         install::Progress::InstallingBootloader => "Installing the bootloader".into(),
         install::Progress::Done => "Finishing up".into(),
     }

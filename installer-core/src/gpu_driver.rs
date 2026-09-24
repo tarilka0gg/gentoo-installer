@@ -18,7 +18,12 @@
 //! AMD (`amdgpu`) and Intel (`i915`/`xe`) are open, in-tree drivers — expected to already
 //! be part of the kernel build itself (as `=y` or a plain in-tree `=m` module downloaded
 //! by `kernel::deploy`'s modules tarball), not something this step needs to touch.
+//!
+//! Chroot/emerge bootstrap plumbing (`/etc/resolv.conf`, syncing the main Portage tree,
+//! directory-safe `/etc/portage/package.*` writes, proc/sys/dev bind mounts) lives in
+//! `chroot_emerge` — shared with `wm`, the other step that still runs `emerge`.
 
+use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs, write_portage_entry};
 use crate::command::CommandRunner;
 use crate::hardware::Gpu;
 use std::path::Path;
@@ -49,9 +54,15 @@ async fn install_for(runner: &dyn CommandRunner, target: &Path, gpu: Gpu) -> cra
 
     bind_mount_chroot_dirs(runner, target).await?;
 
-    let result = runner
-        .run_status("chroot", &[target_str, "emerge", "x11-drivers/nvidia-drivers"])
-        .await;
+    let result = async {
+        ensure_network_resolves(target).await?;
+        ensure_portage_tree(runner, target, target_str).await?;
+        configure_nvidia_portage_overrides(target).await?;
+        runner
+            .run_status("chroot", &[target_str, "emerge", "x11-drivers/nvidia-drivers"])
+            .await
+    }
+    .await;
 
     unmount_chroot_dirs(runner, target).await;
 
@@ -59,33 +70,57 @@ async fn install_for(runner: &dyn CommandRunner, target: &Path, gpu: Gpu) -> cra
     Ok(Ran::Installed)
 }
 
+/// Live-tested: even with a real synced tree, emerge refused every single
+/// x11-drivers/nvidia-drivers version — the proprietary NVIDIA license is never
+/// auto-accepted by Portage (by design, needs explicit opt-in), and on top of that every
+/// version currently in the tree is ~amd64-keyword-masked (no stable branch exists at
+/// all right now). A user installing this distro has already implicitly agreed to run
+/// proprietary Nvidia software by nature of this step existing and running at all, so the
+/// installer accepts on their behalf here rather than failing the whole install on a
+/// prompt nothing can answer inside a non-interactive chroot.
+async fn configure_nvidia_portage_overrides(target: &Path) -> crate::Result<()> {
+    let portage_dir = target.join("etc/portage");
+    tokio::fs::create_dir_all(&portage_dir).await?;
+    write_portage_entry(
+        &portage_dir.join("package.license"),
+        "gentoo-installer-nvidia",
+        "x11-drivers/nvidia-drivers NVIDIA-2025 NVIDIA-2023 NVIDIA-r2\n",
+    )
+    .await?;
+    write_portage_entry(
+        &portage_dir.join("package.accept_keywords"),
+        "gentoo-installer-nvidia",
+        "x11-drivers/nvidia-drivers ~amd64\n",
+    )
+    .await?;
+    // Live-tested: with the default profile's USE flags, nvidia-drivers' "tools" flag
+    // (nvidia-settings, a GTK GUI) drags in the entire X/GTK stack (libepoxy, gtk+,
+    // cairo, pango...) with USE combinations the base profile doesn't satisfy, and emerge
+    // refuses to resolve them non-interactively (needs --autounmask-write + a manual
+    // review pass). This is a base-OS install with no desktop environment chosen yet —
+    // the kernel module and core libs (what actually matters for the GPU to work at all)
+    // don't need that GUI tool, so disabling "tools" here avoids depending on a DE choice
+    // this step has no business making.
+    // libglvnd needs its X flag for the GLX/EGL dispatch libraries nvidia-drivers
+    // actually links against — live-tested: emerge's own autounmask output names this
+    // exact change as the only thing blocking resolution once "tools" was out of the
+    // picture, so it's applied directly instead of depending on the extra
+    // --autounmask-write pass (an extra non-interactive emerge invocation with its own
+    // failure modes) to work it out.
+    write_portage_entry(
+        &portage_dir.join("package.use"),
+        "gentoo-installer-nvidia",
+        "x11-drivers/nvidia-drivers -tools\n>=media-libs/libglvnd-1.7.0 X\n",
+    )
+    .await?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ran {
     /// This machine's GPU doesn't need an out-of-tree driver built at install time.
     NotNeeded,
     Installed,
-}
-
-async fn bind_mount_chroot_dirs(runner: &dyn CommandRunner, target: &Path) -> crate::Result<()> {
-    for dir in ["proc", "sys", "dev"] {
-        let target_dir = target.join(dir);
-        tokio::fs::create_dir_all(&target_dir).await?;
-        let target_dir_str = target_dir
-            .to_str()
-            .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 path")))?;
-        runner.run_status("mount", &["--rbind", &format!("/{dir}"), target_dir_str]).await?;
-    }
-    Ok(())
-}
-
-/// Best-effort: called on both the success and failure path of the emerge above, so a
-/// failed build doesn't leave the target's /proc etc. bind-mounted.
-async fn unmount_chroot_dirs(runner: &dyn CommandRunner, target: &Path) {
-    for dir in ["dev", "sys", "proc"] {
-        if let Some(target_dir_str) = target.join(dir).to_str() {
-            runner.run_status("umount", &["-R", target_dir_str]).await.ok();
-        }
-    }
 }
 
 #[cfg(test)]
