@@ -165,3 +165,8 @@ already true for account creation); the iwd passphrase agent (secured-network
 connect currently hangs/fails — open networks work); wifi-connect UI in either
 frontend; and real binhost/overlay URLs once the store is published
 externally.
+
+## License
+
+[GPL-2.0-or-later](LICENSE), matching Portage, Gentoo and this project's sibling
+[portage-store](https://github.com/tarilka0gg/portage-store).
