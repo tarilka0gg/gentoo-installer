@@ -67,6 +67,8 @@ installer-core/     lib crate — all real logic, no UI code
     mount.rs             MountPhase
     deploy.rs            stage3 unpack + kernel match+deploy (~70% of wall-clock)
     fstab.rs              FstabPhase
+    locale.rs             LocalePhase: keyboard, time zone, hostname, locale-gen
+    users.rs              UsersPhase: first account + /etc/doas.conf
     portage_config.rs   make.conf + git init/commit
     bootloader.rs        Limine
     finalize.rs          sync + unmount
@@ -84,6 +86,8 @@ installer-core/     lib crate — all real logic, no UI code
   bootloader.rs      Limine config generation + install
   store.rs           writes repos.conf/binrepos.conf, git-clones the overlay
   fstab.rs           UUID-based /etc/fstab generation
+  locale.rs          locale.gen + locale-gen + LANG, hostname
+  account.rs         useradd (-R target) + doas.conf; timezone.rs / keyboard.rs likewise
   make_conf.rs       hardware-tuned /etc/portage/make.conf (-march=, MAKEOPTS, ...)
   gpu_driver.rs       on-target Nvidia driver build against the exact kernel
   wm.rs              compositor + Noctalia install, preset config from wm-configs
@@ -114,7 +118,7 @@ interaction model). Rewriting it is deliberately the last step, not skipped.
 
 ## Status
 
-Workspace builds and passes clippy clean across all three crates, 55 unit/
+Workspace builds and passes clippy clean across all three crates, 77 unit/
 integration tests passing, including a `Partition→Format→Mount→Fstab`
 end-to-end run against `FakeCommandRunner` with no root and no real disk.
 Hardware detection was live-verified on this machine (Victus 16, i7-14650HX +
@@ -155,9 +159,8 @@ reason — that's as far as the current fake goes.
 Not yet done (see spec for the full list): `installer-cli`/`installer-gui`
 driving the new phase/journal system instead of legacy `install.rs`; a
 non-interactive `installer-cli` plan-JSON driver (spec's step 4, the one that
-proves the installer works headless); `Locale`/`Users`/`Initramfs`/`PostHooks`
-phases (keymap/timezone application, useradd/passwd, dracut, machine-id/eix
-seeding — genuinely new territory, nothing here does this yet); the
+proves the installer works headless); `Initramfs`/`PostHooks` phases (dracut, machine-id/eix seeding — genuinely new
+territory, nothing here does this yet); the
 non-libadwaita `installer-gtk` rewrite and its 13-page flow; preset/edition
 integration from `portage_store`; a WM picker in `installer-cli`'s TUI (it
 reads `GENTOO_INSTALLER_WM`/`_WM_CONFIGS_URL` env vars instead — same gap
@@ -165,6 +168,22 @@ already true for account creation); the iwd passphrase agent (secured-network
 connect currently hangs/fails — open networks work); wifi-connect UI in either
 frontend; and real binhost/overlay URLs once the store is published
 externally.
+
+### Known gaps found while adding `Locale`/`Users`
+
+- **The installed system has no way to become root.** Root is deliberately left
+  locked and the first user goes in `wheel`, but nothing in the repo installs
+  `sudo` or `doas`. `UsersPhase` now writes `/etc/doas.conf` (`permit persist
+  :wheel`) and warns at runtime, but `app-admin/doas` still has to be emerged in
+  the target; until it is, the account cannot administer the machine.
+- **`installer-cli`/`installer-gui` do not get any of this yet.** They drive the
+  legacy `install.rs`, which still sets only keyboard, time zone and the account —
+  no hostname, no `locale-gen`, no `doas.conf`. The new phases (and
+  `Settings`, the struct that carries these choices) only take effect once a
+  frontend drives the phase system.
+- **`locale-gen`/`env-update` via `chroot` have not run against a real target.**
+  The tests pin the files written and the exact argv against `FakeCommandRunner`,
+  which cannot tell whether a real Gentoo accepts them.
 
 ## License
 

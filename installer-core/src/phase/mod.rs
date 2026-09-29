@@ -13,20 +13,25 @@ mod bootloader;
 mod deploy;
 mod finalize;
 mod fstab;
+mod locale;
 mod mount;
 mod partition;
 mod portage_config;
 mod preflight;
+mod users;
 
 pub use bootloader::BootloaderPhase;
 pub use deploy::DeployPhase;
 pub use finalize::FinalizePhase;
 pub use fstab::FstabPhase;
+pub use locale::LocalePhase;
 pub use mount::MountPhase;
 pub use partition::{FormatPhase, PartitionPhase};
 pub use portage_config::PortageConfigPhase;
 pub use preflight::PreflightPhase;
+pub use users::UsersPhase;
 
+use crate::account::Account;
 use crate::command::CommandRunner;
 use crate::event::EventTx;
 use crate::{hardware, kernel, partition as partition_mod, store};
@@ -95,6 +100,34 @@ pub trait Phase: Send + Sync {
     fn reversible(&self) -> bool;
 }
 
+/// What the user chose on the wizard's settings pages, as the `Locale` and `Users`
+/// phases need it. Everything except `account` has a sensible default, so a Ctx built
+/// without calling [`Ctx::with_settings`] still installs a usable system; `account` has
+/// none, because inventing a username/password would be worse than failing.
+#[derive(Debug, Clone)]
+pub struct Settings {
+    /// IANA zone, e.g. `Europe/Kyiv`.
+    pub timezone: String,
+    /// XKB layout code, e.g. `us` or `ua`.
+    pub keyboard_layout: String,
+    /// `locale-gen` names, e.g. `uk_UA.UTF-8`. The first one becomes the system `LANG`.
+    pub locales: Vec<String>,
+    pub hostname: String,
+    pub account: Option<Account>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            timezone: "UTC".to_string(),
+            keyboard_layout: "us".to_string(),
+            locales: vec![crate::locale::DEFAULT_LOCALE.to_string()],
+            hostname: "gentoo".to_string(),
+            account: None,
+        }
+    }
+}
+
 /// State phases hand off to each other. Not every field is populated at every point in
 /// the run — `Partition` sets `parts` once it exists, `Deploy` sets `kernel_pkg` once
 /// hardware/kernel matching resolves, etc. Phases that need a value another phase should
@@ -108,6 +141,7 @@ pub struct Ctx {
     pub kernel_base_name: String,
     pub profile: Option<hardware::Profile>,
     pub kernel_pkg: Option<kernel::KernelPackage>,
+    pub settings: Settings,
 }
 
 impl Ctx {
@@ -127,7 +161,13 @@ impl Ctx {
             kernel_base_name,
             profile: None,
             kernel_pkg: None,
+            settings: Settings::default(),
         }
+    }
+
+    pub fn with_settings(mut self, settings: Settings) -> Self {
+        self.settings = settings;
+        self
     }
 
     pub fn target_str(&self) -> crate::Result<&str> {
@@ -139,15 +179,12 @@ impl Ctx {
 
 /// The phase list in order — what `installer-cli`/`installer-gtk` drive.
 ///
-/// Only 9 of the 13 `PhaseId::ORDER` phases are implemented here: `Locale`, `Users`,
-/// `Initramfs`, and `PostHooks` are genuinely new work (keymap/timezone application,
-/// useradd/passwd, dracut invocation, machine-id/eix seeding) that nothing in this
-/// codebase does yet, unlike the other 9 which all reuse existing, live-verified logic
-/// (hardware/kernel matching, partitioning, stage3, store config, Limine). Left out
-/// entirely rather than stubbed with a fake no-op `run()`, since a phase that silently
-/// "succeeds" without doing anything is exactly the kind of invisible debt §0 warns
-/// against — `PhaseId` still has all 13 variants so the journal format doesn't need to
-/// change shape when they're added for real.
+/// 11 of the 13 `PhaseId::ORDER` phases are implemented. `Initramfs` and `PostHooks`
+/// (dracut, machine-id/eix seeding, and installing the escalation tool `Users` only
+/// configures) are still missing. They are left out entirely rather than stubbed with a
+/// fake no-op `run()`, since a phase that silently "succeeds" without doing anything is
+/// exactly the kind of invisible debt §0 warns against — `PhaseId` keeps all 13 variants
+/// so the journal format doesn't change shape when they're added for real.
 pub fn all_phases() -> Vec<Box<dyn Phase>> {
     vec![
         Box::new(PreflightPhase),
@@ -156,6 +193,8 @@ pub fn all_phases() -> Vec<Box<dyn Phase>> {
         Box::new(MountPhase),
         Box::new(DeployPhase),
         Box::new(FstabPhase),
+        Box::new(LocalePhase),
+        Box::new(UsersPhase),
         Box::new(PortageConfigPhase),
         Box::new(BootloaderPhase),
         Box::new(FinalizePhase),
@@ -221,5 +260,171 @@ mod tests {
         assert!(dir.join("etc/fstab").exists());
 
         tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+
+    fn settings_for_tests() -> Settings {
+        Settings {
+            timezone: "Europe/Kyiv".into(),
+            keyboard_layout: "ua".into(),
+            locales: vec!["uk_UA.UTF-8".into(), "en_US.UTF-8".into()],
+            hostname: "solomiya-pc".into(),
+            account: Some(Account { username: "solomiya".into(), password: "hunter2".into() }),
+        }
+    }
+
+    fn ctx_with(dir: &std::path::Path, runner: Arc<dyn CommandRunner>, settings: Settings) -> Ctx {
+        let layout = partition_mod::plan("/dev/sda", crate::partition::RootFs::Btrfs, 16 * 1024 * 1024 * 1024);
+        let store = store::StoreConfig {
+            binhost_url: "https://example.invalid".into(),
+            overlay_git_url: "https://example.invalid/overlay.git".into(),
+            overlay_name: "test".into(),
+        };
+        Ctx::new(runner, dir.to_path_buf(), layout, store, "test-kernel".into()).with_settings(settings)
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-phase-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn locale_phase_applies_every_setting_and_only_then_reports_satisfied() {
+        let dir = temp_dir("locale");
+        let fake = Arc::new(FakeCommandRunner::new());
+        let mut ctx = ctx_with(&dir, fake.clone(), settings_for_tests());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        assert!(!LocalePhase.is_satisfied(&ctx).await.unwrap());
+        LocalePhase.run(&mut ctx, &tx).await.unwrap();
+        assert!(LocalePhase.is_satisfied(&ctx).await.unwrap());
+
+        assert_eq!(std::fs::read_to_string(dir.join("etc/timezone")).unwrap(), "Europe/Kyiv\n");
+        assert_eq!(std::fs::read_to_string(dir.join("etc/conf.d/keymaps")).unwrap(), "keymap=\"ua\"\n");
+        assert_eq!(std::fs::read_to_string(dir.join("etc/conf.d/hostname")).unwrap(), "hostname=\"solomiya-pc\"\n");
+        assert_eq!(std::fs::read_to_string(dir.join("etc/env.d/02locale")).unwrap(), "LANG=\"uk_UA.UTF-8\"\n");
+        assert!(std::fs::read_to_string(dir.join("etc/locale.gen")).unwrap().contains("uk_UA.UTF-8 UTF-8"));
+
+        let target = dir.to_str().unwrap();
+        fake.assert_call(0, "chroot", &[target, "locale-gen"]);
+        fake.assert_call(1, "chroot", &[target, "env-update"]);
+
+        drop(tx);
+        let mut events = Vec::new();
+        while let Some(e) = rx.recv().await {
+            events.push(e);
+        }
+        assert!(events.iter().any(|e| matches!(e, crate::event::Event::PhaseStarted { id: PhaseId::Locale, .. })));
+        assert!(events.iter().any(|e| matches!(e, crate::event::Event::PhaseFinished { id: PhaseId::Locale, .. })));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn stage3_defaults_do_not_count_as_a_finished_locale_phase() {
+        // A real stage3 already has these files, with its own values.
+        let dir = temp_dir("stage3defaults");
+        std::fs::create_dir_all(dir.join("etc/conf.d")).unwrap();
+        std::fs::write(dir.join("etc/timezone"), "UTC\n").unwrap();
+        std::fs::write(dir.join("etc/conf.d/keymaps"), "keymap=\"us\"\n").unwrap();
+        std::fs::write(dir.join("etc/conf.d/hostname"), "hostname=\"localhost\"\n").unwrap();
+
+        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        assert!(!LocalePhase.is_satisfied(&ctx).await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn locale_phase_with_a_failing_locale_gen_stays_unsatisfied_so_resume_retries_it() {
+        let dir = temp_dir("localefail");
+        let fake = Arc::new(FakeCommandRunner::new());
+        fake.fail("chroot", "locale-gen: not found");
+        let mut ctx = ctx_with(&dir, fake, settings_for_tests());
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        assert!(LocalePhase.run(&mut ctx, &tx).await.is_err());
+        assert!(!LocalePhase.is_satisfied(&ctx).await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn users_phase_creates_the_account_and_the_doas_rule_and_warns_that_doas_is_missing() {
+        let dir = temp_dir("users");
+        let fake = Arc::new(FakeCommandRunner::new());
+        fake.respond("openssl", "$6$salt$hash\n");
+        let mut ctx = ctx_with(&dir, fake.clone(), settings_for_tests());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        assert!(!UsersPhase.is_satisfied(&ctx).await.unwrap());
+        UsersPhase.run(&mut ctx, &tx).await.unwrap();
+
+        fake.assert_call(0, "openssl", &["passwd", "-6", "--", "hunter2"]);
+        assert_eq!(fake.calls()[1].0, "useradd");
+        assert_eq!(std::fs::read_to_string(dir.join("etc/doas.conf")).unwrap(), "permit persist :wheel\n");
+
+        drop(tx);
+        let mut warned = false;
+        while let Some(e) = rx.recv().await {
+            if let crate::event::Event::Log { line, level: crate::event::Level::Warn } = &e {
+                warned |= line.contains("doas");
+                // The password must never reach the event stream.
+                assert!(!line.contains("hunter2"));
+            }
+        }
+        assert!(warned, "the user must be told doas is configured but not installed");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn users_phase_is_idempotent_when_the_user_already_exists() {
+        let dir = temp_dir("usersidem");
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/passwd"), "root:x:0:0::/root:/bin/bash\nsolomiya:x:1000:1000::/home/solomiya:/bin/bash\n").unwrap();
+        let fake = Arc::new(FakeCommandRunner::new());
+        let mut ctx = ctx_with(&dir, fake.clone(), settings_for_tests());
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        UsersPhase.run(&mut ctx, &tx).await.unwrap();
+
+        assert!(fake.calls().is_empty(), "useradd would fail on an existing user: {:?}", fake.calls());
+        assert!(dir.join("etc/doas.conf").is_file());
+        assert!(UsersPhase.is_satisfied(&ctx).await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_user_whose_name_merely_starts_like_an_existing_one_is_not_mistaken_for_it() {
+        let dir = temp_dir("usersprefix");
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/passwd"), "solomiya2:x:1000:1000::/home/solomiya2:/bin/bash\n").unwrap();
+        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        std::fs::write(dir.join("etc/doas.conf"), "x").unwrap();
+
+        assert!(!UsersPhase.is_satisfied(&ctx).await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn users_phase_without_an_account_fails_loudly_instead_of_succeeding_empty() {
+        let dir = temp_dir("usersnone");
+        let mut settings = settings_for_tests();
+        settings.account = None;
+        let mut ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        assert!(!UsersPhase.is_satisfied(&ctx).await.unwrap());
+        let err = UsersPhase.run(&mut ctx, &tx).await.unwrap_err();
+        assert!(err.to_string().contains("no user account"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn all_phases_come_in_the_fixed_install_order_and_include_the_new_ones() {
+        let ids: Vec<PhaseId> = all_phases().iter().map(|p| p.id()).collect();
+        let positions: Vec<usize> =
+            ids.iter().map(|id| PhaseId::ORDER.iter().position(|o| o == id).expect("id in ORDER")).collect();
+        assert!(positions.windows(2).all(|w| w[0] < w[1]), "phases out of install order: {ids:?}");
+        assert!(ids.contains(&PhaseId::Locale) && ids.contains(&PhaseId::Users));
+        assert_eq!(ids.len(), 11);
     }
 }
