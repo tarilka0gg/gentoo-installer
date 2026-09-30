@@ -86,6 +86,12 @@ async fn git_init_and_commit(runner: &dyn CommandRunner, target: &std::path::Pat
         .run_status(
             "git",
             &[
+                // The live system has no git identity, and `git commit` refuses without one
+                // ("Author identity unknown") — found by running the real phases in a VM.
+                "-c",
+                "user.name=Gentoo installer",
+                "-c",
+                "user.email=installer@localhost",
                 "-C",
                 dir_str,
                 "commit",

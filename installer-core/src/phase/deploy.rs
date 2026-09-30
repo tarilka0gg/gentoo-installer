@@ -27,8 +27,17 @@ impl Phase for DeployPhase {
         "Installing the base system"
     }
 
+    /// Deploy is stage3 + store overlay + kernel, in that order. `etc/portage` only proves the
+    /// first step: a run that failed after unpacking the stage3 (say, the kernel download)
+    /// would otherwise be skipped on resume and leave a system with no kernel. So all three
+    /// results have to be there.
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
-        Ok(ctx.target.join("etc/portage").is_dir())
+        let stage = ctx.target.join("etc/portage").is_dir();
+        let overlay = ctx.target.join("var/db/repos").join(&ctx.store.overlay_name).is_dir();
+        let kernel = std::fs::read_dir(ctx.target.join("boot"))
+            .map(|d| d.filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().starts_with("vmlinuz-")))
+            .unwrap_or(false);
+        Ok(stage && overlay && kernel)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {

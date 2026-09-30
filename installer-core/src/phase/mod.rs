@@ -204,6 +204,34 @@ pub fn all_phases() -> Vec<Box<dyn Phase>> {
     ]
 }
 
+/// Runs every phase of [`all_phases`] in order on `ctx`. A phase whose [`Phase::is_satisfied`]
+/// is true is skipped (that is what makes re-running after a crash safe); the first failure
+/// sends [`Event::Failed`] and is returned, nothing after it runs. Sends [`Event::Complete`]
+/// when all phases are done.
+pub async fn run_all(ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
+    use crate::event::{Event, Level};
+    for phase in all_phases() {
+        let id = phase.id();
+        match phase.is_satisfied(ctx).await {
+            Ok(true) => {
+                let _ = tx.send(Event::Log { line: format!("{}: already done, skipping", phase.label()), level: Level::Info });
+                continue;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                let _ = tx.send(Event::Failed { id, error: e.to_string() });
+                return Err(e);
+            }
+        }
+        if let Err(e) = phase.run(ctx, tx).await {
+            let _ = tx.send(Event::Failed { id, error: e.to_string() });
+            return Err(e);
+        }
+    }
+    let _ = tx.send(Event::Complete);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +302,66 @@ mod tests {
             account: Some(Account { username: "solomiya".into(), password: "hunter2".into() }),
             stage3: None,
         }
+    }
+
+    #[tokio::test]
+    async fn run_all_stops_at_the_first_failure_and_reports_it() {
+        use crate::event::Event;
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-run-all-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        let fake = FakeCommandRunner::new();
+        fake.fail("parted", "disk vanished");
+        fake.fail("sgdisk", "disk vanished");
+        fake.fail("mkfs.vfat", "disk vanished");
+        let mut ctx = ctx_with(&dir, Arc::new(fake), settings_for_tests());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let result = run_all(&mut ctx, &tx).await;
+        drop(tx);
+        let mut events = Vec::new();
+        while let Some(e) = rx.recv().await {
+            events.push(e);
+        }
+
+        assert!(result.is_err(), "a failing phase must fail the run");
+        assert_eq!(events.iter().filter(|e| matches!(e, Event::Failed { .. })).count(), 1);
+        assert!(!events.iter().any(|e| matches!(e, Event::Complete)), "no Complete after a failure");
+        // Nothing starts after the failure.
+        let failed_at = events.iter().position(|e| matches!(e, Event::Failed { .. })).unwrap();
+        assert!(!events[failed_at..].iter().any(|e| matches!(e, Event::PhaseStarted { .. })));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn deploy_is_only_satisfied_once_stage_overlay_and_kernel_are_all_there() {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-deploy-sat-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("etc/portage")).unwrap();
+        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        let phase = DeployPhase;
+
+        assert!(!phase.is_satisfied(&ctx).await.unwrap(), "a bare stage3 is not a finished deploy");
+        std::fs::create_dir_all(dir.join("var/db/repos").join(&ctx.store.overlay_name)).unwrap();
+        assert!(!phase.is_satisfied(&ctx).await.unwrap(), "no kernel yet");
+        std::fs::create_dir_all(dir.join("boot")).unwrap();
+        std::fs::write(dir.join("boot/vmlinuz-generic"), "").unwrap();
+        assert!(phase.is_satisfied(&ctx).await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn the_stage3s_own_fstab_does_not_count_as_a_written_one() {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-fstab-sat-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        // What a real stage3 ships: only comments.
+        std::fs::write(dir.join("etc/fstab"), "# /etc/fstab: static file system information.\n# <fs> <mountpoint> <type>\n").unwrap();
+        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        assert!(!FstabPhase.is_satisfied(&ctx).await.unwrap());
+
+        std::fs::write(dir.join("etc/fstab"), format!("{}\n\nUUID=x / ext4 defaults 0 1\n", crate::fstab::GENERATED_MARKER)).unwrap();
+        assert!(FstabPhase.is_satisfied(&ctx).await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn ctx_with(dir: &std::path::Path, runner: Arc<dyn CommandRunner>, settings: Settings) -> Ctx {
