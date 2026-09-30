@@ -1,0 +1,79 @@
+#!/bin/bash
+# assemble-iso.sh <work-dir> <out.iso>
+# work-dir has: live-root/ (prepared rootfs incl. /boot/initramfs-live.img), vmlinuz-live,
+# builder/ (a chroot that has mksquashfs + xorriso). Run as root.
+# The squashfs/xorriso steps run inside the builder chroot; mounts live in a private
+# namespace, so nothing outlives the script.
+set -euo pipefail
+W=$(readlink -f "${1:?work dir}"); OUT=$(readlink -f "${2:?out.iso}")
+LABEL=GENTOO_LIVE
+ISO=$W/isoroot
+rm -rf "$ISO"; mkdir -p "$ISO"/{boot/limine,LiveOS,EFI/BOOT}
+
+cp "$W/vmlinuz-live" "$ISO/boot/vmlinuz"
+cp "$W/live-root/boot/initramfs-live.img" "$ISO/boot/initramfs.img"
+chmod 644 "$ISO/boot/"*
+cp /usr/share/limine/limine-bios-cd.bin /usr/share/limine/limine-bios.sys "$ISO/boot/limine/"
+cp /usr/share/limine/BOOTX64.EFI "$ISO/EFI/BOOT/"
+
+cat > "$ISO/limine.conf" <<CONF
+timeout: 3
+serial: yes
+
+/Gentoo installer (live)
+    protocol: linux
+    kernel_path: boot():/boot/vmlinuz
+    module_path: boot():/boot/initramfs.img
+    cmdline: root=live:CDLABEL=$LABEL rd.live.image rd.live.overlay.overlayfs=1 rd.live.dir=LiveOS rd.live.squashimg=squashfs.img console=tty0 console=ttyS0,115200 quiet
+CONF
+cp "$ISO/limine.conf" "$ISO/boot/limine/limine.conf"
+
+# UEFI: El Torito boots a small FAT image holding Limine; it finds boot() there, so the
+# kernel and initramfs are copied in too (~30 MB — cheaper than a second config dialect).
+EFI=$W/efiboot.img
+rm -f "$EFI"; truncate -s 96M "$EFI"; mkfs.vfat -F 32 -n EFIBOOT "$EFI" >/dev/null
+mmd -i "$EFI" ::/EFI ::/EFI/BOOT ::/boot
+mcopy -i "$EFI" "$ISO/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i "$EFI" "$ISO/limine.conf" ::/limine.conf
+mcopy -i "$EFI" "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" ::/boot/
+cp "$EFI" "$ISO/boot/efiboot.img"
+
+# Build-time-only weight: the Portage tree, compilers' data, headers and docs. The live
+# system never compiles anything (the installer chroots into the *target*).
+cat > "$W/squashfs-excludes.txt" <<EXCL
+var/db/repos/gentoo
+var/tmp/portage
+var/cache/distfiles
+var/cache/binpkgs
+usr/lib/llvm
+usr/include
+usr/share/man
+usr/share/doc
+usr/share/info
+usr/share/gtk-doc
+usr/lib/python3.14/test
+EXCL
+
+# squashfs + xorriso inside the builder chroot
+cat > "$W/inner.sh" <<INNER
+set -e
+mksquashfs /mnt/live-root /mnt/work/isoroot/LiveOS/squashfs.img -comp zstd -Xcompression-level 12 -b 256K -noappend -no-progress -ef /mnt/work/squashfs-excludes.txt
+xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid $LABEL -R -J \
+  -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
+  --efi-boot boot/efiboot.img -efi-boot-part --efi-boot-image --protective-msdos-label \
+  -o /mnt/work/out.iso /mnt/work/isoroot
+INNER
+cat > "$W/outer.sh" <<OUTER
+set -e
+B=$W/builder
+mkdir -p \$B/mnt/live-root \$B/mnt/work
+mount --bind /proc \$B/proc; mount --rbind /dev \$B/dev
+mount --bind $W/live-root \$B/mnt/live-root
+mount --bind $W \$B/mnt/work
+chroot \$B nice -n 10 bash /mnt/work/inner.sh
+OUTER
+unshare --mount --propagation private bash "$W/outer.sh"
+
+limine bios-install "$W/out.iso" >/dev/null
+mv "$W/out.iso" "$OUT"
+ls -lh "$OUT"
