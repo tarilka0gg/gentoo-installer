@@ -139,6 +139,11 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
 
     let _ = tx.send(Progress::CreatingAccount);
     account::create(runner, &opts.target, &opts.account).await?;
+    // Root stays locked, so without this the user in `wheel` could never administer the
+    // installed system (a stage3 ships neither doas nor sudo). Part of the same step:
+    // no new `Progress` variant, so the frontends' exhaustive matches are unaffected.
+    account::configure_privilege(&opts.target).await?;
+    account::install_doas(runner, &opts.target).await?;
 
     let _ = tx.send(Progress::InstallingDesktop);
     wm::install(runner, &opts.target, opts.wm, &opts.wm_configs_git_url, &opts.account.username).await?;

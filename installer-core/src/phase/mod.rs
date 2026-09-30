@@ -348,8 +348,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn users_phase_creates_the_account_and_the_doas_rule_and_warns_that_doas_is_missing() {
+    async fn users_phase_creates_the_account_writes_the_doas_rule_and_installs_doas() {
         let dir = temp_dir("users");
+        std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap(); // tree "already synced"
+        std::fs::write(dir.join("etc/resolv.conf"), "").ok();
         let fake = Arc::new(FakeCommandRunner::new());
         fake.respond("openssl", "$6$salt$hash\n");
         let mut ctx = ctx_with(&dir, fake.clone(), settings_for_tests());
@@ -360,18 +362,37 @@ mod tests {
 
         fake.assert_call(0, "openssl", &["passwd", "-6", "--", "hunter2"]);
         assert_eq!(fake.calls()[1].0, "useradd");
-        assert_eq!(std::fs::read_to_string(dir.join("etc/doas.conf")).unwrap(), "permit persist :wheel\n");
+        assert_eq!(std::fs::read_to_string(dir.join("etc/doas.conf")).unwrap(), "permit :wheel\n");
+        assert!(
+            fake.calls().iter().any(|(c, a)| c == "chroot" && a.ends_with(&["emerge".into(), "--noreplace".into(), "app-admin/doas".into()])),
+            "doas must be emerged in the target: {:?}",
+            fake.calls()
+        );
 
         drop(tx);
-        let mut warned = false;
         while let Some(e) = rx.recv().await {
-            if let crate::event::Event::Log { line, level: crate::event::Level::Warn } = &e {
-                warned |= line.contains("doas");
-                // The password must never reach the event stream.
+            // The password must never reach the event stream.
+            if let crate::event::Event::Log { line, .. } = &e {
                 assert!(!line.contains("hunter2"));
             }
         }
-        assert!(warned, "the user must be told doas is configured but not installed");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn users_phase_is_not_satisfied_until_the_doas_binary_is_actually_there() {
+        let dir = temp_dir("usersnobin");
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/passwd"), "solomiya:x:1000:1000::/home/solomiya:/bin/bash\n").unwrap();
+        std::fs::write(dir.join("etc/doas.conf"), "permit :wheel\n").unwrap();
+        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+
+        // A rule for a program that was never installed is exactly the bug being fixed.
+        assert!(!UsersPhase.is_satisfied(&ctx).await.unwrap());
+
+        std::fs::create_dir_all(dir.join("usr/bin")).unwrap();
+        std::fs::write(dir.join("usr/bin/doas"), "").unwrap();
+        assert!(UsersPhase.is_satisfied(&ctx).await.unwrap());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -379,6 +400,7 @@ mod tests {
     async fn users_phase_is_idempotent_when_the_user_already_exists() {
         let dir = temp_dir("usersidem");
         std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
         std::fs::write(dir.join("etc/passwd"), "root:x:0:0::/root:/bin/bash\nsolomiya:x:1000:1000::/home/solomiya:/bin/bash\n").unwrap();
         let fake = Arc::new(FakeCommandRunner::new());
         let mut ctx = ctx_with(&dir, fake.clone(), settings_for_tests());
@@ -386,9 +408,11 @@ mod tests {
 
         UsersPhase.run(&mut ctx, &tx).await.unwrap();
 
-        assert!(fake.calls().is_empty(), "useradd would fail on an existing user: {:?}", fake.calls());
+        // `useradd`/`openssl` would fail or waste work on an existing user...
+        assert!(fake.calls().iter().all(|(c, _)| c != "useradd" && c != "openssl"), "{:?}", fake.calls());
+        // ...but the rule and the package are still (re)applied.
         assert!(dir.join("etc/doas.conf").is_file());
-        assert!(UsersPhase.is_satisfied(&ctx).await.unwrap());
+        assert!(fake.calls().iter().any(|(c, a)| c == "chroot" && a.contains(&"app-admin/doas".to_string())));
         std::fs::remove_dir_all(&dir).ok();
     }
 

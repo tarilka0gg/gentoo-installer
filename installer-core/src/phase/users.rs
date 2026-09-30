@@ -1,4 +1,5 @@
-//! Users (spec §3, phase 8): the first account, and the `doas` rule that lets it be root.
+//! Users (spec §3, phase 8): the first account, plus `doas` so that account can become root
+//! (root itself stays locked).
 
 use super::{Ctx, Phase, PhaseId};
 use crate::account;
@@ -26,7 +27,7 @@ impl Phase for UsersPhase {
     /// user is unusable (root stays locked), so `run` fails loudly on it instead.
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
         let Some(acct) = &ctx.settings.account else { return Ok(false) };
-        Ok(user_exists(ctx, &acct.username) && ctx.target.join("etc/doas.conf").is_file())
+        Ok(user_exists(ctx, &acct.username) && ctx.target.join("etc/doas.conf").is_file() && ctx.target.join("usr/bin/doas").exists())
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
@@ -43,10 +44,11 @@ impl Phase for UsersPhase {
             account::create(ctx.runner.as_ref(), &ctx.target, &acct).await?;
         }
         account::configure_privilege(&ctx.target).await?;
+        account::install_doas(ctx.runner.as_ref(), &ctx.target).await?;
 
         let _ = tx.send(Event::Log {
-            line: "doas is configured for the wheel group but not installed yet: until app-admin/doas is emerged in the target, this account cannot become root".to_string(),
-            level: Level::Warn,
+            line: format!("{} can run commands as root with doas (wheel group); the root account stays locked", acct.username),
+            level: Level::Info,
         });
         let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
         Ok(())

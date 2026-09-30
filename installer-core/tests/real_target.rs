@@ -32,7 +32,11 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(tag: &str) -> Self {
-        let src = PathBuf::from(std::env::var("GENTOO_INSTALLER_STAGE3").expect("set GENTOO_INSTALLER_STAGE3 to an unpacked stage3"));
+        Self::from_env("GENTOO_INSTALLER_STAGE3", tag)
+    }
+
+    fn from_env(var: &str, tag: &str) -> Self {
+        let src = PathBuf::from(std::env::var(var).unwrap_or_else(|_| panic!("set {var} to an unpacked stage3")));
         let dst = src.with_file_name(format!("work-{tag}-{}", std::process::id()));
         std::fs::remove_dir_all(&dst).ok(); // a stale copy from this very pid: never mounted, we own the name
         let status = std::process::Command::new("cp").args(["-a", "--reflink=always"]).arg(&src).arg(&dst).status().unwrap();
@@ -130,4 +134,91 @@ async fn account_is_really_created_in_wheel_with_a_working_hash_and_root_stays_l
 
     // Root is still locked, as designed.
     assert_eq!(in_target(&target, "getent shadow root | cut -d: -f2").await.trim(), "*");
+}
+
+const PTY_DOAS: &str = include_str!("pty_doas.py");
+
+/// Bind-mounts /proc, /sys, /dev into the copy so a pty (and python) work inside it.
+/// `Scratch`'s drop guard unmounts them again even if the test panics.
+fn mount_dev(target: &std::path::Path) {
+    for d in ["proc", "sys", "dev"] {
+        let dir = target.join(d);
+        std::fs::create_dir_all(&dir).unwrap();
+        for args in [vec!["--rbind", &format!("/{d}"), dir.to_str().unwrap()], vec!["--make-rslave", dir.to_str().unwrap()]] {
+            assert!(std::process::Command::new("mount").args(&args).status().unwrap().success(), "mount {args:?}");
+        }
+    }
+}
+
+fn umount_dev(target: &std::path::Path) {
+    for d in ["dev", "sys", "proc"] {
+        std::process::Command::new("umount").arg("-R").arg(target.join(d)).status().ok();
+    }
+}
+
+/// Runs `doas -u root id -un` as `user` on a pty inside the target, returns the script's report.
+async fn try_doas(target: &std::path::Path, user: &str, password: &str) -> String {
+    std::fs::write(target.join("root/pty_doas.py"), PTY_DOAS).unwrap();
+    mount_dev(target);
+    let out = RealCommandRunner
+        .run("chroot", &[target.to_str().unwrap(), "python3", "/root/pty_doas.py", user, password])
+        .await;
+    umount_dev(target);
+    out.unwrap_or_else(|e| panic!("pty script failed: {e}"))
+}
+
+/// The whole point of `Users`: root is locked, so the account is only useful if doas is
+/// really installed and the wheel rule really works. Needs network (source tarball) and a
+/// stage3 with a SYNCED Portage tree and no doas (GENTOO_INSTALLER_STAGE3_SYNCED).
+#[tokio::test]
+#[ignore = "needs root, network and GENTOO_INSTALLER_STAGE3_SYNCED"]
+async fn wheel_user_really_becomes_root_through_the_installed_doas() {
+    let scratch = Scratch::from_env("GENTOO_INSTALLER_STAGE3_SYNCED", "doas");
+    let target = scratch.path().to_path_buf();
+    assert!(!target.join("usr/bin/doas").exists(), "the starting stage3 must not already have doas");
+
+    let acct = Account { username: "solomiya".into(), password: "correct horse".into() };
+    account::create(&RealCommandRunner, &target, &acct).await.unwrap();
+    account::configure_privilege(&target).await.unwrap();
+    account::install_doas(&RealCommandRunner, &target).await.unwrap();
+    assert!(!scratch.still_mounted(), "install_doas must unmount what it mounted");
+
+    // setuid root, with its PAM service file
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(target.join("usr/bin/doas")).unwrap().permissions().mode();
+    assert!(mode & 0o4000 != 0, "doas must be setuid, mode {mode:o}");
+    assert!(target.join("etc/pam.d/doas").is_file());
+
+    let ok = try_doas(&target, "solomiya", "correct horse").await;
+    assert!(ok.contains("RAN_AS_ROOT=yes"), "wheel user could not become root: {ok}");
+    assert!(ok.contains("PROMPTS=1"), "expected exactly one password prompt: {ok}");
+
+    // A wrong password must NOT work (guards against a config that lets everyone in).
+    let bad = try_doas(&target, "solomiya", "wrong password").await;
+    assert!(bad.contains("RAN_AS_ROOT=no"), "wrong password got root: {bad}");
+
+    // Root itself is still locked.
+    assert_eq!(in_target(&target, "getent shadow root | cut -d: -f2").await.trim(), "*");
+}
+
+/// A user who is NOT in wheel must not get root even with the right password.
+#[tokio::test]
+#[ignore = "needs root, network and GENTOO_INSTALLER_STAGE3_SYNCED"]
+async fn a_user_outside_wheel_does_not_get_root() {
+    let scratch = Scratch::from_env("GENTOO_INSTALLER_STAGE3_SYNCED", "nowheel");
+    let target = scratch.path().to_path_buf();
+
+    account::create(&RealCommandRunner, &target, &Account { username: "solomiya".into(), password: "pw one".into() }).await.unwrap();
+    account::configure_privilege(&target).await.unwrap();
+    account::install_doas(&RealCommandRunner, &target).await.unwrap();
+
+    // Second account created by hand, deliberately without -G wheel.
+    let hash = RealCommandRunner.run("openssl", &["passwd", "-6", "--", "pw two"]).await.unwrap();
+    RealCommandRunner
+        .run_status("useradd", &["-R", target.to_str().unwrap(), "-m", "-p", hash.trim(), "guest"])
+        .await
+        .unwrap();
+
+    let out = try_doas(&target, "guest", "pw two").await;
+    assert!(out.contains("RAN_AS_ROOT=no"), "a non-wheel user got root: {out}");
 }

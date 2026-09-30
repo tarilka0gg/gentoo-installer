@@ -118,8 +118,8 @@ interaction model). Rewriting it is deliberately the last step, not skipped.
 
 ## Status
 
-Workspace builds and passes clippy clean across all three crates, 77 unit/
-integration tests passing, including a `Partition→Format→Mount→Fstab`
+Workspace builds and passes clippy clean across all three crates, 82 unit/
+integration tests passing (plus 5 real-stage3 tests, run separately), including a `Partition→Format→Mount→Fstab`
 end-to-end run against `FakeCommandRunner` with no root and no real disk.
 Hardware detection was live-verified on this machine (Victus 16, i7-14650HX +
 RTX 4070): `Profile::detect()` produces `intel-raptorlake-nvidia-laptop`, an
@@ -171,39 +171,54 @@ externally.
 
 ### Known gaps found while adding `Locale`/`Users`
 
-- **The installed system has no way to become root.** Root is deliberately left
-  locked and the first user goes in `wheel`, but nothing in the repo installs
-  `sudo` or `doas`. `UsersPhase` now writes `/etc/doas.conf` (`permit persist
-  :wheel`) and warns at runtime, but `app-admin/doas` still has to be emerged in
-  the target; until it is, the account cannot administer the machine.
-- **`installer-cli`/`installer-gui` do not get any of this yet.** They drive the
-  legacy `install.rs`, which still sets only keyboard, time zone and the account —
-  no hostname, no `locale-gen`, no `doas.conf`. The new phases (and
-  `Settings`, the struct that carries these choices) only take effect once a
-  frontend drives the phase system.
+- ~~**The installed system had no way to become root.**~~ **Fixed and verified on a
+  real stage3.** Root is deliberately left locked (`*` in `/etc/shadow`) and the first
+  user goes in `wheel`, but a stage3 ships neither `sudo` nor `doas`, so the account
+  could never administer the machine. `account::configure_privilege` now writes
+  `/etc/doas.conf` (`permit :wheel`) and `account::install_doas` emerges
+  `app-admin/doas`; both `UsersPhase` and the legacy `install.rs` (what the frontends
+  drive) call them. A real-target test has a `wheel` user enter their password on a
+  pty and get a root shell, and checks that a wrong password, and a user outside
+  `wheel`, do not. The rule has no `persist` on purpose: Gentoo builds `doas` with
+  `-persist` by default, where the keyword is accepted and silently ignored, and even
+  with `USE=persist` the password was still asked on every call in the chroot test.
+- **`installer-cli`/`installer-gui` still don't get the rest.** They drive the legacy
+  `install.rs`, which sets keyboard, time zone, the account and now `doas`, but still
+  no hostname and no `locale-gen`: `InstallOptions` has no fields for them, so wiring
+  them needs the two frontends to ask the user first. The new phases (and `Settings`,
+  the struct that carries these choices) only take effect once a frontend drives the
+  phase system.
 - **`locale-gen` needs `/proc`.** Found by running the step against a real stage3
   (it compiles the locales, then aborts on `findmnt: can't read /proc/mounts`,
   leaving `locale -a` at `C, C.utf8, POSIX`); no `FakeCommandRunner` test could have
   seen it. `locale::apply` now bind-mounts `/proc`, `/sys`, `/dev` around it and always
-  unmounts. Fixed and re-verified on the real stage3 below.
+  unmounts.
+- **`useradd -p <hash>` skips the password-quality check** (`pam_passwdqc`) that
+  `chpasswd` enforces, so the installer accepts passwords the installed system would
+  refuse to set. Unchanged; noted because a weak password on an account that can
+  `doas` to root matters more than it used to.
 
 ### Testing against a real stage3
 
 `installer-core/tests/real_target.rs` runs the `Locale`/`Users` steps with the real
 command runner against an unpacked stage3 and asks the *target's own tools* what came
-out (`locale -a`, `id -nG`, `getent shadow`, a password-vs-hash check). They are
-`#[ignore]`d — they need root and a stage3 on btrfs/xfs (each test works on a
-`cp --reflink` copy):
+out (`locale -a`, `id -nG`, `getent shadow`, a password-vs-hash check, and a `doas`
+login on a pty). Five tests, `#[ignore]`d — they need root, network for the `doas`
+ones, and stage3 trees on btrfs/xfs (each test works on a `cp --reflink` copy):
 
 ```bash
-tar xpf stage3-amd64-openrc-*.tar.xz --xattrs-include='*.*' --numeric-owner -C /path/to/pristine
-cargo test -p installer-core --test real_target --no-run          # as your user
-sudo GENTOO_INSTALLER_STAGE3=/path/to/pristine \
+# 1. a pristine stage3, and a second copy with the Portage tree synced (no doas in either)
+tar xpf stage3-amd64-openrc-*.tar.xz --xattrs-include='*.*' --numeric-owner -C /path/pristine
+cp -a --reflink=always /path/pristine /path/pristine-synced      # then run emerge-webrsync
+                                                                   # in it, in an unshare'd chroot
+# 2. build as your user, run as root
+cargo test -p installer-core --test real_target --no-run
+sudo GENTOO_INSTALLER_STAGE3=/path/pristine GENTOO_INSTALLER_STAGE3_SYNCED=/path/pristine-synced \
      unshare --mount --propagation private \
      target/debug/deps/real_target-<hash> --ignored --test-threads=1
 ```
 
-`unshare` keeps the bind mounts these steps make out of the host's mount table even if
+About 40 s in total. `unshare` keeps the bind mounts these steps make out of the host's mount table even if
 a test dies half-way, and each copy is deleted by a guard that **refuses to delete while
 anything is still mounted under it** (`remove_dir_all` does not stop at mount points and
 would otherwise recurse into the host's real `/dev`).

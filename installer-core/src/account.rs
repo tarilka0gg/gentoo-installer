@@ -2,6 +2,7 @@
 //! shadow-utils) rather than a chroot — plain root-relative operation, no bind mounts
 //! needed. Root itself stays locked; this user gets `wheel`.
 
+use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs};
 use crate::command::CommandRunner;
 use std::path::Path;
 
@@ -73,17 +74,21 @@ pub async fn create(runner: &dyn CommandRunner, target: &Path, account: &Account
 }
 
 /// `wheel` members may run anything as root through `doas`, asking for their own
-/// password once per session (`persist`).
-pub const DOAS_CONF: &str = "permit persist :wheel\n";
+/// password each time.
+///
+/// Deliberately no `persist`: Gentoo builds `app-admin/doas` with `-persist` by default
+/// (checked: `USE="pam -persist"`), where the keyword is accepted and silently does
+/// nothing, and even with `USE=persist` the password was asked on every call in a
+/// chroot test (no `/run/doas` for the timestamps). A rule that promises "once per
+/// session" and delivers "every time" is worse than one that says what it does.
+pub const DOAS_CONF: &str = "permit :wheel\n";
 
 /// Writes `/etc/doas.conf` so the `wheel` group [`create`] puts the user in actually
-/// means something.
+/// means something. Pair with [`install_doas`], which puts the binary there.
 ///
-/// Root stays locked (no password is ever set for it), so without an escalation tool
-/// the installed system has a user that can never become root. **This only writes the
-/// config**: `app-admin/doas` still has to be installed in the target, and nothing in
-/// the phase pipeline does that yet (see the README's "Not yet done"). `doas` refuses a
-/// config that other users can write, hence `0400`.
+/// Root stays locked (`*` in `/etc/shadow`; a stage3 ships neither `doas` nor `sudo`),
+/// so without an escalation tool the installed system has a user that can never become
+/// root. `doas` refuses to trust a config other users can write, hence `0400`.
 pub async fn configure_privilege(target: &Path) -> crate::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -92,6 +97,33 @@ pub async fn configure_privilege(target: &Path) -> crate::Result<()> {
     tokio::fs::write(&conf, DOAS_CONF).await?;
     tokio::fs::set_permissions(&conf, std::fs::Permissions::from_mode(0o400)).await?;
     Ok(())
+}
+
+/// Emerges `app-admin/doas` in the target, using the same chroot bootstrap as `wm` and
+/// `gpu_driver` (bind mounts, resolver, Portage tree). `--noreplace` makes a second run
+/// a no-op.
+///
+/// Verified on a real stage3 + synced tree: emerges cleanly with default USE
+/// (`pam -persist`), installs a setuid `/usr/bin/doas` and `/etc/pam.d/doas`, and a
+/// `wheel` user can then run commands as root after entering their password. Needs
+/// network (the tree sync and the source tarball). The mounts are undone on failure too.
+pub async fn install_doas(runner: &dyn CommandRunner, target: &Path) -> crate::Result<()> {
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
+
+    let mounted = bind_mount_chroot_dirs(runner, target).await;
+    let result = match mounted {
+        Ok(()) => async {
+            ensure_network_resolves(target).await?;
+            ensure_portage_tree(runner, target, target_str).await?;
+            runner.run_status("chroot", &[target_str, "emerge", "--noreplace", "app-admin/doas"]).await
+        }
+        .await,
+        Err(e) => Err(e),
+    };
+    unmount_chroot_dirs(runner, target).await;
+    result
 }
 
 #[cfg(test)]
@@ -109,7 +141,7 @@ mod tests {
         configure_privilege(&dir).await.unwrap();
 
         let conf = dir.join("etc/doas.conf");
-        assert_eq!(std::fs::read_to_string(&conf).unwrap(), "permit persist :wheel\n");
+        assert_eq!(std::fs::read_to_string(&conf).unwrap(), "permit :wheel\n");
         assert_eq!(std::fs::metadata(&conf).unwrap().permissions().mode() & 0o777, 0o400);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -180,5 +212,57 @@ mod tests {
         for ok in ["solomiya", "_svc", "user-1", "a", &"a".repeat(32)] {
             assert!(validate_username(ok).is_ok(), "{ok:?}");
         }
+    }
+
+    fn temp_target(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-doas-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/resolv.conf"), "nameserver 127.0.0.1\n").ok();
+        dir
+    }
+
+    fn names(runner: &FakeCommandRunner) -> Vec<String> {
+        runner.calls().iter().map(|(c, a)| if c == "chroot" { format!("chroot:{}", a[1..].join(" ")) } else { c.clone() }).collect()
+    }
+
+    #[tokio::test]
+    async fn install_doas_syncs_the_tree_if_missing_then_emerges_noreplace_and_unmounts() {
+        let dir = temp_target("fresh");
+        let runner = FakeCommandRunner::new();
+
+        install_doas(&runner, &dir).await.unwrap();
+
+        assert_eq!(
+            names(&runner),
+            ["mount", "mount", "mount", "chroot:emerge-webrsync", "chroot:emerge --noreplace app-admin/doas", "umount", "umount", "umount"]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn install_doas_skips_the_tree_sync_when_the_tree_already_exists() {
+        let dir = temp_target("synced");
+        std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
+        let runner = FakeCommandRunner::new();
+
+        install_doas(&runner, &dir).await.unwrap();
+
+        assert!(!names(&runner).iter().any(|n| n == "chroot:emerge-webrsync"), "{:?}", names(&runner));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn install_doas_unmounts_even_when_emerge_fails() {
+        let dir = temp_target("fail");
+        let runner = FakeCommandRunner::new();
+        runner.fail("chroot", "emerge: network is unreachable");
+
+        assert!(install_doas(&runner, &dir).await.is_err());
+
+        let n = names(&runner);
+        assert_eq!(n.iter().filter(|c| *c == "mount").count(), 3);
+        assert_eq!(n.iter().filter(|c| *c == "umount").count(), 3, "{n:?}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
