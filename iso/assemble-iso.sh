@@ -60,6 +60,10 @@ cat > "$W/squashfs-excludes.txt" <<EXCL
 var/db/repos/gentoo
 var/db/repos/guru
 usr/lib/rust
+usr/lib/go
+usr/lib/go-bootstrap
+usr/lib/clang
+usr/lib/grub
 var/tmp/portage
 var/cache/distfiles
 var/cache/binpkgs

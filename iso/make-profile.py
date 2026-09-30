@@ -82,8 +82,6 @@ def settings(src):
             continue
         if re.match(r"\s*font_family\s*=", line):
             continue                                        # the font is not on the ISO
-        if re.match(r"\s*pinned\s*=", line):
-            line = re.sub(r"\[.*\]", '[ "com.mitchellh.ghostty" ]', line)   # only ghostty exists there
         out_lines.append(line)
     return "".join(out_lines)
 

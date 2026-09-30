@@ -63,6 +63,9 @@ KEYRING
     cat >> "$ROOT/root/.config/niri/config.kdl" <<'NIRILIVE'
 
 // --- live ISO additions ---
+spawn-at-startup "pipewire"
+spawn-at-startup "wireplumber"
+spawn-at-startup "pipewire-pulse"
 spawn-at-startup "installer-gui"
 window-rule {
     match app-id="org.gentoo_diy.Installer"
@@ -113,6 +116,75 @@ if [ -z "${INSTALLER_STARTED:-}" ] && { [ "$(tty)" = /dev/tty1 ] || [ "$(tty)" =
     echo "Installer exited. This is a live shell; run 'installer-cli' to start it again."
 fi
 PROFILE
+fi
+
+# --- fish as root's shell, with the house aliases (micro, eza, dust, gping) ---
+# The aliases match the author's own fish config; they live in /etc/fish/conf.d so every
+# user of the image gets them. Only meaningful if the tools were emerged into the rootfs.
+if [ -x "$ROOT/usr/bin/fish" ]; then
+    install -d "$ROOT/etc/fish/conf.d"
+    cat > "$ROOT/etc/fish/conf.d/10-house.fish" <<'HOUSE'
+set -gx EDITOR micro
+set -gx VISUAL micro
+set fish_greeting
+if status is-interactive
+    alias ls 'eza --icons --group-directories-first'
+    alias ll 'eza -la --icons --group-directories-first --git'
+    alias lt 'eza --tree --icons --level=2'
+    alias nano micro
+    alias du dust
+    alias ping gping
+end
+HOUSE
+    grep -qx /usr/bin/fish "$ROOT/etc/shells" || echo /usr/bin/fish >> "$ROOT/etc/shells"
+    chroot "$ROOT" usermod -s /usr/bin/fish root
+
+    # Same start-up logic as .bash_profile, in fish syntax (the login shell is now fish).
+    install -d "$ROOT/root/.config/fish"
+    if [ -n "$GUI" ]; then
+        cat > "$ROOT/root/.config/fish/config.fish" <<'FISHCONF'
+if status is-login; and not set -q INSTALLER_STARTED
+    set -gx INSTALLER_STARTED 1
+    switch (tty)
+    case /dev/tty1
+        set -gx XDG_RUNTIME_DIR /run/user/0
+        set -gx LIBSEAT_BACKEND seatd
+        mkdir -p -m 700 $XDG_RUNTIME_DIR
+        # niri needs a real output; if there is none after 25 s (no hardware GL), stop it.
+        rm -f /run/live-gui-failed
+        begin
+            sleep 25
+            set -l sock (ls /run/user/0/niri.*.sock 2>/dev/null | head -1)
+            if test -z "$sock"; or test -z (env NIRI_SOCKET=$sock niri msg outputs 2>/dev/null | string collect)
+                touch /run/live-gui-failed
+                pkill -x niri
+            end
+        end &
+        dbus-run-session -- niri --session 2>/var/log/niri-session.log
+        if test -e /run/live-gui-failed
+            echo "No usable graphics output (niri needs hardware-accelerated graphics)."
+            echo "Log: /var/log/niri-session.log. Starting the text installer."
+        else
+            echo "The graphical session ended; starting the text installer."
+        end
+        installer-cli
+    case /dev/ttyS0
+        grep -qw live.debug /proc/cmdline; or installer-cli
+    end
+    echo "Installer exited. This is a live shell; run 'installer-cli' to start the text installer."
+end
+FISHCONF
+    else
+        cat > "$ROOT/root/.config/fish/config.fish" <<'FISHCONF'
+if status is-login; and not set -q INSTALLER_STARTED
+    set -gx INSTALLER_STARTED 1
+    if test (tty) = /dev/tty1; or test (tty) = /dev/ttyS0
+        installer-cli
+        echo "Installer exited. This is a live shell; run 'installer-cli' to start it again."
+    end
+end
+FISHCONF
+    fi
 fi
 
 echo gentoo-live > "$ROOT/etc/hostname"

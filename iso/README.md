@@ -1,6 +1,6 @@
 # Live ISOs (minimal TUI, and GUI)
 
-Boots on BIOS and UEFI, autologins as root and starts `installer-cli`. 511 MB.
+Boots on BIOS and UEFI, autologins as root and starts `installer-cli`. 506 MB.
 Tested in QEMU (KVM) with SeaBIOS and OVMF: Limine → kernel → dracut (`dmsquash-live`,
 OverlayFS) → OpenRC → the installer's TUI on tty1 and on the serial console.
 
@@ -54,10 +54,12 @@ qemu-system-x86_64 -machine q35 -enable-kvm -m 2048 -display none -serial stdio 
 
 ## Size
 
-Measured with `ls -l` on the built images: minimal 755 → **511 MB**, GUI 1.1 GB → **836 MB** after
+Measured with `ls -l` on the built images: minimal 755 → **506 MB**, GUI 1.1 GB → **996 MB** (with the apps below) after
 (1) sizing the UEFI FAT image to its content instead of a fixed 96 MB, and (2) leaving out what a
 live system never uses: `usr/share/{locale,i18n,sgml,cmake,gcc-data,binutils-data}`, GCC's
-`libexec`, binutils, Python, and (GUI) Sway, which the first emerge pulled in. All three boot
+`libexec`, binutils, Python, the Go toolchain (micro is written in Go, so building it pulls
+~500 MB of Go into the rootfs), clang's resource dir, GRUB's files (the installer uses Limine)
+and (GUI) Sway, which the first emerge pulled in. All three boot
 modes were re-tested after trimming (BIOS and UEFI for minimal, UEFI for GUI).
 For comparison, the official Gentoo minimal install CD is 975.8 MiB and its LiveGUI 4.0 GiB
 (distfiles.gentoo.org, 2026-09-13 builds).
@@ -70,7 +72,7 @@ ghostty** — the compositor and shell from `gentoo-wm-configs`, with that repo'
 and `noctalia/config.toml` copied unchanged into root's home. `prepare-rootfs.sh <root> <cli>
 <gui> <wm-configs-dir>` appends two live-only blocks to the *copy* of the niri config (start
 `installer-gui` as a floating window, so Noctalia's bar stays visible). tty1 starts `dbus-run-session -- niri --session` (stderr
-in `/var/log/niri-session.log`); the serial console gets the TUI. 836 MB.
+in `/var/log/niri-session.log`); the serial console gets the TUI. 996 MB.
 
 **niri needs hardware-accelerated graphics.** It skips software EGL renderers
 (`software EGL renderers are skipped` in the log), so with no GPU driver it has no outputs. A
@@ -97,6 +99,22 @@ the bar remain.
 Add `live.debug` to the kernel command line (`EXTRA_CMDLINE=live.debug` when assembling) to get a
 plain shell on the serial console instead of the installer.
 
+## Shell and tools
+
+Both images use **fish** as root's shell, with the author's aliases in `/etc/fish/conf.d/10-house.fish`
+(`ls`/`ll`/`lt` → `eza`, `nano` → `micro`, `du` → `dust`, `ping` → `gping`, `EDITOR=micro`) and no
+`nano`. The installer is started from `~/.config/fish/config.fish` (same logic as `.bash_profile`,
+fish syntax). `micro` and `gping` are `~amd64` (`micro` from `gentoo`, `gping` from GURU).
+
+## Desktop programs (GUI image)
+
+Zen Browser (`zen-bin`, GURU), Thunar with gvfs and tumbler, GParted, PipeWire + WirePlumber
+(Noctalia's volume widget talks to PipeWire; the session starts it), xdg-desktop-portal(-gtk),
+`wl-clipboard`, `btop`, `imv`. Wi-Fi is Noctalia's network widget over `iwd`, which the image already
+runs. GTK3 apps need `X`, so `gtkmm`/`cairomm`/`gtk+`/`cairo` are built with it (and run through
+xwayland-satellite). Checked in the GL VM: the installer, Thunar and Zen open, PipeWire has clients
+and the bar shows the volume control.
+
 ## Personal profile (optional)
 
 `make-profile.py <dir>` (run as the user, not root) reads the current user's niri and Noctalia
@@ -104,8 +122,7 @@ setup and writes a copy that is safe to boot elsewhere; pass that directory as t
 of `prepare-rootfs.sh`. Kept: colours, layout, animations, key bindings, input, bar and dock
 layout, theme and the community palettes it refers to. Dropped: start-up services and scripts,
 monitor blocks, the iGPU render-device pin, per-app window rules, the home address, wallpaper
-paths, per-monitor lock-screen widgets, and history/usage/clipboard data. The dock keeps only
-apps that exist on the ISO (ghostty). The output is derived from a home directory, so keep it
+paths, per-monitor lock-screen widgets, and history/usage/clipboard data. The output is derived from a home directory, so keep it
 out of git; the script itself contains no personal data.
 
 ## Bugs this found in the kernel config
