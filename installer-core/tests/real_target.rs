@@ -44,6 +44,15 @@ impl Scratch {
         Scratch(dst)
     }
 
+    /// An empty directory next to the stage3 (same filesystem), for tests that unpack into it.
+    fn empty(tag: &str) -> Self {
+        let src = PathBuf::from(std::env::var("GENTOO_INSTALLER_STAGE3").expect("set GENTOO_INSTALLER_STAGE3"));
+        let dst = src.with_file_name(format!("work-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dst).ok();
+        std::fs::create_dir_all(&dst).unwrap();
+        Scratch(dst)
+    }
+
     fn path(&self) -> &std::path::Path {
         &self.0
     }
@@ -221,4 +230,37 @@ async fn a_user_outside_wheel_does_not_get_root() {
 
     let out = try_doas(&target, "guest", "pw two").await;
     assert!(out.contains("RAN_AS_ROOT=no"), "a non-wheel user got root: {out}");
+}
+
+/// The custom-stage path, end to end with the real tools: the installer's own `download`
+/// (local file + SHA512) and `unpack` (`tar --numeric-owner --xattrs-include`), then
+/// `account::create`, which must give the user fish because this stage has it.
+/// Needs GENTOO_INSTALLER_CUSTOM_STAGE3=<tarball> (and optionally its _SHA512).
+#[tokio::test]
+#[ignore]
+async fn a_custom_stage_is_fetched_verified_unpacked_and_gives_the_user_fish() {
+    use installer_core::stage3::{self, Stage3Source};
+    let tarball = std::env::var("GENTOO_INSTALLER_CUSTOM_STAGE3").expect("set GENTOO_INSTALLER_CUSTOM_STAGE3");
+    let sha = std::env::var("GENTOO_INSTALLER_CUSTOM_STAGE3_SHA512").ok();
+    let scratch = Scratch::empty("custom-stage");
+    let runner = RealCommandRunner;
+
+    // A wrong digest is refused before anything is unpacked.
+    let copy = std::env::temp_dir().join(format!("gi-custom-{}.tar.xz", std::process::id()));
+    let bad = Stage3Source::custom(format!("file://{tarball}"), Some("00".repeat(64)));
+    assert!(stage3::download(&bad, &copy).await.unwrap_err().to_string().contains("sha512 mismatch"));
+
+    stage3::download(&Stage3Source::custom(format!("file://{tarball}"), sha), &copy).await.unwrap();
+    stage3::unpack(&runner, &copy, scratch.path()).await.unwrap();
+    std::fs::remove_file(&copy).ok();
+
+    assert!(scratch.path().join("usr/bin/fish").is_file());
+    assert!(!scratch.path().join("usr/bin/nano").exists(), "the custom stage has no nano");
+
+    account::create(&runner, scratch.path(), &Account { username: "solomiya".into(), password: "hunter2".into() })
+        .await
+        .unwrap();
+    let passwd = std::fs::read_to_string(scratch.path().join("etc/passwd")).unwrap();
+    let line = passwd.lines().find(|l| l.starts_with("solomiya:")).expect("user created");
+    assert!(line.ends_with(":/usr/bin/fish"), "{line}");
 }

@@ -114,6 +114,8 @@ pub struct Settings {
     pub locales: Vec<String>,
     pub hostname: String,
     pub account: Option<Account>,
+    /// Custom stage3 tarball; `None` means the official mirror's latest.
+    pub stage3: Option<crate::stage3::Stage3Source>,
 }
 
 impl Default for Settings {
@@ -124,6 +126,7 @@ impl Default for Settings {
             locales: vec![crate::locale::DEFAULT_LOCALE.to_string()],
             hostname: "gentoo".to_string(),
             account: None,
+            stage3: None,
         }
     }
 }
@@ -269,6 +272,7 @@ mod tests {
             locales: vec!["uk_UA.UTF-8".into(), "en_US.UTF-8".into()],
             hostname: "solomiya-pc".into(),
             account: Some(Account { username: "solomiya".into(), password: "hunter2".into() }),
+            stage3: None,
         }
     }
 

@@ -241,6 +241,13 @@ fn start_install(state: &mut AppState) {
         Err(_) => installer_core::packages::default_ids(),
     };
 
+    // Custom stage3 (your own tarball): GENTOO_INSTALLER_STAGE3_URL=<https://…|file://…|/path>,
+    // optionally GENTOO_INSTALLER_STAGE3_SHA512. Unset = Gentoo's latest.
+    let stage3 = std::env::var("GENTOO_INSTALLER_STAGE3_URL")
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+        .map(|u| installer_core::stage3::Stage3Source::custom(u.trim(), std::env::var("GENTOO_INSTALLER_STAGE3_SHA512").ok()));
+
     let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
     let opts = install::InstallOptions {
         layout,
@@ -259,6 +266,7 @@ fn start_install(state: &mut AppState) {
         locales,
         gpu_override,
         packages,
+        stage3,
         account,
         wm,
         wm_configs_git_url,

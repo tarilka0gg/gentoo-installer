@@ -11,8 +11,39 @@ const INDEX_FILE: &str = "latest-stage3-amd64-openrc.txt";
 
 #[derive(Debug, Clone)]
 pub struct Stage3Source {
+    /// `https://…`, `file:///…` or a plain absolute path.
     pub url: String,
     pub sha512: Option<String>,
+}
+
+impl Stage3Source {
+    /// A tarball of the caller's choosing (a custom stage built from Gentoo's, hosted on the
+    /// store or shipped on the ISO) instead of the official mirror's latest.
+    pub fn custom(url: impl Into<String>, sha512: Option<String>) -> Self {
+        Self { url: url.into(), sha512: sha512.map(|h| h.to_ascii_lowercase()) }
+    }
+}
+
+/// Picks the source: the custom one if given, else the official mirror's current stage3.
+pub async fn resolve(custom: Option<&Stage3Source>) -> crate::Result<Stage3Source> {
+    match custom {
+        Some(c) => Ok(c.clone()),
+        None => resolve_latest().await,
+    }
+}
+
+/// `file:///x/y.tar.xz` and `/x/y.tar.xz` are local files; anything else goes over HTTP.
+fn local_path(url: &str) -> Option<&str> {
+    url.strip_prefix("file://").or_else(|| url.starts_with('/').then_some(url))
+}
+
+fn check_digest(expected: &Option<String>, actual: String) -> crate::Result<()> {
+    match expected {
+        Some(e) if !e.eq_ignore_ascii_case(&actual) => {
+            Err(crate::Error::Other(anyhow::anyhow!("stage3 sha512 mismatch: expected {e}, got {actual}")))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Reads the mirror's `latest-stage3-amd64-openrc.txt` index to resolve the current
@@ -100,6 +131,23 @@ fn parse_sha512_digest(body: &str, filename: &str) -> Option<String> {
 }
 
 pub async fn download(source: &Stage3Source, dest: &Path) -> crate::Result<()> {
+    if let Some(path) = local_path(&source.url) {
+        let mut src = tokio::fs::File::open(path).await?;
+        let mut file = tokio::fs::File::create(dest).await?;
+        let mut hasher = Sha512::new();
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = tokio::io::AsyncReadExt::read(&mut src, &mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            file.write_all(&buf[..n]).await?;
+        }
+        file.flush().await?;
+        return check_digest(&source.sha512, hex::encode(hasher.finalize()));
+    }
+
     let response = reqwest::get(&source.url)
         .await
         .map_err(|e| crate::Error::Other(e.into()))?
@@ -117,16 +165,7 @@ pub async fn download(source: &Stage3Source, dest: &Path) -> crate::Result<()> {
     }
     file.flush().await?;
 
-    if let Some(expected) = &source.sha512 {
-        let actual = hex::encode(hasher.finalize());
-        if &actual != expected {
-            return Err(crate::Error::Other(anyhow::anyhow!(
-                "stage3 sha512 mismatch: expected {expected}, got {actual}"
-            )));
-        }
-    }
-
-    Ok(())
+    check_digest(&source.sha512, hex::encode(hasher.finalize()))
 }
 
 /// Unpacks the tarball into `root` (typically the mounted target `@` subvolume),
@@ -224,5 +263,30 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
         // -- confirms there's nothing here that could accidentally satisfy a
         // SHA256-shaped lookup were one still in the code.
         assert!(!DIGESTS_FIXTURE.contains("SHA256 HASH"));
+    }
+
+    #[tokio::test]
+    async fn a_local_tarball_is_copied_and_its_digest_checked() {
+        let dir = std::env::temp_dir().join(format!("gi-stage3-local-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("custom.tar.xz");
+        std::fs::write(&src, b"not really a tarball").unwrap();
+        let dest = dir.join("out");
+        let good = hex::encode(Sha512::digest(b"not really a tarball"));
+
+        for url in [src.display().to_string(), format!("file://{}", src.display())] {
+            download(&Stage3Source::custom(url, Some(good.to_uppercase())), &dest).await.unwrap();
+            assert_eq!(std::fs::read(&dest).unwrap(), b"not really a tarball");
+        }
+        let err = download(&Stage3Source::custom(src.display().to_string(), Some("00".into())), &dest).await.unwrap_err();
+        assert!(err.to_string().contains("sha512 mismatch"), "{err}");
+        assert!(download(&Stage3Source::custom("/nonexistent/x.tar.xz", None), &dest).await.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn resolve_prefers_the_custom_source_without_touching_the_network() {
+        let c = Stage3Source::custom("/x/custom.tar.xz", None);
+        assert_eq!(resolve(Some(&c)).await.unwrap().url, "/x/custom.tar.xz");
     }
 }

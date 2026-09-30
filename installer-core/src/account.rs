@@ -28,6 +28,17 @@ pub fn validate_username(name: &str) -> crate::Result<()> {
     }
 }
 
+/// `/usr/bin/fish` if the target's stage has it (a custom stage), else `/bin/bash`. Checked
+/// against the target rather than assumed: `useradd -s` with a missing shell gives an
+/// account that cannot log in.
+pub fn login_shell(target: &Path) -> &'static str {
+    if target.join("usr/bin/fish").is_file() {
+        "/usr/bin/fish"
+    } else {
+        "/bin/bash"
+    }
+}
+
 /// Creates `account.username` in the target with `account.password`, in `wheel`, with
 /// `/bin/bash`. The password is hashed via `openssl passwd -6` (SHA-512 crypt) and handed
 /// to `useradd -p` rather than piped to `chpasswd` over stdin — `CommandRunner` has no
@@ -62,7 +73,7 @@ pub async fn create(runner: &dyn CommandRunner, target: &Path, account: &Account
                 "-G",
                 "wheel",
                 "-s",
-                "/bin/bash",
+                login_shell(target),
                 "-p",
                 hash,
                 &account.username,
@@ -205,6 +216,17 @@ mod tests {
             assert!(create(&runner, Path::new("/mnt/gentoo"), &account).await.is_err(), "{bad:?}");
             assert!(runner.calls().is_empty(), "{bad:?}: no command may run");
         }
+    }
+
+    #[test]
+    fn login_shell_is_fish_only_when_the_stage_has_it() {
+        let dir = std::env::temp_dir().join(format!("gi-shell-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("usr/bin")).unwrap();
+        assert_eq!(login_shell(&dir), "/bin/bash");
+        std::fs::write(dir.join("usr/bin/fish"), "").unwrap();
+        assert_eq!(login_shell(&dir), "/usr/bin/fish");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

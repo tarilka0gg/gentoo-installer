@@ -35,7 +35,7 @@ impl Phase for DeployPhase {
         let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
 
         let _ = tx.send(log("Resolving current stage3 release..."));
-        let source = stage3::resolve_latest().await?;
+        let source = stage3::resolve(ctx.settings.stage3.as_ref()).await?;
         let tarball_path = std::env::temp_dir().join("gentoo-installer-stage3.tar.xz");
 
         let _ = tx.send(log("Downloading stage3...".to_string()));

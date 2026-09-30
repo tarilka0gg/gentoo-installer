@@ -34,6 +34,7 @@ async fn main() {
         timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
         gpu_override: None,
         packages: Vec::new(),
+        stage3: None,
         hostname: "gentoo".into(),
         locales: vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
         account: Account { username: "tester".into(), password: "testpassword123".into() },

@@ -222,6 +222,23 @@ a test dies half-way, and each copy is deleted by a guard that **refuses to dele
 anything is still mounted under it** (`remove_dir_all` does not stop at mount points and
 would otherwise recurse into the host's real `/dev`).
 
+## Custom stage3
+
+The installer normally unpacks Gentoo's latest stage3. `GENTOO_INSTALLER_STAGE3_URL` (TUI and GUI;
+`InstallOptions::stage3` / `Settings::stage3` in code) points it at your own tarball instead: an
+`https://` URL, a `file://` path or a plain absolute path, with `GENTOO_INSTALLER_STAGE3_SHA512`
+checked while it downloads (a mismatch aborts before anything is unpacked).
+
+`iso/make-stage.sh` builds one: Gentoo's stage3 + fish, eza, dust, gping and micro (installed from
+binary packages, nothing compiled there), `nano` removed, the house aliases in
+`/etc/fish/conf.d/10-house.fish`, and the Portage tree and caches stripped again. The result is
+240 MB (Gentoo's own is 265 MB). The first user is created with fish as login shell when the stage
+has it, otherwise bash; root stays locked either way.
+
+Tested end to end with the real `tar`/`useradd` (`a_custom_stage_is_fetched_verified_unpacked_and_gives_the_user_fish`
+in `installer-core/tests/real_target.rs`: digest mismatch refused, tarball unpacked, user's shell is
+fish). A full install from the custom stage has not been run (the store has no kernels).
+
 ## Choices: desktop, graphics driver, software
 
 Advanced setup (GUI) or environment variables (TUI) choose three things:

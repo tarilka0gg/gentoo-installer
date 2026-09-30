@@ -38,6 +38,9 @@ pub struct InstallOptions {
     pub gpu_override: Option<Gpu>,
     /// Ids from `packages::GROUPS` to emerge after the desktop.
     pub packages: Vec<String>,
+    /// A custom stage3 tarball (your own, with your shell and tools) instead of Gentoo's
+    /// latest: URL, `file://` path or plain path, plus its SHA512 if known.
+    pub stage3: Option<stage3::Stage3Source>,
     pub account: Account,
     /// Compositor to install alongside Noctalia — auto-detected-default shape (same as
     /// `keyboard_layout`/`timezone`): `WmChoice::default()` (niri) unless Advanced setup
@@ -104,7 +107,7 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     partition::mount_target(runner, &opts.layout, &parts, target_str).await?;
 
     let _ = tx.send(Progress::DownloadingStage3);
-    let source = stage3::resolve_latest().await?;
+    let source = stage3::resolve(opts.stage3.as_ref()).await?;
     let tarball_path = std::env::temp_dir().join("gentoo-installer-stage3.tar.xz");
     stage3::download(&source, &tarball_path).await?;
 
