@@ -32,6 +32,10 @@ if [ -n "$GUI" ]; then
     cp "$WMCONF/noctalia/config.toml" "$ROOT/root/.config/noctalia/config.toml"
     # Live-only additions, appended to the *copy*: start the installer and give it the whole
     # screen. The preset itself is left exactly as the repo has it.
+    # Noctalia shows a first-run wizard on top of everything until this marker exists; on a
+    # live ISO it would cover the installer. The marker sits next to state.toml.
+    install -d "$ROOT/root/.local/state/noctalia"
+    touch "$ROOT/root/.local/state/noctalia/.setup-complete"
     cat >> "$ROOT/root/.config/niri/config.kdl" <<'NIRILIVE'
 
 // --- live ISO additions ---

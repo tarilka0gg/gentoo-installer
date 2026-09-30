@@ -76,8 +76,21 @@ in `/var/log/niri-session.log`); the serial console gets the TUI. 836 MB.
 (`software EGL renderers are skipped` in the log), so with no GPU driver it has no outputs. A
 watchdog stops it after 25 s in that case and starts the text installer instead of leaving a
 black screen. Verified in QEMU with a plain `virtio-vga`, which is exactly that situation.
-The graphical path itself — niri drawing `installer-gui` — has **not** been seen working: the
-QEMU on the build machine has no GL display (`-display egl-headless` is not compiled in).
+
+The graphical path **was** verified in a VM with a 3D virtual GPU: QEMU built with
+`USE="opengl virgl"` (in a stage3 chroot, x86_64 target only; the host QEMU has no GL display) and
+
+    qemu-system-x86_64 -machine q35 -enable-kvm -m 4096 -device virtio-vga-gl \
+        -display egl-headless,rendernode=/dev/dri/renderD129 -cdrom out.iso ...
+
+niri then gets an output (`Virtual-1`, 1280x800), Noctalia starts and `installer-gui` opens full
+screen on its Welcome page. `screendump` does not work with GL scanout (`Error: no surface`);
+take the picture inside the guest instead: `niri msg action screenshot-screen --write-to-disk true`
+from the `live.debug` serial shell, and pull the PNG out as base64. Real hardware has not been tried.
+
+Noctalia's first-run wizard would otherwise sit on top of the installer; the image ships
+`~/.local/state/noctalia/.setup-complete` to skip it. A `gcr-prompter` (keyring) window also
+exists in the session but does not cover the installer.
 
 Add `live.debug` to the kernel command line (`EXTRA_CMDLINE=live.debug` when assembling) to get a
 plain shell on the serial console instead of the installer.
