@@ -69,7 +69,7 @@ adds GTK4, libadwaita, Mesa (with LLVM), seatd, **niri, Noctalia, xwayland-satel
 ghostty** — the compositor and shell from `gentoo-wm-configs`, with that repo's `niri/config.kdl`
 and `noctalia/config.toml` copied unchanged into root's home. `prepare-rootfs.sh <root> <cli>
 <gui> <wm-configs-dir>` appends two live-only blocks to the *copy* of the niri config (start
-`installer-gui` as an ordinary window, so Noctalia's bar stays visible). tty1 starts `dbus-run-session -- niri --session` (stderr
+`installer-gui` as a floating window, so Noctalia's bar stays visible). tty1 starts `dbus-run-session -- niri --session` (stderr
 in `/var/log/niri-session.log`); the serial console gets the TUI. 836 MB.
 
 **niri needs hardware-accelerated graphics.** It skips software EGL renderers

@@ -55,6 +55,10 @@ KEYRING
 
 // --- live ISO additions ---
 spawn-at-startup "installer-gui"
+window-rule {
+    match app-id="org.gentoo_diy.Installer"
+    open-floating true
+}
 NIRILIVE
     cat > "$ROOT/root/.bash_profile" <<'PROFILE'
 if [ -z "${INSTALLER_STARTED:-}" ]; then
