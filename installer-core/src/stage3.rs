@@ -24,10 +24,40 @@ impl Stage3Source {
     }
 }
 
-/// Picks the source: the custom one if given, else the official mirror's current stage3.
+/// Where the live ISO keeps the stage3 it ships (`stage/` on the medium; dracut's
+/// `dmsquash-live` mounts the medium at `/run/initramfs/live`).
+pub const BUNDLED_DIRS: &[&str] = &["/run/initramfs/live/stage", "/run/live/medium/stage"];
+
+/// A stage3 shipped next to the installer: the newest `*.tar.xz` in `dir`, with the digest
+/// from its `<name>.sha512` (`sha512sum` format) when that file is there.
+pub fn bundled_from(dir: &Path) -> Option<Stage3Source> {
+    let mut tarballs: Vec<_> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "xz") && p.to_string_lossy().ends_with(".tar.xz"))
+        .collect();
+    tarballs.sort();
+    let tarball = tarballs.pop()?;
+    let sha512 = std::fs::read_to_string(format!("{}.sha512", tarball.display()))
+        .ok()
+        .and_then(|t| t.split_whitespace().next().map(str::to_string))
+        .filter(|h| h.len() == 128 && h.chars().all(|c| c.is_ascii_hexdigit()));
+    Some(Stage3Source::custom(tarball.to_string_lossy(), sha512))
+}
+
+/// The stage3 on the live medium, if this is a live ISO that carries one.
+pub fn bundled() -> Option<Stage3Source> {
+    BUNDLED_DIRS.iter().find_map(|d| bundled_from(Path::new(d)))
+}
+
+/// Picks the source: the caller's custom one, else the stage3 shipped on the live medium,
+/// else the official mirror's current stage3 (which needs the network).
 pub async fn resolve(custom: Option<&Stage3Source>) -> crate::Result<Stage3Source> {
-    match custom {
-        Some(c) => Ok(c.clone()),
+    if let Some(c) = custom {
+        return Ok(c.clone());
+    }
+    match bundled() {
+        Some(b) => Ok(b),
         None => resolve_latest().await,
     }
 }
@@ -288,5 +318,31 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
     async fn resolve_prefers_the_custom_source_without_touching_the_network() {
         let c = Stage3Source::custom("/x/custom.tar.xz", None);
         assert_eq!(resolve(Some(&c)).await.unwrap().url, "/x/custom.tar.xz");
+    }
+
+    #[test]
+    fn bundled_picks_the_newest_tarball_and_reads_its_digest() {
+        let dir = std::env::temp_dir().join(format!("gi-bundled-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(bundled_from(&dir).is_none(), "an empty directory carries no stage3");
+
+        let hash = "ab".repeat(64);
+        std::fs::write(dir.join("stage3-20260101.tar.xz"), "").unwrap();
+        std::fs::write(dir.join("stage3-20260930.tar.xz"), "").unwrap();
+        std::fs::write(dir.join("stage3-20260930.tar.xz.sha512"), format!("{hash}  stage3-20260930.tar.xz\n")).unwrap();
+        std::fs::write(dir.join("notes.txt"), "").unwrap();
+
+        let s = bundled_from(&dir).unwrap();
+        // "newest" is the lexicographically last name (the names are date-stamped).
+        assert!(s.url.ends_with("stage3-20260930.tar.xz"), "{}", s.url);
+        assert_eq!(s.sha512.as_deref(), Some(hash.as_str()));
+        std::fs::remove_file(dir.join("stage3-20260101.tar.xz")).unwrap();
+        let s = bundled_from(&dir).unwrap();
+        assert_eq!(s.sha512.as_deref(), Some(hash.as_str()));
+
+        std::fs::write(dir.join("stage3-20260930.tar.xz.sha512"), "not a digest").unwrap();
+        assert_eq!(bundled_from(&dir).unwrap().sha512, None, "a malformed digest file is ignored, not trusted");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

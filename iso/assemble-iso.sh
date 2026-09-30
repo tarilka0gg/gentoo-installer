@@ -1,5 +1,6 @@
 #!/bin/bash
-# assemble-iso.sh <work-dir> <out.iso>   (ROOTFS=live-root-gui selects the GUI tree)
+# assemble-iso.sh <work-dir> <out.iso>   (ROOTFS=live-root-gui selects the GUI tree;
+#                                         STAGE_TARBALL=<file> ships a custom stage3 on the medium)
 # work-dir has: live-root/ (prepared rootfs incl. /boot/initramfs-live.img), vmlinuz-live,
 # builder/ (a chroot that has mksquashfs + xorriso). Run as root.
 # The squashfs/xorriso steps run inside the builder chroot; mounts live in a private
@@ -10,6 +11,14 @@ LABEL=GENTOO_LIVE
 ROOTFS=${ROOTFS:-live-root}
 ISO=$W/isoroot
 rm -rf "$ISO"; mkdir -p "$ISO"/{boot/limine,LiveOS,EFI/BOOT}
+
+# Optional: ship a stage3 on the medium (outside the squashfs, so it is not loaded into RAM).
+# The installer finds it at /run/initramfs/live/stage (stage3::bundled).
+if [ -n "${STAGE_TARBALL:-}" ]; then
+    mkdir -p "$ISO/stage"
+    cp "$STAGE_TARBALL" "$ISO/stage/"
+    [ -e "$STAGE_TARBALL.sha512" ] && cp "$STAGE_TARBALL.sha512" "$ISO/stage/"
+fi
 
 cp "$W/vmlinuz-live" "$ISO/boot/vmlinuz"
 cp "$W/$ROOTFS/boot/initramfs-live.img" "$ISO/boot/initramfs.img"

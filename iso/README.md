@@ -99,6 +99,16 @@ the bar remain.
 Add `live.debug` to the kernel command line (`EXTRA_CMDLINE=live.debug` when assembling) to get a
 plain shell on the serial console instead of the installer.
 
+## Shipping the custom stage on the ISO
+
+`STAGE_TARBALL=<file> assemble-iso.sh …` copies the tarball (and its `.sha512`) to `stage/` on the
+medium — outside the squashfs, so it does not occupy RAM (checked: ~330 MB used with it on the disc).
+The installer finds it at `/run/initramfs/live/stage` (`stage3::bundled`), verifies the digest and
+unpacks it, so the stage3 step needs no network. Precedence: `GENTOO_INSTALLER_STAGE3_URL` >
+the bundled stage > Gentoo's latest from the mirror. Sizes with it: minimal **746 MB**, GUI **1.3 GB**
+(506 MB / 996 MB without). Verified in a VM: the file is visible read-only at that path and
+`sha512sum -c` passes; the download-verify-unpack-user-gets-fish chain is covered by the real-target test.
+
 ## Shell and tools
 
 Both images use **fish** as root's shell, with the author's aliases in `/etc/fish/conf.d/10-house.fish`

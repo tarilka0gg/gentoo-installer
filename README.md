@@ -227,7 +227,9 @@ would otherwise recurse into the host's real `/dev`).
 The installer normally unpacks Gentoo's latest stage3. `GENTOO_INSTALLER_STAGE3_URL` (TUI and GUI;
 `InstallOptions::stage3` / `Settings::stage3` in code) points it at your own tarball instead: an
 `https://` URL, a `file://` path or a plain absolute path, with `GENTOO_INSTALLER_STAGE3_SHA512`
-checked while it downloads (a mismatch aborts before anything is unpacked).
+checked while it downloads (a mismatch aborts before anything is unpacked). Without the variable the
+installer looks for a stage3 shipped on the live medium (`/run/initramfs/live/stage`, see
+`iso/README.md`) and only then falls back to Gentoo's latest from the mirror.
 
 `iso/make-stage.sh` builds one: Gentoo's stage3 + fish, eza, dust, gping and micro (installed from
 binary packages, nothing compiled there), `nano` removed, the house aliases in
