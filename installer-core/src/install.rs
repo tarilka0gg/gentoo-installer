@@ -149,6 +149,7 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     wm::install(runner, &opts.target, opts.wm, &opts.wm_configs_git_url, &opts.account.username).await?;
 
     let _ = tx.send(Progress::InstallingBootloader);
+    bootloader::configure(runner, &opts.target, &opts.layout, &parts).await?;
     bootloader::install(runner, &opts.target, &opts.layout.disk).await?;
 
     let _ = tx.send(Progress::Done);
