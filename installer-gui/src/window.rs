@@ -192,6 +192,24 @@ fn install_css() {
         .gentoo-part-esp { background-color: #3584e4; border-radius: 6px; }\n\
         .gentoo-part-swap { background-color: #e5a50a; border-radius: 6px; }\n\
         .gentoo-part-root { background-color: #26a269; border-radius: 6px; }\n\
+        .hero-title { font-size: 1.8rem; font-weight: 800; }\n\
+        .section-heading { font-size: 1.05rem; font-weight: 800; }\n\
+        .info-tile { padding: 16px 10px; border-radius: 12px; }\n\
+        .info-tile-icon { border-radius: 999px; min-width: 44px; min-height: 44px; \
+            background-color: alpha(currentColor, 0.10); }\n\
+        .category-tile { min-height: 88px; padding: 0 18px; border-radius: 16px; border: none; \
+            color: #ffffff; font-size: 1.15rem; font-weight: 800; \
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); box-shadow: none; }\n\
+        .category-tile:hover { filter: brightness(1.08); }\n\
+        .category-tile:active { filter: brightness(0.94); }\n\
+        .category-tile:checked { outline: 3px solid @accent_bg_color; outline-offset: 2px; }\n\
+        .category-tile-0 { background-image: linear-gradient(160deg, #a06ee1, #4568dc); }\n\
+        .category-tile-1 { background-image: linear-gradient(160deg, #fbf6d9, #f3ebc3); \
+            color: #2b5ea8; text-shadow: none; }\n\
+        .category-tile-2 { background-image: linear-gradient(120deg, #ffd3a5, #f78ca0 55%, #7b4dff); }\n\
+        .category-tile-3 { background-image: linear-gradient(120deg, #f0416c, #ff7158); }\n\
+        .category-tile-4 { background-image: linear-gradient(160deg, #2fbf71, #17a35c); }\n\
+        .category-tile-5 { background-image: linear-gradient(160deg, #6b6b76, #4a4a55); }\n\
         ",
     );
     if let Some(display) = gtk::gdk::Display::default() {
@@ -233,22 +251,46 @@ fn welcome_page(
     } else {
         "Automated btrfs partitioning, kernel profile detection, Limine boot setup."
     };
-    let status = adw::StatusPage::builder()
-        .title("Gentoo Installer")
-        .description(description)
-        .icon_name("drive-harddisk-symbolic")
-        .build();
+    let title = gtk::Label::builder().label("Gentoo Installer").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Center).build();
+    let subtitle = gtk::Label::builder().label(description).css_classes(vec!["dim-label".to_string()]).wrap(true).justify(gtk::Justification::Center).build();
+
+    // Three at-a-glance facts as tiles, the way the store's detail page shows download
+    // size / build time — what the installer will do, before asking anything.
+    let tiles = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).homogeneous(true).margin_top(12).build();
+    for (icon, head, text) in [
+        ("drive-harddisk-symbolic", "Disk", "btrfs, ESP and swap laid out for you"),
+        ("cpu-symbolic", "Kernel", "prebuilt for your CPU and GPU"),
+        ("system-run-symbolic", "Boot", "Limine, UEFI or BIOS"),
+    ] {
+        let image = gtk::Image::builder().icon_name(icon).pixel_size(22).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
+        let badge = gtk::Box::builder().css_classes(vec!["info-tile-icon".to_string()]).halign(gtk::Align::Center).build();
+        badge.append(&image);
+        let head = gtk::Label::builder().label(head).css_classes(vec!["section-heading".to_string()]).build();
+        let text = gtk::Label::builder().label(text).css_classes(vec!["dim-label".to_string(), "caption".to_string()]).wrap(true).justify(gtk::Justification::Center).build();
+        let tile = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).css_classes(vec!["card".to_string(), "info-tile".to_string()]).build();
+        tile.append(&badge);
+        tile.append(&head);
+        tile.append(&text);
+        tiles.append(&tile);
+    }
 
     let button = gtk::Button::builder()
         .label("Start")
         .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
         .halign(gtk::Align::Center)
+        .margin_top(24)
         .build();
-    status.set_child(Some(&button));
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).valign(gtk::Align::Center).margin_start(24).margin_end(24).build();
+    content.append(&title);
+    content.append(&subtitle);
+    content.append(&tiles);
+    content.append(&button);
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(680).valign(gtk::Align::Center).build();
 
     let page = adw::NavigationPage::builder()
         .title("Welcome")
-        .child(&status)
+        .child(&clamp)
         .build();
     page.set_tag(Some("welcome"));
 
@@ -266,7 +308,7 @@ fn welcome_page(
 
 /// Advanced-setup only: keyboard layout, auto-detected default via `keyboard::detect_current`.
 fn keyboard_select_page(nav: adw::NavigationView, state: Rc<WizardState>, timezone_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Keyboard layout").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder().label("Keyboard layout").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
     let body = gtk::Label::builder().label("Type below to check it's right.").css_classes(vec!["dim-label".to_string()]).halign(gtk::Align::Start).build();
 
     let layouts = keyboard::list_layouts();
@@ -312,7 +354,7 @@ fn keyboard_select_page(nav: adw::NavigationView, state: Rc<WizardState>, timezo
 /// Advanced-setup only: time zone, auto-detected default via `timezone::detect_current`.
 /// `next_page` is Disk directly if there's already an ethernet link, else Network.
 fn timezone_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Where are you?").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder().label("Where are you?").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
     let body = gtk::Label::builder().label("This sets your time zone and clock.").css_classes(vec!["dim-label".to_string()]).halign(gtk::Align::Start).build();
 
     let zones = tz::list_zones();
@@ -355,33 +397,47 @@ fn timezone_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_p
 /// Advanced setup is off entirely). `next_page` is Disk directly if there's already an
 /// ethernet link, else Network — same choice `timezone_select_page` makes.
 fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Desktop").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder().label("Desktop").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
     let body = gtk::Label::builder()
         .label("Pick a compositor. Noctalia (the shell/bar) is installed alongside any of these.")
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .build();
 
-    let display_strings: Vec<String> = WmChoice::ALL.iter().map(|c| c.display_name().to_string()).collect();
     let current = state.wm.get();
-    let selected_index = WmChoice::ALL.iter().position(|c| *c == current).unwrap_or(0) as u32;
-
-    let model = gtk::StringList::new(&display_strings.iter().map(String::as_str).collect::<Vec<_>>());
-    let dropdown = gtk::DropDown::builder().model(&model).selected(selected_index).build();
-
-    {
+    let grid = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .min_children_per_line(2)
+        .max_children_per_line(3)
+        .column_spacing(12)
+        .row_spacing(12)
+        .homogeneous(true)
+        .build();
+    let mut group: Option<gtk::ToggleButton> = None;
+    for (i, choice) in WmChoice::ALL.iter().enumerate() {
+        let tile = gtk::ToggleButton::builder()
+            .label(choice.display_name())
+            .css_classes(vec!["category-tile".to_string(), format!("category-tile-{}", i % 6)])
+            .active(*choice == current)
+            .build();
+        match &group {
+            Some(first) => tile.set_group(Some(first)),
+            None => group = Some(tile.clone()),
+        }
         let state = state.clone();
-        dropdown.connect_selected_notify(move |dd| {
-            if let Some(choice) = WmChoice::ALL.get(dd.selected() as usize) {
-                state.wm.set(*choice);
+        let choice = *choice;
+        tile.connect_toggled(move |t| {
+            if t.is_active() {
+                state.wm.set(choice);
             }
         });
+        grid.insert(&tile, -1);
     }
 
     let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
     content.append(&heading);
     content.append(&body);
-    content.append(&dropdown);
+    content.append(&grid);
 
     let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
     content.append(&next_button);
@@ -400,7 +456,7 @@ fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: a
 /// when Advanced setup is off entirely — see `make_conf::OptLevel`'s doc comment for why
 /// O2 is the recommended choice, not just an arbitrary default).
 fn opt_level_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Build optimization").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder().label("Build optimization").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
     let body = gtk::Label::builder()
         .label("-O3 rarely measurably outperforms -O2 outside numeric-heavy code, and makes builds slower and binaries larger. Leave this off unless you have a specific reason.")
         .css_classes(vec!["dim-label".to_string()])
@@ -542,7 +598,7 @@ fn spawn_network_worker() -> (tokio::sync::mpsc::UnboundedSender<NetCmd>, std_mp
 /// advance regardless of connection state, since everything the installer needs is
 /// already on this device.
 fn network_page_build(nav: adw::NavigationView, disk_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Connect to a network").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder().label("Connect to a network").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
     let body = gtk::Label::builder()
         .label("Gentoo installs everything it needs from this device, so a connection is optional. It's used to check for updates on first start.")
         .css_classes(vec!["dim-label".to_string()])
@@ -728,7 +784,7 @@ fn min_disk_bytes() -> u64 {
 fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus: PageMenus) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
         .label("Where should Gentoo go?")
-        .css_classes(vec!["title-1".to_string()])
+        .css_classes(vec!["hero-title".to_string()])
         .halign(gtk::Align::Start)
         .wrap(true)
         .build();
@@ -925,7 +981,7 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus
 /// scope of "manual" here rather than a full GParted-style editor this codebase can't
 /// back.
 fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Partitions").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder().label("Partitions").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
     let body = gtk::Label::builder()
         .label("Gentoo needs a root partition, and an EFI system partition on this machine.")
         .css_classes(vec!["dim-label".to_string()])
@@ -992,7 +1048,7 @@ fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>)
 /// Screen script §9: username + password, before Confirm. Root stays locked; this
 /// account gets `wheel` (see `installer_core::account::create`).
 fn account_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Create your account").css_classes(vec!["title-1".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder().label("Create your account").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
     let body = gtk::Label::builder()
         .label("This account can install software and change system settings.")
         .css_classes(vec!["dim-label".to_string()])
@@ -1069,7 +1125,7 @@ fn account_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
 fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
         .label("Review before installing")
-        .css_classes(vec!["title-1".to_string()])
+        .css_classes(vec!["hero-title".to_string()])
         .halign(gtk::Align::Start)
         .build();
 
