@@ -182,12 +182,11 @@ externally.
   `wheel`, do not. The rule has no `persist` on purpose: Gentoo builds `doas` with
   `-persist` by default, where the keyword is accepted and silently ignored, and even
   with `USE=persist` the password was still asked on every call in the chroot test.
-- **`installer-cli`/`installer-gui` still don't get the rest.** They drive the legacy
-  `install.rs`, which sets keyboard, time zone, the account and now `doas`, but still
-  no hostname and no `locale-gen`: `InstallOptions` has no fields for them, so wiring
-  them needs the two frontends to ask the user first. The new phases (and `Settings`,
-  the struct that carries these choices) only take effect once a frontend drives the
-  phase system.
+- **Frontends: hostname and locale are wired, but not asked.** `InstallOptions` now has
+  `hostname` and `locales`, and the legacy `install.rs` applies them (`locale::apply_hostname`,
+  then `locale::apply`). The TUI reads `GENTOO_INSTALLER_HOSTNAME` / `GENTOO_INSTALLER_LOCALES`
+  (comma-separated); the GUI has no page for them yet and uses `gentoo` / `en_US.UTF-8`.
+  The phase system (`Settings`) is still not driven by either frontend.
 - **`locale-gen` needs `/proc`.** Found by running the step against a real stage3
   (it compiles the locales, then aborts on `findmnt: can't read /proc/mounts`,
   leaving `locale -a` at `C, C.utf8, POSIX`); no `FakeCommandRunner` test could have

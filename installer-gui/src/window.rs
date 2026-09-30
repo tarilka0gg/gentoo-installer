@@ -1202,6 +1202,8 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                     .unwrap_or_else(|| "gentoo-diy-kernel".into()),
                 keyboard_layout: state.keyboard_layout.borrow().clone(),
                 timezone: state.timezone.borrow().clone(),
+                hostname: "gentoo".into(),
+                locales: vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
                 account,
                 wm: state.wm.get(),
                 opt_level: state.opt_level.get(),

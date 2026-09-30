@@ -10,7 +10,7 @@ use crate::account::Account;
 use crate::command::{CommandRunner, RealCommandRunner};
 use crate::hardware::Gpu;
 use crate::wm::WmChoice;
-use crate::{account, bootloader, detect, fstab, gpu_driver, hardware, keyboard, kernel, make_conf, partition, stage3, store, timezone, wm};
+use crate::{account, bootloader, detect, fstab, gpu_driver, hardware, keyboard, kernel, locale, make_conf, partition, stage3, store, timezone, wm};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -29,6 +29,10 @@ pub struct InstallOptions {
     /// IANA zone name (e.g. "Europe/Kyiv") — auto-detected default, or an Advanced-setup
     /// manual choice.
     pub timezone: String,
+    /// Machine hostname (RFC 1123, lowercase) — `"gentoo"` unless the frontend asks.
+    pub hostname: String,
+    /// `locale.gen` entries; the first becomes `LANG`. `["en_US.UTF-8"]` by default.
+    pub locales: Vec<String>,
     pub account: Account,
     /// Compositor to install alongside Noctalia — auto-detected-default shape (same as
     /// `keyboard_layout`/`timezone`): `WmChoice::default()` (niri) unless Advanced setup
@@ -136,6 +140,10 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
 
     let _ = tx.send(Progress::SettingTimezone);
     timezone::apply(&opts.target, &opts.timezone).await?;
+    // Same step as the time zone from the frontends' point of view: no new `Progress`
+    // variant (their matches are exhaustive). Locale generation runs last, as in LocalePhase.
+    locale::apply_hostname(&opts.target, &opts.hostname).await?;
+    locale::apply(runner, &opts.target, &opts.locales).await?;
 
     let _ = tx.send(Progress::CreatingAccount);
     account::create(runner, &opts.target, &opts.account).await?;

@@ -32,6 +32,8 @@ async fn main() {
         kernel_base_name: "gentoo-diy-kernel".into(),
         keyboard_layout: installer_core::keyboard::detect_current(),
         timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
+        hostname: "gentoo".into(),
+        locales: vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
         account: Account { username: "tester".into(), password: "testpassword123".into() },
         wm: WmChoice::Niri,
         wm_configs_git_url: "file:///home/tarilka0gg/Documents/projects/gentoo-wm-configs".into(),

@@ -220,6 +220,12 @@ fn start_install(state: &mut AppState) {
         _ => PackageMode::default(),
     };
 
+    let hostname = std::env::var("GENTOO_INSTALLER_HOSTNAME").unwrap_or_else(|_| "gentoo".into());
+    let locales: Vec<String> = match std::env::var("GENTOO_INSTALLER_LOCALES") {
+        Ok(v) if !v.trim().is_empty() => v.split(',').map(|l| l.trim().to_string()).collect(),
+        _ => vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
+    };
+
     let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
     let opts = install::InstallOptions {
         layout,
@@ -234,6 +240,8 @@ fn start_install(state: &mut AppState) {
             .unwrap_or_else(|| "gentoo-diy-kernel".into()),
         keyboard_layout: installer_core::keyboard::detect_current(),
         timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
+        hostname,
+        locales,
         account,
         wm,
         wm_configs_git_url,
