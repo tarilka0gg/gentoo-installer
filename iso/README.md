@@ -1,4 +1,4 @@
-# Live ISO (minimal, TUI)
+# Live ISOs (minimal TUI, and GUI)
 
 Boots on BIOS and UEFI, autologins as root and starts `installer-cli`. About 750 MB.
 Tested in QEMU (KVM) with SeaBIOS and OVMF: Limine → kernel → dracut (`dmsquash-live`,
@@ -52,9 +52,39 @@ qemu-system-x86_64 -machine q35 -enable-kvm -m 2048 -display none -serial stdio 
     ... -drive if=pflash,format=raw,readonly=on,file=/usr/share/qemu/edk2-x86_64-code.fd   # UEFI
 ```
 
-## Not done
+## GUI ISO
 
-- The GUI ("main") ISO: niri, GTK4/libadwaita and `installer-gui` are not in the image yet.
+Same kernel and boot path, `ROOTFS=live-root-gui ./assemble-iso.sh <work> out.iso`. The rootfs
+adds GTK4, libadwaita, Mesa (with LLVM), seatd, **niri, Noctalia, xwayland-satellite and
+ghostty** — the compositor and shell from `gentoo-wm-configs`, with that repo's `niri/config.kdl`
+and `noctalia/config.toml` copied unchanged into root's home. `prepare-rootfs.sh <root> <cli>
+<gui> <wm-configs-dir>` appends two live-only blocks to the *copy* of the niri config (start
+`installer-gui`, open it full screen). tty1 starts `dbus-run-session -- niri --session` (stderr
+in `/var/log/niri-session.log`); the serial console gets the TUI. About 1.1 GB.
+
+**niri needs hardware-accelerated graphics.** It skips software EGL renderers
+(`software EGL renderers are skipped` in the log), so with no GPU driver it has no outputs. A
+watchdog stops it after 25 s in that case and starts the text installer instead of leaving a
+black screen. Verified in QEMU with a plain `virtio-vga`, which is exactly that situation.
+The graphical path itself — niri drawing `installer-gui` — has **not** been seen working: the
+QEMU on the build machine has no GL display (`-display egl-headless` is not compiled in).
+
+Add `live.debug` to the kernel command line (`EXTRA_CMDLINE=live.debug` when assembling) to get a
+plain shell on the serial console instead of the installer.
+
+## Bugs this found in the kernel config
+
+Both are invisible with serial-only testing and were only noticed from screenshots:
+
+- `CONFIG_FB` was missing, so `olddefconfig` silently dropped `FRAMEBUFFER_CONSOLE`: on any UEFI
+  machine tty1 stayed black. Fixed in `kernel-live.config` (`FB`, `FB_EFI`, `DRM_FBDEV_EMULATION`,
+  `FRAMEBUFFER_CONSOLE`); the TUI is now visible on a UEFI VM.
+- Mesa loads `libLLVM.so` at run time. Excluding `usr/lib/llvm` from the squashfs (fine for the
+  minimal ISO) broke the GUI ISO; `assemble-iso.sh` now keeps only that library when the rootfs
+  contains the GUI.
+
+## Not done
+- The TUI's network screen says Wi-Fi (iwd) is "not wired into this screen yet": on a machine without Ethernet the installer cannot get online from the TUI.
 - Nothing runs a real install from the ISO: the store has no kernels to install (see the
   main README), so the TUI has been started but not driven end to end.
 - No checksums, no signing, no Secure Boot.
