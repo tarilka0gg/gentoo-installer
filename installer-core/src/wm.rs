@@ -33,12 +33,14 @@ pub enum WmChoice {
     Sway,
     Labwc,
     MangoWc,
+    /// suckless-style: its config is a C header compiled in via Portage's `savedconfig`.
+    Dwl,
 }
 
 impl WmChoice {
     /// All choices, in the order the Advanced-setup picker lists them — niri first,
     /// matching its role as the silent default.
-    pub const ALL: [WmChoice; 5] = [WmChoice::Niri, WmChoice::Hyprland, WmChoice::Sway, WmChoice::Labwc, WmChoice::MangoWc];
+    pub const ALL: [WmChoice; 6] = [WmChoice::Niri, WmChoice::Hyprland, WmChoice::Sway, WmChoice::Labwc, WmChoice::MangoWc, WmChoice::Dwl];
 
     pub fn display_name(self) -> &'static str {
         match self {
@@ -47,6 +49,7 @@ impl WmChoice {
             WmChoice::Sway => "Sway",
             WmChoice::Labwc => "Labwc",
             WmChoice::MangoWc => "MangoWC",
+            WmChoice::Dwl => "dwl",
         }
     }
 }
@@ -118,6 +121,15 @@ fn spec(choice: WmChoice) -> WmSpec {
             preset_dir: "mangowc",
             config_dest_dir: "mango",
         },
+        WmChoice::Dwl => WmSpec {
+            atom: "gui-wm/dwl",
+            extra_overlay: None,
+            accept_keywords: Some("gui-wm/dwl ~amd64"),
+            // dwl has no exec-on-startup of its own: Noctalia rides on its `-s` flag.
+            launch_cmd: "dwl -s noctalia",
+            preset_dir: "dwl",
+            config_dest_dir: "dwl",
+        },
     }
 }
 
@@ -133,7 +145,6 @@ pub async fn install(
     username: &str,
 ) -> crate::Result<()> {
     let spec = spec(choice);
-    emerge_wm_packages(runner, target, &spec).await?;
 
     let staging = std::env::temp_dir().join(format!("gentoo-installer-wm-configs-{}", std::process::id()));
     if staging.exists() {
@@ -142,11 +153,33 @@ pub async fn install(
     let staging_str = staging
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 staging path")))?;
+    // Cloned before the emerge: dwl's config is compiled in, so `config.h` has to be in
+    // Portage's savedconfig directory by the time the build starts.
     runner.run_status("git", &["clone", "--depth", "1", configs_git_url, staging_str]).await?;
 
-    let result = apply_preset_from_dir(runner, target, &staging, &spec, username).await;
+    let result = async {
+        if choice == WmChoice::Dwl {
+            install_savedconfig(&staging, target, &spec).await?;
+        }
+        emerge_wm_packages(runner, target, &spec).await?;
+        apply_preset_from_dir(runner, target, &staging, &spec, username).await
+    }
+    .await;
     tokio::fs::remove_dir_all(&staging).await.ok();
     result
+}
+
+/// Puts the preset's `config.h` where `savedconfig.eclass` restores it from
+/// (`/etc/portage/savedconfig/<category>/<name>`), so dwl builds with the preset's keybinds.
+async fn install_savedconfig(preset_root: &Path, target: &Path, spec: &WmSpec) -> crate::Result<()> {
+    let name = spec.atom.rsplit('/').next().unwrap_or(spec.atom);
+    let dest_dir = target.join("etc/portage/savedconfig/gui-wm");
+    tokio::fs::create_dir_all(&dest_dir).await?;
+    tokio::fs::copy(preset_root.join(spec.preset_dir).join("config.h"), dest_dir.join(name)).await?;
+    // Without the flag the eclass ignores the file (`-savedconfig` is the default).
+    let portage_dir = target.join("etc/portage");
+    write_portage_entry(&portage_dir.join("package.use"), "gentoo-installer-dwl", &format!("{} savedconfig\n", spec.atom)).await?;
+    Ok(())
 }
 
 /// Bind-mounts, bootstraps network/tree/overlays, writes portage overrides, and emerges
@@ -232,7 +265,7 @@ async fn configure_wm_portage_overrides(target: &Path, spec: &WmSpec) -> crate::
     write_portage_entry(
         &portage_dir.join("package.mask"),
         "gentoo-installer-wm",
-        "=gui-wm/niri-9999\n=gui-wm/hyprland-9999\n=gui-wm/mangowm-9999\n=gui-wm/labwc-9999\n=gui-apps/noctalia-9999\n",
+        "=gui-wm/niri-9999\n=gui-wm/hyprland-9999\n=gui-wm/mangowm-9999\n=gui-wm/labwc-9999\n=gui-wm/dwl-9999\n=gui-apps/noctalia-9999\n",
     )
     .await?;
 
@@ -321,6 +354,7 @@ mod tests {
             (WmChoice::Sway, "gui-wm/sway"),
             (WmChoice::Labwc, "gui-wm/labwc"),
             (WmChoice::MangoWc, "gui-wm/mangowm"),
+            (WmChoice::Dwl, "gui-wm/dwl"),
         ] {
             let target_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-test-{choice:?}-{}", std::process::id()));
             tokio::fs::create_dir_all(&target_dir).await.unwrap();
@@ -379,5 +413,25 @@ mod tests {
         assert!(written.contains("dev-cpp/sdbus-c++ ~amd64"));
 
         tokio::fs::remove_dir_all(&target_dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn dwl_gets_its_config_h_as_savedconfig_and_launches_noctalia_with_dash_s() {
+        let root = std::env::temp_dir().join(format!("gentoo-installer-dwl-{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let preset = root.join("preset");
+        let target = root.join("target");
+        make_preset_repo(&preset, "dwl");
+        std::fs::write(preset.join("dwl/config.h"), "/* dwl */\n").unwrap();
+
+        install_savedconfig(&preset, &target, &spec(WmChoice::Dwl)).await.unwrap();
+        assert_eq!(std::fs::read_to_string(target.join("etc/portage/savedconfig/gui-wm/dwl")).unwrap(), "/* dwl */\n");
+        let uses = std::fs::read_to_string(target.join("etc/portage/package.use")).unwrap();
+        assert!(uses.contains("gui-wm/dwl savedconfig"), "{uses}");
+
+        apply_preset_from_dir(&FakeCommandRunner::new(), &target, &preset, &spec(WmChoice::Dwl), "solomiya").await.unwrap();
+        let profile = std::fs::read_to_string(target.join("home/solomiya/.bash_profile")).unwrap();
+        assert_eq!(profile, "exec dbus-run-session -- dwl -s noctalia\n");
+        std::fs::remove_dir_all(&root).ok();
     }
 }

@@ -208,6 +208,7 @@ fn start_install(state: &mut AppState) {
         Ok("sway") => WmChoice::Sway,
         Ok("labwc") => WmChoice::Labwc,
         Ok("mangowc") => WmChoice::MangoWc,
+        Ok("dwl") => WmChoice::Dwl,
         _ => WmChoice::default(),
     };
     let wm_configs_git_url = std::env::var("GENTOO_INSTALLER_WM_CONFIGS_URL").unwrap_or_default();

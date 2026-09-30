@@ -222,11 +222,6 @@ a test dies half-way, and each copy is deleted by a guard that **refuses to dele
 anything is still mounted under it** (`remove_dir_all` does not stop at mount points and
 would otherwise recurse into the host's real `/dev`).
 
-## License
-
-[GPL-2.0-or-later](LICENSE), matching Portage, Gentoo and this project's sibling
-[portage-store](https://github.com/tarilka0gg/portage-store).
-
 ## Choices: desktop, graphics driver, software
 
 Advanced setup (GUI) or environment variables (TUI) choose three things:
@@ -240,5 +235,12 @@ Advanced setup (GUI) or environment variables (TUI) choose three things:
   `--autounmask-write --autounmask-continue`: on a bare stage3 nearly every desktop package
   needs a point USE change, and every atom was checked with `emerge -f` on a real stage3.
   Steam and Discord are deliberately not offered (overlay/multilib/licence decisions).
-- **Desktop** — the compositors in `gentoo-wm-configs` that have a Portage package. Scroll and
-  Triad have no ebuild in `gentoo`, `guru` or the local overlays, so they cannot be installed yet.
+- **Desktop** — niri, Hyprland, Sway, Labwc, MangoWC and dwl (`GENTOO_INSTALLER_WM=…`). dwl's config is a C
+  header: the preset's `config.h` goes to `/etc/portage/savedconfig/gui-wm/dwl` with `USE=savedconfig` and
+  is compiled in. Scroll and Triad from `gentoo-wm-configs` have no ebuild in `gentoo`, `guru` or the local
+  overlays, so they cannot be installed yet.
+
+## License
+
+[GPL-2.0-or-later](LICENSE), matching Portage, Gentoo and this project's sibling
+[portage-store](https://github.com/tarilka0gg/portage-store).
