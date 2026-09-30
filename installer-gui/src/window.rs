@@ -53,6 +53,8 @@ struct WizardState {
     keyboard_layout: RefCell<String>,
     timezone: RefCell<String>,
     wm: Cell<WmChoice>,
+    gpu: Cell<Option<hardware::Gpu>>,
+    packages: RefCell<Vec<String>>,
     opt_level: Cell<OptLevel>,
     package_mode: Cell<PackageMode>,
     manual_root_fs: Cell<partition::RootFs>,
@@ -73,6 +75,8 @@ impl WizardState {
             keyboard_layout: RefCell::new(keyboard::detect_current()),
             timezone: RefCell::new(tz::detect_current().unwrap_or_else(|| "UTC".to_string())),
             wm: Cell::new(WmChoice::default()),
+            gpu: Cell::new(None),
+            packages: RefCell::new(installer_core::packages::default_ids()),
             opt_level: Cell::new(OptLevel::default()),
             package_mode: Cell::new(PackageMode::default()),
             manual_root_fs: Cell::new(partition::RootFs::Btrfs),
@@ -120,13 +124,17 @@ pub fn build(app: &adw::Application) {
     // on installer hardware.
     let target_after_prelude = if network::IwdClient::ethernet_link_up() { disk_page.clone() } else { network_page.clone() };
     let opt_level_page = opt_level_select_page(nav.clone(), state.clone(), target_after_prelude.clone());
-    let wm_page = wm_select_page(nav.clone(), state.clone(), opt_level_page.clone());
+    let packages_page = packages_select_page(nav.clone(), state.clone(), opt_level_page.clone());
+    let gpu_page = gpu_select_page(nav.clone(), state.clone(), packages_page.clone());
+    let wm_page = wm_select_page(nav.clone(), state.clone(), gpu_page.clone());
     let timezone_page = timezone_select_page(nav.clone(), state.clone(), wm_page.clone());
     let keyboard_page = keyboard_select_page(nav.clone(), state.clone(), timezone_page.clone());
     nav.add(&welcome_page(&nav, state.clone(), keyboard_page.clone(), target_after_prelude));
     nav.add(&keyboard_page);
     nav.add(&timezone_page);
     nav.add(&wm_page);
+    nav.add(&gpu_page);
+    nav.add(&packages_page);
     nav.add(&opt_level_page);
     nav.add(&network_page);
     nav.add(&disk_page);
@@ -451,6 +459,106 @@ fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: a
     page.set_tag(Some("wm"));
     page
 }
+
+/// Advanced-setup only: which GPU driver/kernel build to use. Detection picks the default
+/// (listed first and marked); the rest are for machines where the hardware can't say what
+/// the user wants (nouveau instead of the proprietary driver, for one).
+fn gpu_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Graphics driver").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+    let detected = hardware::Profile::detect().ok().map(|p| p.gpu);
+    let body = gtk::Label::builder()
+        .label("This picks the kernel build and, for NVIDIA, whether the proprietary driver is compiled for it.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build();
+
+    let mut choices: Vec<hardware::Gpu> = Vec::new();
+    if let Some(d) = detected {
+        choices.push(d);
+    }
+    choices.extend(hardware::Gpu::ALL.iter().copied().filter(|g| Some(*g) != detected));
+    let labels: Vec<String> = choices
+        .iter()
+        .map(|g| if Some(*g) == detected { format!("{} — detected", g.display_name()) } else { g.display_name().to_string() })
+        .collect();
+    let model = gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
+    let dropdown = gtk::DropDown::builder().model(&model).selected(0).build();
+    {
+        let state = state.clone();
+        let choices = choices.clone();
+        dropdown.connect_selected_notify(move |dd| {
+            // Index 0 is the detected GPU: leave the override unset so a failed detection
+            // at install time still falls through to the normal path.
+            let picked = choices.get(dd.selected() as usize).copied();
+            state.gpu.set(if dd.selected() == 0 && detected.is_some() { None } else { picked });
+        });
+    }
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&dropdown);
+    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&next_button);
+    {
+        let nav = nav.clone();
+        next_button.connect_clicked(move |_| nav.push(&next_page));
+    }
+    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Graphics").child(&clamp).build();
+    page.set_tag(Some("gpu"));
+    page
+}
+
+/// Advanced-setup only: optional software, one switch per group in `installer_core::packages`.
+/// The defaults (terminal, browser, CLI tools) are ticked; with Advanced off they are
+/// installed anyway.
+fn packages_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
+    let heading = gtk::Label::builder().label("Software").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+    let body = gtk::Label::builder()
+        .label("Installed after the desktop. Prebuilt where Gentoo offers a binary; everything else compiles.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build();
+
+    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(vec!["boxed-list".to_string()]).build();
+    for group in installer_core::packages::GROUPS {
+        let row = adw::ActionRow::builder().title(group.name).subtitle(group.description).build();
+        let switch = gtk::Switch::builder().valign(gtk::Align::Center).active(state.packages.borrow().iter().any(|id| id == group.id)).build();
+        let state = state.clone();
+        let id = group.id.to_string();
+        switch.connect_state_set(move |_, on| {
+            let mut ids = state.packages.borrow_mut();
+            ids.retain(|i| *i != id);
+            if on {
+                ids.push(id.clone());
+            }
+            glib::Propagation::Proceed
+        });
+        row.add_suffix(&switch);
+        row.set_activatable_widget(Some(&switch));
+        list.append(&row);
+    }
+
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    content.append(&heading);
+    content.append(&body);
+    content.append(&list);
+    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    content.append(&next_button);
+    {
+        let nav = nav.clone();
+        next_button.connect_clicked(move |_| nav.push(&next_page));
+    }
+    let scroll = gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Never).build();
+    let clamp = adw::Clamp::builder().child(&scroll).maximum_size(560).build();
+    let page = adw::NavigationPage::builder().title("Software").child(&clamp).build();
+    page.set_tag(Some("packages"));
+    page
+}
+
 
 /// Advanced-setup only: `-O2`/`-O3` for `make.conf`, O2 preselected (the silent default
 /// when Advanced setup is off entirely — see `make_conf::OptLevel`'s doc comment for why
@@ -1261,6 +1369,8 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                 hostname: "gentoo".into(),
                 locales: vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
                 account,
+                gpu_override: state.gpu.get(),
+                packages: state.packages.borrow().clone(),
                 wm: state.wm.get(),
                 opt_level: state.opt_level.get(),
                 package_mode: state.package_mode.get(),

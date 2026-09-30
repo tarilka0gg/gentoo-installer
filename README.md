@@ -226,3 +226,19 @@ would otherwise recurse into the host's real `/dev`).
 
 [GPL-2.0-or-later](LICENSE), matching Portage, Gentoo and this project's sibling
 [portage-store](https://github.com/tarilka0gg/portage-store).
+
+## Choices: desktop, graphics driver, software
+
+Advanced setup (GUI) or environment variables (TUI) choose three things:
+
+- **Graphics driver** — `InstallOptions::gpu_override` (`GENTOO_INSTALLER_GPU=nvidia|nouveau|amd|intel|xe|none`).
+  Detection stays the default; the override picks the kernel build in the store and whether
+  the proprietary NVIDIA module is compiled.
+- **Software** — `installer-core/src/packages.rs` holds the groups (terminal, browser, CLI tools,
+  development, media, graphics, messaging, office, gaming tools). `GENTOO_INSTALLER_PACKAGES=terminal,browser,dev`
+  (unset = the defaults: terminal, browser, CLI tools). The emerge runs with
+  `--autounmask-write --autounmask-continue`: on a bare stage3 nearly every desktop package
+  needs a point USE change, and every atom was checked with `emerge -f` on a real stage3.
+  Steam and Discord are deliberately not offered (overlay/multilib/licence decisions).
+- **Desktop** — the compositors in `gentoo-wm-configs` that have a Portage package. Scroll and
+  Triad have no ebuild in `gentoo`, `guru` or the local overlays, so they cannot be installed yet.

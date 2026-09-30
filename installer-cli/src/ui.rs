@@ -226,6 +226,20 @@ fn start_install(state: &mut AppState) {
         _ => vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
     };
 
+    let gpu_override = match std::env::var("GENTOO_INSTALLER_GPU").as_deref() {
+        Ok("nvidia") => Some(installer_core::hardware::Gpu::Nvidia),
+        Ok("nouveau") => Some(installer_core::hardware::Gpu::Nouveau),
+        Ok("amd") => Some(installer_core::hardware::Gpu::Amd),
+        Ok("intel") => Some(installer_core::hardware::Gpu::Intel),
+        Ok("xe") => Some(installer_core::hardware::Gpu::Xe),
+        Ok("none") => Some(installer_core::hardware::Gpu::None),
+        _ => None,
+    };
+    let packages: Vec<String> = match std::env::var("GENTOO_INSTALLER_PACKAGES") {
+        Ok(v) => v.split(',').map(|g| g.trim().to_string()).filter(|g| !g.is_empty()).collect(),
+        Err(_) => installer_core::packages::default_ids(),
+    };
+
     let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
     let opts = install::InstallOptions {
         layout,
@@ -242,6 +256,8 @@ fn start_install(state: &mut AppState) {
         timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
         hostname,
         locales,
+        gpu_override,
+        packages,
         account,
         wm,
         wm_configs_git_url,

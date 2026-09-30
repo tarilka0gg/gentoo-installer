@@ -88,6 +88,21 @@ pub enum Gpu {
 }
 
 impl Gpu {
+    /// Every value an installer can offer, detected-first ordering is the caller's job.
+    pub const ALL: [Gpu; 7] = [Gpu::Nvidia, Gpu::Nouveau, Gpu::Amd, Gpu::Intel, Gpu::Xe, Gpu::RadeonLegacy, Gpu::None];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Gpu::Nvidia => "NVIDIA — proprietary driver",
+            Gpu::Nouveau => "NVIDIA — open-source (nouveau)",
+            Gpu::Amd => "AMD (amdgpu)",
+            Gpu::Intel => "Intel (i915)",
+            Gpu::Xe => "Intel Arc (xe)",
+            Gpu::RadeonLegacy => "AMD/ATI legacy (radeon)",
+            Gpu::None => "No discrete driver / software rendering",
+        }
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Gpu::Intel => "intel",

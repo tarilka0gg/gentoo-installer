@@ -1,0 +1,298 @@
+//! Optional software groups the user can tick in the installer, emerged in the target after
+//! the desktop. Each atom was checked to exist in the synced `gentoo`/`guru` trees; the
+//! ones whose only keyword is `~amd64` get an accept-keywords line, everything else
+//! resolves on a stock `amd64` profile.
+//!
+//! Deliberately absent: Steam (needs the `steam-overlay`, a multilib profile and licence
+//! acceptance — more than an unattended step should decide for the user) and Discord
+//! (proprietary licence).
+
+use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs, write_portage_entry};
+use crate::command::CommandRunner;
+use std::path::Path;
+
+pub struct Group {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    /// Ticked by default (`GENTOO_INSTALLER_PACKAGES` / the GUI list start from these).
+    pub default: bool,
+    pub atoms: &'static [&'static str],
+    /// Atoms from `atoms` that only have `~amd64` keywords.
+    pub testing: &'static [&'static str],
+    /// `package.use` lines (`atom flag ...`) the atoms need on a stock stage3 profile —
+    /// found by `emerge -p` on a real stage3, e.g. ghostty's `REQUIRED_USE` wants X or wayland.
+    pub use_flags: &'static [&'static str],
+    /// Needs the GURU overlay (the desktop step always clones it).
+    pub guru: bool,
+}
+
+pub const GROUPS: &[Group] = &[
+    Group {
+        id: "terminal",
+        name: "Terminal",
+        description: "ghostty, the terminal every WM preset binds to Mod+Return",
+        default: true,
+        atoms: &["x11-terms/ghostty"],
+        testing: &[],
+        use_flags: &["x11-terms/ghostty wayland"],
+        guru: false,
+    },
+    Group {
+        id: "browser",
+        name: "Web browser",
+        description: "Firefox (prebuilt binary — no hours of compiling)",
+        default: true,
+        atoms: &["www-client/firefox-bin"],
+        testing: &[],
+        use_flags: &[],
+        guru: false,
+    },
+    Group {
+        id: "tools",
+        name: "Command-line tools",
+        description: "git, btop, fish, micro",
+        default: true,
+        atoms: &["dev-vcs/git", "sys-process/btop", "app-shells/fish", "app-editors/micro"],
+        testing: &["app-editors/micro"],
+        use_flags: &[],
+        guru: false,
+    },
+    Group {
+        id: "dev",
+        name: "Development",
+        description: "neovim, Rust (rust-bin), podman",
+        default: false,
+        atoms: &["app-editors/neovim", "dev-lang/rust-bin", "app-containers/podman"],
+        testing: &[],
+        use_flags: &[],
+        guru: false,
+    },
+    Group {
+        id: "media",
+        name: "Media",
+        description: "mpv and VLC",
+        default: false,
+        atoms: &["media-video/mpv", "media-video/vlc"],
+        testing: &[],
+        use_flags: &[],
+        guru: false,
+    },
+    Group {
+        id: "graphics",
+        name: "Graphics",
+        description: "GIMP",
+        default: false,
+        atoms: &["media-gfx/gimp"],
+        testing: &[],
+        use_flags: &[],
+        guru: false,
+    },
+    Group {
+        id: "chat",
+        name: "Messaging",
+        description: "Telegram Desktop (prebuilt)",
+        default: false,
+        atoms: &["net-im/telegram-desktop-bin"],
+        testing: &["net-im/telegram-desktop-bin"],
+        use_flags: &[],
+        guru: false,
+    },
+    Group {
+        id: "office",
+        name: "Office",
+        description: "LibreOffice (prebuilt)",
+        default: false,
+        atoms: &["app-office/libreoffice-bin"],
+        testing: &[],
+        use_flags: &[],
+        guru: false,
+    },
+    Group {
+        id: "gaming",
+        name: "Gaming tools",
+        description: "GameMode and MangoHud",
+        default: false,
+        atoms: &["games-util/gamemode", "games-util/mangohud"],
+        testing: &["games-util/gamemode", "games-util/mangohud"],
+        use_flags: &["games-util/gamemode elogind"],
+        guru: true,
+    },
+];
+
+pub fn find(id: &str) -> Option<&'static Group> {
+    GROUPS.iter().find(|g| g.id == id)
+}
+
+/// The ids ticked before the user touches anything.
+pub fn default_ids() -> Vec<String> {
+    GROUPS.iter().filter(|g| g.default).map(|g| g.id.to_string()).collect()
+}
+
+/// Unknown ids are an error, not silently skipped: a typo in
+/// `GENTOO_INSTALLER_PACKAGES` should not produce an install without the browser.
+pub fn resolve(ids: &[String]) -> crate::Result<Vec<&'static Group>> {
+    let mut out: Vec<&'static Group> = Vec::new();
+    for id in ids {
+        let group = find(id).ok_or_else(|| {
+            let known: Vec<_> = GROUPS.iter().map(|g| g.id).collect();
+            crate::Error::Other(anyhow::anyhow!("unknown package group {id:?}; known: {}", known.join(", ")))
+        })?;
+        if !out.iter().any(|g| g.id == group.id) {
+            out.push(group);
+        }
+    }
+    Ok(out)
+}
+
+/// Emerges every atom of the chosen groups in one transaction (`--noreplace`, so a re-run
+/// is a no-op), inside the usual chroot bootstrap. Nothing runs for an empty selection.
+pub async fn install(runner: &dyn CommandRunner, target: &Path, ids: &[String]) -> crate::Result<()> {
+    let groups = resolve(ids)?;
+    if groups.is_empty() {
+        return Ok(());
+    }
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
+
+    let mut atoms: Vec<&str> = groups.iter().flat_map(|g| g.atoms.iter().copied()).collect();
+    atoms.dedup();
+    let mut testing = String::new();
+    for atom in groups.iter().flat_map(|g| g.testing.iter()) {
+        testing.push_str(&format!("{atom} ~amd64\n"));
+    }
+
+    bind_mount_chroot_dirs(runner, target).await?;
+    let result = async {
+        ensure_network_resolves(target).await?;
+        ensure_portage_tree(runner, target, target_str).await?;
+        let portage_dir = target.join("etc/portage");
+        tokio::fs::create_dir_all(&portage_dir).await?;
+        if !testing.is_empty() {
+            write_portage_entry(&portage_dir.join("package.accept_keywords"), "gentoo-installer-packages", &testing).await?;
+        }
+        let use_lines: String = groups.iter().flat_map(|g| g.use_flags.iter()).map(|l| format!("{l}\n")).collect();
+        if !use_lines.is_empty() {
+            write_portage_entry(&portage_dir.join("package.use"), "gentoo-installer-packages", &use_lines).await?;
+        }
+        // A bare stage3 profile needs point USE changes for desktop software (harfbuzz for
+        // freetype, nftables for iptables, X for vulkan-loader...), different for every
+        // atom. `--autounmask-write --autounmask-continue` lets Portage write and apply
+        // them; `CONFIG_PROTECT_MASK` makes it write `/etc/portage` directly instead of
+        // `._cfg` files nobody would dispatch. Verified with `emerge -f` on a real stage3.
+        let mut argv = vec![target_str, "env", "CONFIG_PROTECT_MASK=/etc/portage", "emerge", "--noreplace", "--autounmask-write", "--autounmask-continue"];
+        argv.extend(atoms.iter().copied());
+        runner.run_status("chroot", &argv).await
+    }
+    .await;
+    unmount_chroot_dirs(runner, target).await;
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::FakeCommandRunner;
+
+    fn temp_target(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-pkgs-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
+        std::fs::write(dir.join("etc/resolv.conf"), "nameserver 127.0.0.1\n").ok();
+        dir
+    }
+
+    #[test]
+    fn ids_are_unique_and_every_atom_is_category_slash_name() {
+        let mut seen = std::collections::HashSet::new();
+        for g in GROUPS {
+            assert!(seen.insert(g.id), "duplicate group id {}", g.id);
+            assert!(!g.atoms.is_empty());
+            for a in g.atoms {
+                assert!(a.split('/').count() == 2 && !a.starts_with('=') && !a.contains(' '), "{a}");
+            }
+            for t in g.testing {
+                assert!(g.atoms.contains(t), "{t} is marked testing but is not in {}", g.id);
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_group_is_rejected_before_anything_runs() {
+        assert!(resolve(&["browser".into(), "browsr".into()]).is_err());
+    }
+
+    #[test]
+    fn duplicates_collapse() {
+        assert_eq!(resolve(&["dev".into(), "dev".into()]).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn empty_selection_runs_nothing() {
+        let runner = FakeCommandRunner::new();
+        install(&runner, Path::new("/nonexistent"), &[]).await.unwrap();
+        assert!(runner.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn emerges_all_atoms_in_one_call_and_unmounts() {
+        let dir = temp_target("ok");
+        let runner = FakeCommandRunner::new();
+        install(&runner, &dir, &["browser".into(), "gaming".into()]).await.unwrap();
+
+        let calls = runner.calls();
+        let emerge = calls.iter().find(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("env")).unwrap();
+        assert_eq!(
+            emerge.1[2..],
+            [
+                "CONFIG_PROTECT_MASK=/etc/portage",
+                "emerge",
+                "--noreplace",
+                "--autounmask-write",
+                "--autounmask-continue",
+                "www-client/firefox-bin",
+                "games-util/gamemode",
+                "games-util/mangohud"
+            ]
+        );
+        assert_eq!(calls.iter().filter(|(c, _)| c == "umount").count(), 3);
+        let kw = std::fs::read_to_string(dir.join("etc/portage/package.accept_keywords")).unwrap();
+        assert!(kw.contains("games-util/gamemode ~amd64") && kw.contains("games-util/mangohud ~amd64") && !kw.contains("firefox"), "{kw}");
+        let uses = std::fs::read_to_string(dir.join("etc/portage/package.use")).unwrap();
+        assert!(uses.contains("games-util/gamemode elogind") && !uses.contains("ghostty"), "{uses}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn unmounts_even_when_emerge_fails() {
+        let dir = temp_target("fail");
+        let runner = FakeCommandRunner::new();
+        runner.fail("chroot", "emerge: blocked");
+        assert!(install(&runner, &dir, &["media".into()]).await.is_err());
+        assert_eq!(runner.calls().iter().filter(|(c, _)| c == "umount").count(), 3);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod use_tests {
+    use super::*;
+    use crate::command::FakeCommandRunner;
+
+    #[tokio::test]
+    async fn terminal_group_turns_on_wayland_for_ghostty() {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-pkgs-use-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/resolv.conf"), "x\n").ok();
+
+        install(&FakeCommandRunner::new(), &dir, &["terminal".into()]).await.unwrap();
+
+        let text = std::fs::read_to_string(dir.join("etc/portage/package.use")).unwrap();
+        assert!(text.contains("x11-terms/ghostty wayland"), "{text}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
