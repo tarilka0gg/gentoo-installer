@@ -181,9 +181,32 @@ externally.
   no hostname, no `locale-gen`, no `doas.conf`. The new phases (and
   `Settings`, the struct that carries these choices) only take effect once a
   frontend drives the phase system.
-- **`locale-gen`/`env-update` via `chroot` have not run against a real target.**
-  The tests pin the files written and the exact argv against `FakeCommandRunner`,
-  which cannot tell whether a real Gentoo accepts them.
+- **`locale-gen` needs `/proc`.** Found by running the step against a real stage3
+  (it compiles the locales, then aborts on `findmnt: can't read /proc/mounts`,
+  leaving `locale -a` at `C, C.utf8, POSIX`); no `FakeCommandRunner` test could have
+  seen it. `locale::apply` now bind-mounts `/proc`, `/sys`, `/dev` around it and always
+  unmounts. Fixed and re-verified on the real stage3 below.
+
+### Testing against a real stage3
+
+`installer-core/tests/real_target.rs` runs the `Locale`/`Users` steps with the real
+command runner against an unpacked stage3 and asks the *target's own tools* what came
+out (`locale -a`, `id -nG`, `getent shadow`, a password-vs-hash check). They are
+`#[ignore]`d — they need root and a stage3 on btrfs/xfs (each test works on a
+`cp --reflink` copy):
+
+```bash
+tar xpf stage3-amd64-openrc-*.tar.xz --xattrs-include='*.*' --numeric-owner -C /path/to/pristine
+cargo test -p installer-core --test real_target --no-run          # as your user
+sudo GENTOO_INSTALLER_STAGE3=/path/to/pristine \
+     unshare --mount --propagation private \
+     target/debug/deps/real_target-<hash> --ignored --test-threads=1
+```
+
+`unshare` keeps the bind mounts these steps make out of the host's mount table even if
+a test dies half-way, and each copy is deleted by a guard that **refuses to delete while
+anything is still mounted under it** (`remove_dir_all` does not stop at mount points and
+would otherwise recurse into the host's real `/dev`).
 
 ## License
 

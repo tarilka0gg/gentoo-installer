@@ -307,8 +307,8 @@ mod tests {
         assert!(std::fs::read_to_string(dir.join("etc/locale.gen")).unwrap().contains("uk_UA.UTF-8 UTF-8"));
 
         let target = dir.to_str().unwrap();
-        fake.assert_call(0, "chroot", &[target, "locale-gen"]);
-        fake.assert_call(1, "chroot", &[target, "env-update"]);
+        let chroots: Vec<Vec<String>> = fake.calls().into_iter().filter(|(c, _)| c == "chroot").map(|(_, a)| a).collect();
+        assert_eq!(chroots, [[target, "locale-gen"], [target, "env-update"]]);
 
         drop(tx);
         let mut events = Vec::new();

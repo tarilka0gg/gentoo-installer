@@ -6,12 +6,13 @@
 //! (+ `env-update` to fold it into `/etc/profile.env`). Missing any one leaves the
 //! system on the POSIX locale — UTF-8 text (Ukrainian included) renders and sorts wrong.
 //!
-//! `locale-gen` and `env-update` run through `chroot` (no bind mounts): both only read
-//! files under the target and write inside it, neither touches `/proc` or `/dev`.
-//! **Not yet exercised against a real Gentoo target** — the tests below pin the exact
-//! files and argv against `FakeCommandRunner`, which cannot tell whether a real
-//! `locale-gen` accepts them.
+//! `locale-gen` and `env-update` run through `chroot` **with `/proc`, `/sys` and `/dev`
+//! bind-mounted** (the same helpers `wm` and `gpu_driver` use). A bare chroot is not
+//! enough: run against a real stage3, `locale-gen` compiles the locales and then aborts
+//! with `findmnt: can't read /proc/mounts` (exit 1), leaving `locale -a` at
+//! `C, C.utf8, POSIX`. The mounts are always undone, success or failure.
 
+use crate::chroot_emerge::{bind_mount_chroot_dirs, unmount_chroot_dirs};
 use crate::command::CommandRunner;
 use std::path::Path;
 
@@ -67,11 +68,19 @@ pub async fn apply(runner: &dyn CommandRunner, target: &Path, locales: &[String]
     }
     tokio::fs::write(target.join("etc/locale.gen"), locale_gen).await?;
 
+    let mounted = bind_mount_chroot_dirs(runner, target).await;
+    let result = match mounted {
+        Ok(()) => generate_in_chroot(runner, target, target_str, first).await,
+        Err(e) => Err(e),
+    };
+    unmount_chroot_dirs(runner, target).await;
+    result
+}
+
+async fn generate_in_chroot(runner: &dyn CommandRunner, target: &Path, target_str: &str, lang: &str) -> crate::Result<()> {
     runner.run_status("chroot", &[target_str, "locale-gen"]).await?;
-
-    tokio::fs::write(target.join("etc/env.d/02locale"), format!("LANG=\"{first}\"\n")).await?;
+    tokio::fs::write(target.join("etc/env.d/02locale"), format!("LANG=\"{lang}\"\n")).await?;
     runner.run_status("chroot", &[target_str, "env-update"]).await?;
-
     Ok(())
 }
 
@@ -137,9 +146,11 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("etc/env.d/02locale")).unwrap(), "LANG=\"uk_UA.UTF-8\"\n");
 
         let target = dir.to_str().unwrap();
-        runner.assert_call(0, "chroot", &[target, "locale-gen"]);
-        runner.assert_call(1, "chroot", &[target, "env-update"]);
-        assert_eq!(runner.calls().len(), 2);
+        let cmds: Vec<(String, Vec<String>)> = runner.calls();
+        let names: Vec<&str> = cmds.iter().map(|(c, a)| if c == "chroot" { a[1].as_str() } else { c.as_str() }).collect();
+        // /proc, /sys, /dev in; the two chroot steps; the same three out, in reverse.
+        assert_eq!(names, ["mount", "mount", "mount", "locale-gen", "env-update", "umount", "umount", "umount"]);
+        assert!(cmds.iter().filter(|(c, _)| c == "chroot").all(|(_, a)| a[0] == target));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -180,6 +191,20 @@ mod tests {
     async fn an_empty_selection_is_an_error_not_a_silent_no_op() {
         let dir = temp_target("empty");
         assert!(apply(&FakeCommandRunner::new(), &dir, &[]).await.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn the_mounts_are_undone_even_when_locale_gen_fails() {
+        let dir = temp_target("unmountfail");
+        let runner = FakeCommandRunner::new();
+        runner.fail("chroot", "locale-gen: boom");
+
+        assert!(apply(&runner, &dir, &strings(&["en_US.UTF-8"])).await.is_err());
+
+        let cmds: Vec<String> = runner.calls().into_iter().map(|(c, _)| c).collect();
+        assert_eq!(cmds.iter().filter(|c| *c == "mount").count(), 3);
+        assert_eq!(cmds.iter().filter(|c| *c == "umount").count(), 3, "a failed build must not leave /proc etc. mounted in the target");
         std::fs::remove_dir_all(&dir).ok();
     }
 
