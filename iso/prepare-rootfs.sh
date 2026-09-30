@@ -36,14 +36,25 @@ if [ -n "$GUI" ]; then
     # live ISO it would cover the installer. The marker sits next to state.toml.
     install -d "$ROOT/root/.local/state/noctalia"
     touch "$ROOT/root/.local/state/noctalia/.setup-complete"
+    # gnome-keyring asks for a password to create "Default keyring" the first time Noctalia
+    # touches the secret service, and that prompt lands on top of the installer. A plain
+    # (unencrypted, empty-password) default keyring makes the question moot; nothing secret
+    # lives in a live session.
+    install -d -m 700 "$ROOT/root/.local/share/keyrings"
+    printf 'Default_keyring' > "$ROOT/root/.local/share/keyrings/default"
+    cat > "$ROOT/root/.local/share/keyrings/Default_keyring.keyring" <<'KEYRING'
+[keyring]
+display-name=Default keyring
+ctime=0
+mtime=0
+lock-on-idle=false
+lock-after=false
+KEYRING
+    chmod 600 "$ROOT/root/.local/share/keyrings/Default_keyring.keyring"
     cat >> "$ROOT/root/.config/niri/config.kdl" <<'NIRILIVE'
 
 // --- live ISO additions ---
 spawn-at-startup "installer-gui"
-window-rule {
-    match app-id="org.gentoo_diy.Installer"
-    open-fullscreen true
-}
 NIRILIVE
     cat > "$ROOT/root/.bash_profile" <<'PROFILE'
 if [ -z "${INSTALLER_STARTED:-}" ]; then

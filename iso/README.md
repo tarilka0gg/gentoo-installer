@@ -69,7 +69,7 @@ adds GTK4, libadwaita, Mesa (with LLVM), seatd, **niri, Noctalia, xwayland-satel
 ghostty** — the compositor and shell from `gentoo-wm-configs`, with that repo's `niri/config.kdl`
 and `noctalia/config.toml` copied unchanged into root's home. `prepare-rootfs.sh <root> <cli>
 <gui> <wm-configs-dir>` appends two live-only blocks to the *copy* of the niri config (start
-`installer-gui`, open it full screen). tty1 starts `dbus-run-session -- niri --session` (stderr
+`installer-gui` as an ordinary window, so Noctalia's bar stays visible). tty1 starts `dbus-run-session -- niri --session` (stderr
 in `/var/log/niri-session.log`); the serial console gets the TUI. 836 MB.
 
 **niri needs hardware-accelerated graphics.** It skips software EGL renderers
@@ -84,13 +84,15 @@ The graphical path **was** verified in a VM with a 3D virtual GPU: QEMU built wi
         -display egl-headless,rendernode=/dev/dri/renderD129 -cdrom out.iso ...
 
 niri then gets an output (`Virtual-1`, 1280x800), Noctalia starts and `installer-gui` opens full
-screen on its Welcome page. `screendump` does not work with GL scanout (`Error: no surface`);
+window on its Welcome page (the bar on top). `screendump` does not work with GL scanout (`Error: no surface`);
 take the picture inside the guest instead: `niri msg action screenshot-screen --write-to-disk true`
 from the `live.debug` serial shell, and pull the PNG out as base64. Real hardware has not been tried.
 
-Noctalia's first-run wizard would otherwise sit on top of the installer; the image ships
-`~/.local/state/noctalia/.setup-complete` to skip it. A `gcr-prompter` (keyring) window also
-exists in the session but does not cover the installer.
+Two first-run prompts would otherwise land on top of the installer, so the image pre-empts both:
+Noctalia's setup wizard (`~/.local/state/noctalia/.setup-complete`) and gnome-keyring's "Choose
+password for new keyring" (a plain, empty-password `Default_keyring` in `~/.local/share/keyrings`;
+nothing secret lives in a live session). Both checked in the GL VM: only the installer window and
+the bar remain.
 
 Add `live.debug` to the kernel command line (`EXTRA_CMDLINE=live.debug` when assembling) to get a
 plain shell on the serial console instead of the installer.
