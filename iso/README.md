@@ -1,6 +1,6 @@
 # Live ISOs (minimal TUI, and GUI)
 
-Boots on BIOS and UEFI, autologins as root and starts `installer-cli`. About 750 MB.
+Boots on BIOS and UEFI, autologins as root and starts `installer-cli`. 511 MB.
 Tested in QEMU (KVM) with SeaBIOS and OVMF: Limine → kernel → dracut (`dmsquash-live`,
 OverlayFS) → OpenRC → the installer's TUI on tty1 and on the serial console.
 
@@ -13,7 +13,7 @@ OverlayFS) → OpenRC → the installer's TUI on tty1 and on the serial console.
 | Initramfs | dracut with `dmsquash-live`, run inside the root filesystem |
 | Image | `mksquashfs` (zstd) + `xorriso`, Limine for BIOS (El Torito) and UEFI (FAT image) |
 
-The Portage tree, LLVM, headers and docs are left out of the squashfs
+The Portage tree, LLVM, compilers, Python, headers, translations and docs are left out of the squashfs
 (`squashfs-excludes.txt` is written by `assemble-iso.sh`): the live system never compiles;
 the installer works in a chroot of the *target*.
 
@@ -52,6 +52,16 @@ qemu-system-x86_64 -machine q35 -enable-kvm -m 2048 -display none -serial stdio 
     ... -drive if=pflash,format=raw,readonly=on,file=/usr/share/qemu/edk2-x86_64-code.fd   # UEFI
 ```
 
+## Size
+
+Measured with `ls -l` on the built images: minimal 755 → **511 MB**, GUI 1.1 GB → **836 MB** after
+(1) sizing the UEFI FAT image to its content instead of a fixed 96 MB, and (2) leaving out what a
+live system never uses: `usr/share/{locale,i18n,sgml,cmake,gcc-data,binutils-data}`, GCC's
+`libexec`, binutils, Python, and (GUI) Sway, which the first emerge pulled in. All three boot
+modes were re-tested after trimming (BIOS and UEFI for minimal, UEFI for GUI).
+For comparison, the official Gentoo minimal install CD is 975.8 MiB and its LiveGUI 4.0 GiB
+(distfiles.gentoo.org, 2026-09-13 builds).
+
 ## GUI ISO
 
 Same kernel and boot path, `ROOTFS=live-root-gui ./assemble-iso.sh <work> out.iso`. The rootfs
@@ -60,7 +70,7 @@ ghostty** — the compositor and shell from `gentoo-wm-configs`, with that repo'
 and `noctalia/config.toml` copied unchanged into root's home. `prepare-rootfs.sh <root> <cli>
 <gui> <wm-configs-dir>` appends two live-only blocks to the *copy* of the niri config (start
 `installer-gui`, open it full screen). tty1 starts `dbus-run-session -- niri --session` (stderr
-in `/var/log/niri-session.log`); the serial console gets the TUI. About 1.1 GB.
+in `/var/log/niri-session.log`); the serial console gets the TUI. 836 MB.
 
 **niri needs hardware-accelerated graphics.** It skips software EGL renderers
 (`software EGL renderers are skipped` in the log), so with no GPU driver it has no outputs. A

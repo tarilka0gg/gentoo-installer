@@ -32,7 +32,10 @@ cp "$ISO/limine.conf" "$ISO/boot/limine/limine.conf"
 # UEFI: El Torito boots a small FAT image holding Limine; it finds boot() there, so the
 # kernel and initramfs are copied in too (~30 MB — cheaper than a second config dialect).
 EFI=$W/efiboot.img
-rm -f "$EFI"; truncate -s 96M "$EFI"; mkfs.vfat -F 32 -n EFIBOOT "$EFI" >/dev/null
+# Sized to what goes in (+8 MB slack); FAT32 with 512-byte clusters needs >= ~33 MB to be valid.
+need=$(( $(stat -c %s "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" "$ISO/EFI/BOOT/BOOTX64.EFI" | paste -sd+ | bc) / 1048576 + 8 ))
+[ "$need" -lt 36 ] && need=36
+rm -f "$EFI"; truncate -s ${need}M "$EFI"; mkfs.vfat -F 32 -s 1 -n EFIBOOT "$EFI" >/dev/null
 mmd -i "$EFI" ::/EFI ::/EFI/BOOT ::/boot
 mcopy -i "$EFI" "$ISO/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "$EFI" "$ISO/limine.conf" ::/limine.conf
@@ -62,6 +65,20 @@ var/cache/distfiles
 var/cache/binpkgs
 $LLVM_EXCLUDES
 usr/include
+usr/share/locale
+usr/share/i18n
+usr/share/sgml
+usr/share/cmake
+usr/share/gcc-data
+usr/share/binutils-data
+usr/libexec/gcc
+usr/lib/binutils
+usr/lib/python3.14
+usr/bin/sway
+usr/bin/swaymsg
+usr/bin/swaynag
+usr/bin/swaybar
+usr/share/sway
 usr/share/man
 usr/share/doc
 usr/share/info
