@@ -110,7 +110,7 @@ PROFILE
     chroot "$ROOT" rc-update add seatd default >/dev/null 2>&1 || true
 else
     cat > "$ROOT/root/.bash_profile" <<'PROFILE'
-if [ -z "${INSTALLER_STARTED:-}" ] && { [ "$(tty)" = /dev/tty1 ] || [ "$(tty)" = /dev/ttyS0 ]; }; then
+if [ -z "${INSTALLER_STARTED:-}" ] && { [ "$(tty)" = /dev/tty1 ] || { [ "$(tty)" = /dev/ttyS0 ] && ! grep -qw live.debug /proc/cmdline; }; }; then
     export INSTALLER_STARTED=1
     installer-cli
     echo "Installer exited. This is a live shell; run 'installer-cli' to start it again."
@@ -178,7 +178,8 @@ FISHCONF
         cat > "$ROOT/root/.config/fish/config.fish" <<'FISHCONF'
 if status is-login; and not set -q INSTALLER_STARTED
     set -gx INSTALLER_STARTED 1
-    if test (tty) = /dev/tty1; or test (tty) = /dev/ttyS0
+    # `live.debug` on the kernel command line leaves a plain shell on the serial console.
+    if test (tty) = /dev/tty1; or begin; test (tty) = /dev/ttyS0; and not grep -qw live.debug /proc/cmdline; end
         installer-cli
         echo "Installer exited. This is a live shell; run 'installer-cli' to start it again."
     end

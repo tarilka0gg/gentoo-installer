@@ -44,6 +44,16 @@ Boot parameters (in `limine.conf`): `root=live:CDLABEL=GENTOO_LIVE rd.live.image
 rd.live.overlay.overlayfs=1` — the kernel has device-mapper but no snapshot target, so the
 overlay is OverlayFS.
 
+## Installing from the image, headless
+
+`installer-cli --headless` (see the main README) was run inside a VM booted from the minimal image, onto a
+blank virtio disk, against a local test store (an HTTP server with `Packages`, the live kernel and its modules;
+a git server for the overlay; both on loopback, reached as `10.0.2.2`). The installed disk then booted by itself
+(OVMF → Limine → kernel → OpenRC) to a login prompt with the hostname the installer set; logging in as the created
+user gives fish with `micro`, `nano` absent, the btrfs subvolumes (`@`, `@home`, `@var`, `@log`) and `/boot` mounted
+from `/etc/fstab`, and `doas` installed. Not covered: the desktop and GPU steps (the legacy path that installs
+niri was not run), a real store with real kernels, real hardware.
+
 ## Testing
 
 ```
@@ -108,6 +118,23 @@ unpacks it, so the stage3 step needs no network. Precedence: `GENTOO_INSTALLER_S
 the bundled stage > Gentoo's latest from the mirror. Sizes with it: minimal **746 MB**, GUI **1.3 GB**
 (506 MB / 996 MB without). Verified in a VM: the file is visible read-only at that path and
 `sha512sum -c` passes; the download-verify-unpack-user-gets-fish chain is covered by the real-target test.
+
+## Firmware and rescue tools
+
+Both images carry `linux-firmware` (Wi-Fi, GPU, Bluetooth, audio; the kernel's drivers are useless on
+real hardware without it), `sof-firmware` and `intel-microcode`, and the usual rescue kit: `xfsprogs`,
+`ntfs-3g`, `exfatprogs`, `f2fs-tools`, `cryptsetup`, `lvm2` (with its tools — the stage3 builds it
+without), `mdadm`, `testdisk`, `ddrescue`, `smartmontools`, `nvme-cli`, `hdparm`, `usbutils`,
+`dmidecode`, `lsof`, `htop`, `tmux`, `tcpdump`, `ethtool`, `strace`. The kernel fragment adds the modules
+for them (`dm-crypt`, software RAID, XFS, F2FS, NTFS3, exFAT) and compressed-firmware loading.
+Checked in a VM: the modules load and the tools are on `PATH`.
+
+`linux-firmware` is 1.9 GB raw, so `assemble-iso.sh` leaves out what laptops and desktops do not use (server
+NICs, SoC/phone blobs, old per-chip Wi-Fi versions; the two newest `iwlwifi` firmwares per chip stay),
+which brings it to ~314 MB compressed. The microcode is not put into the initramfs (it is stored
+uncompressed and the ISO carries the initramfs twice); the files stay in `/lib/firmware`.
+
+Sizes with the firmware, the rescue kit and the bundled stage: minimal **1.2 GB**, GUI **1.7 GB**.
 
 ## Shell and tools
 

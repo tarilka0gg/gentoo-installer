@@ -222,6 +222,29 @@ a test dies half-way, and each copy is deleted by a guard that **refuses to dele
 anything is still mounted under it** (`remove_dir_all` does not stop at mount points and
 would otherwise recurse into the host's real `/dev`).
 
+## Wi-Fi in the TUI
+
+With no Ethernet link the TUI scans through `iwd` (the same `IwdClient` the GUI uses), lists the networks
+strongest first, asks for the passphrase (masked, 8–63 characters, `q` and Esc are plain input while typing),
+and offers rescan and skip. The screen is a pure state machine (`installer-cli/src/wifi.rs`, 9 tests); the real
+`iwd` round trip has not been exercised in a VM (there is no Wi-Fi radio there).
+
+## Headless install and what a real run found
+
+`installer-cli --headless` runs the whole phase chain with no screens, configured from the environment
+(`GENTOO_INSTALLER_DISK`, `_CONFIRM_ERASE` — must repeat the disk path —, `_USERNAME`, `_PASSWORD`, the
+`GENTOO_STORE_*` variables, optionally `_HOSTNAME`/`_LOCALES`/`_TIMEZONE`/`_KEYBOARD`/`_STAGE3_URL`).
+`phase::run_all` is the driver: it skips phases whose `is_satisfied` holds, stops at the first failure
+and reports it. Resuming is only partly there: `Partition` tracks its state in memory, so re-running over
+a half-finished disk tries to re-partition it (and refuses while it is mounted).
+
+Running it for real in a VM (live minimal ISO, blank virtio disk, a local test store with the live
+kernel, bundled stage) found four bugs no unit test could: `git commit` in `/etc/portage` needs an
+identity; `Deploy` counted a bare unpacked stage3 as done, so a retry skipped the kernel; `Fstab`
+counted the stage3's own comment-only `/etc/fstab` as written, so the system booted with no `/home`,
+`/var`, `/boot` or swap; and the kernel `.config` had dropped `FRAMEBUFFER_CONSOLE`. All fixed, each with a test. The resulting system booted by itself
+from the installed disk; see `iso/README.md` for what was and was not covered.
+
 ## Custom stage3
 
 The installer normally unpacks Gentoo's latest stage3. `GENTOO_INSTALLER_STAGE3_URL` (TUI and GUI;

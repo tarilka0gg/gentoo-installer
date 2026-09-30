@@ -99,6 +99,33 @@ usr/share/gtk-doc
 usr/lib/python3.14/test
 EXCL
 
+# linux-firmware is ~1.9 GB raw. Keep what laptops/desktops need (Wi-Fi, GPU, Bluetooth, audio,
+# Ethernet); leave out server NICs, SoC/phone firmware, and old per-chip Wi-Fi versions.
+# Computed from the rootfs, so a missing firmware dir just adds nothing.
+python3 - "$W/$ROOTFS" >> "$W/squashfs-excludes.txt" <<'FWPY'
+import glob, os, re, sys, collections
+root = sys.argv[1]
+fw = os.path.join(root, "usr/lib/firmware")
+if os.path.isdir(fw):
+    drop = """qcom netronome mellanox mrvl qed dpaa2 liquidio cxgb4 bnx2x bnx2 myri10ge sfc e100 tigon
+    ql2xxx ql2400 ql2500 ti-keystone amphion imx nxp arm rockchip meson powervr vpu airoha
+    mediatek/mt8* qat_* intel/ipu intel/vsc intel/ice intel/qat intel/vpu intel/catpt intel/avs""".split()
+    for pat in drop:
+        for p in glob.glob(os.path.join(fw, pat)):
+            print("usr/lib/firmware/" + os.path.relpath(p, fw))
+    # Wi-Fi: per chip the kernel asks for the newest API versions; keep the two newest.
+    d = os.path.join(fw, "intel/iwlwifi")
+    groups = collections.defaultdict(list)
+    for f in os.listdir(d) if os.path.isdir(d) else []:
+        m = re.match(r"(iwlwifi-.+?)-(\d+)\.(ucode|pnvm)$", f)
+        if m:
+            groups[(m.group(1), m.group(3))].append((int(m.group(2)), f))
+    for v in groups.values():
+        v.sort(reverse=True)
+        for _, f in v[2:]:
+            print("usr/lib/firmware/intel/iwlwifi/" + f)
+FWPY
+
 # squashfs + xorriso inside the builder chroot
 cat > "$W/inner.sh" <<INNER
 set -e
