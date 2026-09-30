@@ -97,6 +97,17 @@ the bar remain.
 Add `live.debug` to the kernel command line (`EXTRA_CMDLINE=live.debug` when assembling) to get a
 plain shell on the serial console instead of the installer.
 
+## Personal profile (optional)
+
+`make-profile.py <dir>` (run as the user, not root) reads the current user's niri and Noctalia
+setup and writes a copy that is safe to boot elsewhere; pass that directory as the fifth argument
+of `prepare-rootfs.sh`. Kept: colours, layout, animations, key bindings, input, bar and dock
+layout, theme and the community palettes it refers to. Dropped: start-up services and scripts,
+monitor blocks, the iGPU render-device pin, per-app window rules, the home address, wallpaper
+paths, per-monitor lock-screen widgets, and history/usage/clipboard data. The dock keeps only
+apps that exist on the ISO (ghostty). The output is derived from a home directory, so keep it
+out of git; the script itself contains no personal data.
+
 ## Bugs this found in the kernel config
 
 Both are invisible with serial-only testing and were only noticed from screenshots:

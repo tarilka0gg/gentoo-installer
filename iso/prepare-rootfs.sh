@@ -1,5 +1,5 @@
 #!/bin/bash
-# prepare-rootfs.sh <rootfs> <installer-cli-binary> [installer-gui-binary gentoo-wm-configs-dir]
+# prepare-rootfs.sh <rootfs> <installer-cli-binary> [installer-gui-binary gentoo-wm-configs-dir [profile-dir]]
 # Turns an unpacked stage3 (with the runtime tools already emerged) into the live system:
 # root autologin on tty1 + serial, the installer started from root's login shell, iwd and
 # dhcpcd on boot, an empty root password (this is a live ISO, not an installed system).
@@ -8,6 +8,7 @@ ROOT=${1:?rootfs}
 CLI=${2:?installer-cli binary}
 GUI=${3:-}
 WMCONF=${4:-}
+PROFILE=${5:-}     # optional output of make-profile.py: the user's own niri/Noctalia setup
 
 install -Dm755 "$CLI" "$ROOT/usr/local/bin/installer-cli"
 
@@ -30,6 +31,14 @@ if [ -n "$GUI" ]; then
     install -d "$ROOT/root/.config/niri" "$ROOT/root/.config/noctalia"
     cp "$WMCONF/niri/config.kdl" "$ROOT/root/.config/niri/config.kdl"
     cp "$WMCONF/noctalia/config.toml" "$ROOT/root/.config/noctalia/config.toml"
+    if [ -n "$PROFILE" ]; then
+        # The user's own look, bar and dock (already stripped of machine-specific parts by
+        # make-profile.py) replace the repo presets.
+        cp "$PROFILE/niri/config.kdl" "$ROOT/root/.config/niri/config.kdl"
+        cp "$PROFILE/noctalia/config.toml" "$ROOT/root/.config/noctalia/config.toml"
+        install -d "$ROOT/root/.local/state"
+        cp -r "$PROFILE/state/noctalia" "$ROOT/root/.local/state/"
+    fi
     # Live-only additions, appended to the *copy*: start the installer and give it the whole
     # screen. The preset itself is left exactly as the repo has it.
     # Noctalia shows a first-run wizard on top of everything until this marker exists; on a
