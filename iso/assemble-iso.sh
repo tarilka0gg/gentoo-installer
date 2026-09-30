@@ -20,6 +20,11 @@ if [ -n "${STAGE_TARBALL:-}" ]; then
     [ -e "$STAGE_TARBALL.sha512" ] && cp "$STAGE_TARBALL.sha512" "$ISO/stage/"
 fi
 
+# The rootfs was built in chroots that borrowed the build host's /etc/resolv.conf. Do not ship it:
+# it names the host's resolver (and, on the author's machine, a private Tailscale network).
+# dhcpcd writes the real one at boot.
+: > "$W/$ROOTFS/etc/resolv.conf"
+
 cp "$W/vmlinuz-live" "$ISO/boot/vmlinuz"
 cp "$W/$ROOTFS/boot/initramfs-live.img" "$ISO/boot/initramfs.img"
 chmod 644 "$ISO/boot/"*
