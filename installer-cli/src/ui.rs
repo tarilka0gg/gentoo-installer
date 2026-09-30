@@ -3,6 +3,7 @@
 //! background and Installing streams its progress until it finishes or errors.
 
 use crate::steps::Step;
+use crate::wifi::{Action, Mode as WifiMode, WifiState};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use installer_core::{
@@ -31,6 +32,11 @@ pub struct AppState {
     pub install_rx: Option<mpsc::UnboundedReceiver<install::Progress>>,
     pub install_task: Option<tokio::task::JoinHandle<installer_core::Result<()>>>,
     pub install_finished: bool,
+    /// Wi-Fi screen (only used while there is no Ethernet link).
+    pub wifi: WifiState,
+    pub iwd: Option<network::IwdClient>,
+    /// The next `Action` for the loop to perform after the frame showing "Scanning…" is drawn.
+    pub wifi_action: Option<Action>,
 }
 
 impl AppState {
@@ -46,20 +52,38 @@ impl AppState {
             install_rx: None,
             install_task: None,
             install_finished: false,
+            wifi: WifiState::new(),
+            iwd: None,
+            wifi_action: None,
         }
     }
 }
 
 pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
     let mut state = AppState::new();
+    if !state.ethernet_up {
+        state.wifi.begin("Scanning…");
+        state.wifi_action = Some(Action::Scan);
+    }
 
     loop {
         drain_install_progress(&mut state).await;
 
         terminal.draw(|frame| draw(frame, &state))?;
+        perform_wifi(&mut state).await;
 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
+                // The Wi-Fi screen owns the keyboard (passphrase entry needs `q` and Esc).
+                if state.step == Step::Network && !state.ethernet_up {
+                    match state.wifi.handle_key(key.code) {
+                        Some(Action::Quit) => return Ok(()),
+                        Some(Action::Continue) => advance(&mut state).await,
+                        Some(a) => state.wifi_action = Some(a),
+                        None => {}
+                    }
+                    continue;
+                }
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Down => {
@@ -128,6 +152,46 @@ fn describe(p: &install::Progress) -> String {
         install::Progress::InstallingDesktop => "Installing desktop environment...".into(),
         install::Progress::InstallingBootloader => "Installing Limine...".into(),
         install::Progress::Done => "Install complete.".into(),
+    }
+}
+
+/// Runs the Wi-Fi action the key handler queued. Called right after a frame was drawn, so the
+/// screen already says "Scanning…"/"Connecting…" while `iwd` works.
+async fn perform_wifi(state: &mut AppState) {
+    let Some(action) = state.wifi_action.take() else { return };
+    if state.iwd.is_none() {
+        match network::IwdClient::connect().await {
+            Ok(c) => state.iwd = Some(c),
+            Err(e) => {
+                state.wifi.scan_failed(&format!("iwd is not reachable ({e})"));
+                return;
+            }
+        }
+    }
+    let Some(iwd) = state.iwd.as_ref() else { return };
+    match action {
+        Action::Scan => {
+            let result = async {
+                iwd.request_scan().await?;
+                // iwd's Scan() returns as soon as scanning starts; give it time to fill in.
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                iwd.scan().await
+            }
+            .await;
+            match result {
+                Ok(nets) => state.wifi.set_networks(nets),
+                Err(e) => state.wifi.scan_failed(&e.to_string()),
+            }
+        }
+        Action::Connect { path, passphrase } => match iwd.connect_to(&path, passphrase.as_deref()).await {
+            Ok(()) => {
+                state.ethernet_up = true; // "the network is up" — the screen then just says so
+                state.status = "Connected.".into();
+                advance(state).await;
+            }
+            Err(e) => state.wifi.connect_failed(&e.to_string()),
+        },
+        Action::Continue | Action::Quit => {}
     }
 }
 
@@ -300,13 +364,45 @@ fn draw(frame: &mut ratatui::Frame, state: &AppState) {
 }
 
 fn draw_network(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let text = if state.ethernet_up {
-        "Ethernet link detected — network already up.\n\n[Enter] continue  [q] quit".to_string()
-    } else {
-        "No ethernet link. Wifi setup (iwd) not wired into this screen yet.\n\n[Enter] continue anyway  [q] quit".to_string()
+    if state.ethernet_up {
+        let body = Paragraph::new("Ethernet link detected — network already up.\n\n[Enter] continue  [q] quit")
+            .block(Block::default().borders(Borders::ALL).title("Network"));
+        frame.render_widget(body, area);
+        return;
+    }
+
+    let w = &state.wifi;
+    let chunks = RtLayout::vertical([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)]).split(area);
+    let header = match &w.mode {
+        WifiMode::Busy(what) => what.clone(),
+        WifiMode::Passphrase { ssid, input, .. } => {
+            format!("Passphrase for \"{ssid}\": {}▏   [Enter] connect  [Esc] back", "*".repeat(input.chars().count()))
+        }
+        WifiMode::List => "No Ethernet link. Pick a Wi-Fi network.".to_string(),
     };
-    let body = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Network"));
-    frame.render_widget(body, area);
+    frame.render_widget(Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("Network")), chunks[0]);
+
+    let items: Vec<ListItem> = w
+        .networks
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            // iwd reports signal in hundredths of a dBm (-3000 = -30 dBm).
+            let bars = match n.signal_strength / 100 {
+                s if s > -50 => "▂▄▆█",
+                s if s > -60 => "▂▄▆ ",
+                s if s > -70 => "▂▄  ",
+                _ => "▂   ",
+            };
+            let lock = if n.secured { "🔒" } else { "  " };
+            let style = if i == w.selected { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() };
+            ListItem::new(Line::from(format!(" {bars} {lock} {}", n.ssid))).style(style)
+        })
+        .collect();
+    frame.render_widget(List::new(items).block(Block::default().borders(Borders::ALL).title("Networks")), chunks[1]);
+
+    let hint = if w.message.is_empty() { "[↑↓] select  [Enter] connect  [r] rescan  [s] skip  [q] quit".to_string() } else { w.message.clone() };
+    frame.render_widget(Paragraph::new(hint).block(Block::default().borders(Borders::ALL)), chunks[2]);
 }
 
 fn draw_disk_select(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
