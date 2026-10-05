@@ -51,7 +51,11 @@ async fn main() {
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let handle = tokio::spawn(install::run(opts, tx));
+    let handle = tokio::spawn(install::run(
+        opts,
+        tx,
+        installer_core::phase::RunMode::Fresh,
+    ));
 
     while let Some(progress) = rx.recv().await {
         println!(">> {progress:?}");

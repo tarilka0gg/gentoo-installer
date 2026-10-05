@@ -12,6 +12,10 @@
 //! | `GENTOO_STORE_BINHOST_URL`, `GENTOO_STORE_OVERLAY_URL`, … | see `StoreEnv` |
 //! | `GENTOO_INSTALLER_HOSTNAME`, `_LOCALES` (comma), `_TIMEZONE`, `_KEYBOARD` | optional |
 //! | `GENTOO_INSTALLER_STAGE3_URL`, `_SHA512` | optional custom stage3 (else the bundled one) |
+//! | `GENTOO_INSTALLER_WM`, `_PACKAGES`, `_GPU`, `_OPT_LEVEL`, `_PACKAGE_MODE` | same meaning as in the TUI |
+//!
+//! `--resume` continues the unfinished install this live session remembers on the same disk (the journal
+//! is in `/run`), skipping what is already done; without it every phase runs.
 
 use anyhow::{bail, Context, Result};
 use installer_core::{
@@ -19,10 +23,13 @@ use installer_core::{
     command::RealCommandRunner,
     config::StoreEnv,
     event::{Event, Level},
+    journal,
+    make_conf::{OptLevel, PackageMode},
     partition,
-    phase::{self, Ctx, Settings},
+    phase::{self, Ctx, RunMode, Settings},
     stage3::Stage3Source,
     store,
+    wm::WmChoice,
 };
 use std::sync::Arc;
 
@@ -58,6 +65,44 @@ pub async fn run() -> Result<()> {
     }
     if let Ok(v) = std::env::var("GENTOO_INSTALLER_KEYBOARD") {
         settings.keyboard_layout = v;
+    }
+    settings.wm = match std::env::var("GENTOO_INSTALLER_WM").as_deref() {
+        Ok("hyprland") => WmChoice::Hyprland,
+        Ok("sway") => WmChoice::Sway,
+        Ok("labwc") => WmChoice::Labwc,
+        Ok("mangowc") => WmChoice::MangoWc,
+        Ok("dwl") => WmChoice::Dwl,
+        _ => WmChoice::default(),
+    };
+    settings.wm_configs_git_url = store_env.wm_configs_git_url.clone();
+    settings.packages = match std::env::var("GENTOO_INSTALLER_PACKAGES") {
+        Ok(v) => v
+            .split(',')
+            .map(|g| g.trim().to_string())
+            .filter(|g| !g.is_empty())
+            .collect(),
+        Err(_) => installer_core::packages::default_ids(),
+    };
+    settings.gpu_override = match std::env::var("GENTOO_INSTALLER_GPU").as_deref() {
+        Ok("nvidia") => Some(installer_core::hardware::Gpu::Nvidia),
+        Ok("nouveau") => Some(installer_core::hardware::Gpu::Nouveau),
+        Ok("amd") => Some(installer_core::hardware::Gpu::Amd),
+        Ok("intel") => Some(installer_core::hardware::Gpu::Intel),
+        Ok("xe") => Some(installer_core::hardware::Gpu::Xe),
+        Ok("none") => Some(installer_core::hardware::Gpu::None),
+        _ => None,
+    };
+    if matches!(
+        std::env::var("GENTOO_INSTALLER_OPT_LEVEL").as_deref(),
+        Ok("O3") | Ok("o3")
+    ) {
+        settings.opt_level = OptLevel::O3;
+    }
+    if matches!(
+        std::env::var("GENTOO_INSTALLER_PACKAGE_MODE").as_deref(),
+        Ok("source")
+    ) {
+        settings.package_mode = PackageMode::Source;
     }
     settings.stage3 = std::env::var("GENTOO_INSTALLER_STAGE3_URL")
         .ok()
@@ -104,7 +149,12 @@ pub async fn run() -> Result<()> {
             }
         }
     });
-    let result = phase::run_all(&mut ctx, &tx).await;
+    let mode = if std::env::args().any(|a| a == "--resume") {
+        RunMode::Resume
+    } else {
+        RunMode::Fresh
+    };
+    let result = phase::run_phases(&mut ctx, &tx, mode, Some(&journal::default_path())).await;
     drop(tx);
     printer.await.ok();
     result.map_err(|e| anyhow::anyhow!(e))

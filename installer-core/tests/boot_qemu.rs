@@ -29,7 +29,7 @@ fn installed_layout_boots_through_limine_to_openrc() {
     let dir = std::env::temp_dir().join(format!("gi-boot-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let uuid = "22222222-2222-2222-2222-222222222222";
-    let conf = installer_core::bootloader::generate_config("vmlinuz-test", uuid, None)
+    let conf = installer_core::bootloader::generate_config("vmlinuz-test", uuid, None, "")
         + " console=ttyS0\n";
     // generate_config ends the cmdline with "rw\n"; splice console= onto that line.
     let conf = conf.replace("rw\n console=ttyS0\n", "rw console=ttyS0\n");

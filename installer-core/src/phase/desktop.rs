@@ -1,0 +1,65 @@
+//! Desktop: the chosen compositor, Noctalia and the user's session files (`wm::install`), plus the
+//! OpenRC services and runtime directory the session needs.
+
+use super::{Ctx, Phase, PhaseId};
+use crate::event::{Event, EventTx};
+use crate::wm;
+
+pub struct DesktopPhase;
+
+#[async_trait::async_trait]
+impl Phase for DesktopPhase {
+    fn id(&self) -> PhaseId {
+        PhaseId::Desktop
+    }
+
+    fn label(&self) -> &str {
+        "Installing the desktop"
+    }
+
+    async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
+        let Some(account) = &ctx.settings.account else {
+            return Ok(false);
+        };
+        Ok(wm::installed(&ctx.target, ctx.settings.wm)
+            && ctx
+                .target
+                .join("home")
+                .join(&account.username)
+                .join(".bash_profile")
+                .is_file())
+    }
+
+    async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
+        let account = ctx.settings.account.clone().ok_or_else(|| {
+            crate::Error::Other(anyhow::anyhow!(
+                "the desktop is set up for a user; none was given"
+            ))
+        })?;
+        wm::install(
+            ctx.runner.as_ref(),
+            &ctx.target,
+            ctx.settings.wm,
+            &ctx.settings.wm_configs_git_url,
+            &account.username,
+        )
+        .await?;
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
+        Ok(())
+    }
+
+    fn weight(&self) -> u32 {
+        100
+    }
+
+    fn reversible(&self) -> bool {
+        false
+    }
+}

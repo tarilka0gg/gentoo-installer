@@ -1,21 +1,20 @@
-//! Legacy monolithic orchestrator, still what `installer-cli`/`installer-gui` (the
-//! current libadwaita-based frontends) drive. The spec-aligned replacement is the
-//! `phase/` state machine + `journal` + `Ctx` — this function calls the exact same
-//! underlying step functions (`partition`, `stage3`, `store`, `kernel`, `fstab`,
-//! `bootloader`) those phases do, just without the journal/resume machinery, so nothing
-//! about *what* an install does diverges between the two orchestration layers while
-//! `installer-gtk` (spec §2, non-libadwaita) doesn't exist yet.
+//! One install, as the frontends run it. [`InstallOptions`] is what the wizard collected; [`run`] turns it
+//! into a [`Ctx`] and hands it to the phase pipeline ([`phase::run_phases`]), which is the only place the
+//! steps of an install live. The frontends consume the [`Event`] stream; nothing here prints.
+//!
+//! (The older linear `run` that duplicated every step is gone: two orchestrators drifted apart — different
+//! `make.conf` generators, different step order, no resume — and each fix had to be made twice.)
 
 use crate::account::Account;
 use crate::command::{CommandRunner, RealCommandRunner};
+use crate::event::{Event, EventTx, Level};
 use crate::hardware::Gpu;
+use crate::journal;
+use crate::phase::{self, Ctx, RunMode, Settings};
 use crate::wm::WmChoice;
-use crate::{
-    account, bootloader, detect, fstab, gpu_driver, hardware, kernel, keyboard, locale, make_conf,
-    packages, partition, stage3, store, timezone, wm,
-};
+use crate::{make_conf, partition, stage3, store};
 use std::path::PathBuf;
-use tokio::sync::mpsc::UnboundedSender;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
@@ -67,197 +66,234 @@ pub struct InstallOptions {
     pub simulate: bool,
 }
 
-#[derive(Debug, Clone)]
-pub enum Progress {
-    Partitioning,
-    DownloadingStage3,
-    UnpackingStage3,
-    /// Writes `/etc/portage/make.conf` tuned to the detected hardware — see
-    /// `make_conf`'s doc comment.
-    WritingMakeConf,
-    ConfiguringStore,
-    /// Carries the resolved atom once hardware/kernel matching picks one, so the UI
-    /// can show *which* profile got selected (and whether it had to degrade).
-    InstallingKernel {
-        atom: String,
-        degraded_by: usize,
-    },
-    /// Only sent when the detected GPU actually needs one (currently: Nvidia). See
-    /// `gpu_driver`'s doc comment for why this is the one step that still uses `emerge`.
-    InstallingGpuDriver,
-    WritingFstab,
-    SettingKeyboard,
-    SettingTimezone,
-    CreatingAccount,
-    /// Always sent — the compositor may just be the silent niri default. Same
-    /// "always runs, may just be the default" shape as `SettingKeyboard`/`SettingTimezone`.
-    InstallingDesktop,
-    InstallingBootloader,
-    Done,
+impl InstallOptions {
+    /// The pipeline's state for this install: the disk layout, the store, and the user's choices as
+    /// [`Settings`].
+    pub fn into_ctx(self, runner: Arc<dyn CommandRunner>) -> Ctx {
+        let settings = Settings {
+            timezone: self.timezone,
+            keyboard_layout: self.keyboard_layout,
+            locales: self.locales,
+            hostname: self.hostname,
+            account: Some(self.account),
+            stage3: self.stage3,
+            wm: self.wm,
+            wm_configs_git_url: self.wm_configs_git_url,
+            packages: self.packages,
+            gpu_override: self.gpu_override,
+            opt_level: self.opt_level,
+            package_mode: self.package_mode,
+        };
+        Ctx::new(
+            runner,
+            self.target,
+            self.layout,
+            self.store,
+            self.kernel_base_name,
+        )
+        .with_settings(settings)
+    }
 }
 
-pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::Result<()> {
+/// Runs the install: [`RunMode::Fresh`] from the beginning, [`RunMode::Resume`] to continue one that
+/// stopped (see [`resumable`]). Progress and errors arrive on `tx`; the result is the first error, if any.
+pub async fn run(opts: InstallOptions, tx: EventTx, mode: RunMode) -> crate::Result<()> {
     if opts.simulate {
-        return run_simulated(opts, tx).await;
+        return simulate(opts, tx).await;
     }
-
-    let runner: &dyn CommandRunner = &RealCommandRunner;
-
-    let _ = tx.send(Progress::Partitioning);
-    let parts = partition::create_partitions(runner, &opts.layout).await?;
-    partition::format_partitions(runner, &opts.layout, &parts).await?;
-    let target_str = opts
-        .target
-        .to_str()
-        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
-    partition::mount_target(runner, &opts.layout, &parts, target_str).await?;
-
-    let _ = tx.send(Progress::DownloadingStage3);
-    let source = stage3::resolve(opts.stage3.as_ref()).await?;
-    let tarball_path = std::env::temp_dir().join("gentoo-installer-stage3.tar.xz");
-    stage3::download(&source, &tarball_path).await?;
-
-    let _ = tx.send(Progress::UnpackingStage3);
-    stage3::unpack(runner, &tarball_path, &opts.target).await?;
-    tokio::fs::remove_file(&tarball_path).await.ok();
-
-    let mut profile = hardware::Profile::detect()?;
-    if let Some(gpu) = opts.gpu_override {
-        profile.gpu = gpu;
-    }
-
-    let _ = tx.send(Progress::WritingMakeConf);
-    let detected = detect::gather(runner).await;
-    let jobs = make_conf::nproc(runner).await;
-    make_conf::generate(
-        &opts.target,
-        profile.cpu,
-        &detected,
-        jobs,
-        opts.opt_level,
-        opts.package_mode,
-    )
-    .await?;
-
-    let _ = tx.send(Progress::ConfiguringStore);
-    store::configure(runner, &opts.target, &opts.store).await?;
-
-    let atoms = store::list_binhost_atoms(&opts.store.binhost_url).await?;
-    let kernel_pkg = kernel::resolve(&opts.kernel_base_name, &profile, &atoms)?;
-    let _ = tx.send(Progress::InstallingKernel {
-        atom: kernel_pkg.atom.clone(),
-        degraded_by: kernel_pkg.degraded_by,
-    });
-    // No emerge: the kernel is a direct file copy, not a package install (matches
-    // installer-core::phase::deploy's DeployPhase — see its doc comment for why).
-    kernel::deploy(
-        runner,
-        &opts.store.binhost_url,
-        &kernel_pkg.combo,
-        &opts.target,
-    )
-    .await?;
-
-    if profile.gpu == Gpu::Nvidia {
-        let _ = tx.send(Progress::InstallingGpuDriver);
-        gpu_driver::install(runner, &opts.target).await?;
-    }
-
-    let _ = tx.send(Progress::WritingFstab);
-    fstab::generate(runner, &opts.target, &opts.layout, &parts).await?;
-
-    let _ = tx.send(Progress::SettingKeyboard);
-    keyboard::apply(&opts.target, &opts.keyboard_layout).await?;
-
-    let _ = tx.send(Progress::SettingTimezone);
-    timezone::apply(&opts.target, &opts.timezone).await?;
-    // Same step as the time zone from the frontends' point of view: no new `Progress`
-    // variant (their matches are exhaustive). Locale generation runs last, as in LocalePhase.
-    locale::apply_hostname(&opts.target, &opts.hostname).await?;
-    locale::apply(runner, &opts.target, &opts.locales).await?;
-
-    let _ = tx.send(Progress::CreatingAccount);
-    account::create(runner, &opts.target, &opts.account).await?;
-    // Root stays locked, so without this the user in `wheel` could never administer the
-    // installed system (a stage3 ships neither doas nor sudo). Part of the same step:
-    // no new `Progress` variant, so the frontends' exhaustive matches are unaffected.
-    account::configure_privilege(&opts.target).await?;
-    account::install_doas(runner, &opts.target).await?;
-
-    let _ = tx.send(Progress::InstallingDesktop);
-    wm::install(
-        runner,
-        &opts.target,
-        opts.wm,
-        &opts.wm_configs_git_url,
-        &opts.account.username,
-    )
-    .await?;
-    packages::install(runner, &opts.target, &opts.packages).await?;
-
-    let _ = tx.send(Progress::InstallingBootloader);
-    bootloader::configure(runner, &opts.target, &opts.layout, &parts).await?;
-    bootloader::install(runner, &opts.target, &opts.layout.disk).await?;
-
-    // Leave the disk consistent: the frontends offer a reboot right after this. (`umount -R` also
-    // takes the chroot bind mounts and the btrfs subvolumes; failures are ignored on purpose —
-    // a busy mount must not turn a finished install into an error, the shutdown unmounts anyway.)
-    let target_str = opts.target.to_string_lossy().to_string();
-    let _ = runner.run_status("sync", &[]).await;
-    let _ = runner.run_status("umount", &["-R", &target_str]).await;
-
-    let _ = tx.send(Progress::Done);
-    Ok(())
+    let journal_path = journal::default_path();
+    let mut ctx = opts.into_ctx(Arc::new(RealCommandRunner));
+    phase::run_phases(&mut ctx, &tx, mode, Some(&journal_path)).await
 }
 
-/// Fake run for UI iteration: same `Progress` sequence and rough timing shape as the real
-/// pipeline, no disk/network/chroot access at all. Hardware detection is real (read-only),
-/// so the kernel atom shown at least reflects what this actual machine would resolve to —
-/// it just skips the `store::list_binhost_atoms` lookup and reports it as an exact match.
-async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::Result<()> {
+/// What an earlier, unfinished run on a disk left behind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeInfo {
+    pub phases_done: usize,
+    pub phases_total: usize,
+    /// The error the run stopped on, if it recorded one.
+    pub error: Option<String>,
+}
+
+/// Whether the journal of this live session describes an unfinished install on `disk` — i.e. whether
+/// [`RunMode::Resume`] is on offer. The journal lives in `/run`, so it dies with the live session: after a
+/// reboot there is nothing to resume, and a fresh start is the only option.
+pub async fn resumable(disk: &str) -> Option<ResumeInfo> {
+    resumable_at(&journal::default_path(), disk).await
+}
+
+pub async fn resumable_at(path: &std::path::Path, disk: &str) -> Option<ResumeInfo> {
+    let j = journal::Journal::load(path).await.ok()??;
+    if j.plan.get("disk").and_then(|d| d.as_str()) != Some(disk) || !j.is_resumable() {
+        return None;
+    }
+    Some(ResumeInfo {
+        phases_done: j
+            .phases
+            .values()
+            .filter(|r| r.status == journal::PhaseStatus::Done)
+            .count(),
+        phases_total: j.phases.len(),
+        error: j.phases.values().find_map(|r| r.error.clone()),
+    })
+}
+
+/// Fake run for UI iteration: the same events as the real pipeline (one started/finished pair per phase, a
+/// log line for the kernel), with short sleeps and no disk, network or chroot access. Hardware detection
+/// is real (read-only), so the combo shown is what this machine would actually resolve to.
+async fn simulate(opts: InstallOptions, tx: EventTx) -> crate::Result<()> {
     use tokio::time::{sleep, Duration};
 
-    for step in [
-        Progress::Partitioning,
-        Progress::DownloadingStage3,
-        Progress::UnpackingStage3,
-        Progress::WritingMakeConf,
-        Progress::ConfiguringStore,
-    ] {
-        let _ = tx.send(step);
-        sleep(Duration::from_millis(700)).await;
+    for phase in phase::all_phases() {
+        let id = phase.id();
+        let _ = tx.send(Event::PhaseStarted {
+            id,
+            label: phase.label().to_string(),
+        });
+        if id == phase::PhaseId::Deploy {
+            let combo = crate::hardware::Profile::detect()
+                .map(|p| p.combo())
+                .unwrap_or_else(|_| "unknown".into());
+            let _ = tx.send(Event::Log {
+                line: format!(
+                    "Kernel: sys-kernel/{}-bin-{combo} (simulated)",
+                    opts.kernel_base_name
+                ),
+                level: Level::Info,
+            });
+        }
+        sleep(Duration::from_millis(
+            250 + 6 * u64::from(phase.weight().min(100)),
+        ))
+        .await;
+        let _ = tx.send(Event::PhaseFinished {
+            id,
+            duration: Duration::default(),
+        });
     }
-
-    let detected_profile = hardware::Profile::detect().ok();
-    let combo = detected_profile
-        .as_ref()
-        .map(|p| p.combo())
-        .unwrap_or_else(|| "unknown".to_string());
-    let _ = tx.send(Progress::InstallingKernel {
-        atom: format!("sys-kernel/{}-bin-{combo}", opts.kernel_base_name),
-        degraded_by: 0,
-    });
-    sleep(Duration::from_millis(700)).await;
-
-    if detected_profile.map(|p| p.gpu) == Some(Gpu::Nvidia) {
-        let _ = tx.send(Progress::InstallingGpuDriver);
-        sleep(Duration::from_millis(700)).await;
-    }
-
-    for step in [
-        Progress::WritingFstab,
-        Progress::SettingKeyboard,
-        Progress::SettingTimezone,
-        Progress::CreatingAccount,
-        Progress::InstallingDesktop,
-    ] {
-        let _ = tx.send(step);
-        sleep(Duration::from_millis(400)).await;
-    }
-
-    let _ = tx.send(Progress::InstallingBootloader);
-    sleep(Duration::from_millis(700)).await;
-
-    let _ = tx.send(Progress::Done);
+    let _ = tx.send(Event::Complete);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::journal::Journal;
+    use crate::phase::PhaseId;
+
+    fn options() -> InstallOptions {
+        InstallOptions {
+            layout: partition::plan("/dev/vda", partition::RootFs::Btrfs, 16 << 30),
+            target: "/mnt/gentoo".into(),
+            store: store::StoreConfig {
+                binhost_url: "http://x".into(),
+                overlay_git_url: "git://x".into(),
+                overlay_name: "local".into(),
+            },
+            kernel_base_name: "k".into(),
+            keyboard_layout: "ua".into(),
+            timezone: "Europe/Kyiv".into(),
+            hostname: "h".into(),
+            locales: vec!["uk_UA.UTF-8".into()],
+            gpu_override: Some(Gpu::Amd),
+            packages: vec!["wifi".into()],
+            stage3: None,
+            account: Account {
+                username: "u".into(),
+                password: "p".into(),
+            },
+            wm: WmChoice::Sway,
+            opt_level: make_conf::OptLevel::default(),
+            package_mode: make_conf::PackageMode::default(),
+            wm_configs_git_url: "git://wm".into(),
+            simulate: false,
+        }
+    }
+
+    #[test]
+    fn every_choice_of_the_wizard_reaches_the_pipeline() {
+        let ctx = options().into_ctx(Arc::new(crate::command::FakeCommandRunner::new()));
+        let s = &ctx.settings;
+        assert_eq!(
+            (
+                s.keyboard_layout.as_str(),
+                s.timezone.as_str(),
+                s.hostname.as_str()
+            ),
+            ("ua", "Europe/Kyiv", "h")
+        );
+        assert_eq!(s.locales, ["uk_UA.UTF-8"]);
+        assert_eq!((s.wm, s.gpu_override), (WmChoice::Sway, Some(Gpu::Amd)));
+        assert_eq!(
+            (s.wm_configs_git_url.as_str(), s.packages.as_slice()),
+            ("git://wm", ["wifi".to_string()].as_slice())
+        );
+        assert_eq!(s.account.as_ref().map(|a| a.username.as_str()), Some("u"));
+        assert_eq!(ctx.layout.disk, "/dev/vda");
+    }
+
+    #[tokio::test]
+    async fn a_simulated_run_sends_every_phase_and_then_complete() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut opts = options();
+        opts.simulate = true;
+        run(opts, tx, RunMode::Fresh).await.unwrap();
+        let mut started = Vec::new();
+        let mut complete = false;
+        while let Ok(e) = rx.try_recv() {
+            match e {
+                Event::PhaseStarted { id, .. } => started.push(id),
+                Event::Complete => complete = true,
+                _ => {}
+            }
+        }
+        assert_eq!(
+            started,
+            phase::all_phases()
+                .iter()
+                .map(|p| p.id())
+                .collect::<Vec<_>>()
+        );
+        assert!(complete);
+    }
+
+    #[tokio::test]
+    async fn resume_is_offered_only_for_an_unfinished_run_on_the_same_disk() {
+        let dir = std::env::temp_dir().join(format!("gi-resumable-{}", std::process::id()));
+        let path = dir.join("journal.json");
+        let ids = phase::all_phases()
+            .iter()
+            .map(|p| p.id())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            resumable_at(&path, "/dev/vda").await,
+            None,
+            "no journal, nothing to resume"
+        );
+
+        let mut j = Journal::new(serde_json::json!({"disk": "/dev/vda"}), &ids);
+        j.mark_done(PhaseId::Preflight);
+        j.mark_done(PhaseId::Partition);
+        j.mark_failed(PhaseId::Format, "boom".into());
+        j.save(&path).await.unwrap();
+
+        let info = resumable_at(&path, "/dev/vda").await.unwrap();
+        assert_eq!((info.phases_done, info.error.as_deref()), (2, Some("boom")));
+        assert_eq!(
+            resumable_at(&path, "/dev/vdb").await,
+            None,
+            "another disk is a different install"
+        );
+
+        for id in &ids {
+            j.mark_done(*id);
+        }
+        j.save(&path).await.unwrap();
+        assert_eq!(
+            resumable_at(&path, "/dev/vda").await,
+            None,
+            "a finished run has nothing left to resume"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -271,6 +271,17 @@ end
     )
 }
 
+/// Whether `choice`'s compositor binary is already in the target (what `DesktopPhase` checks on resume).
+pub fn installed(target: &Path, choice: WmChoice) -> bool {
+    let binary = spec(choice)
+        .launch_cmd
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    !binary.is_empty() && target.join("usr/bin").join(binary).exists()
+}
+
 /// What a compositor session needs from the OS and the stage3 does not give: the system bus
 /// (`dbus`), a seat manager (`seatd` — the compositor opens the GPU and input devices through it,
 /// not as root) and the user in the groups that may talk to it and to the devices. Without this

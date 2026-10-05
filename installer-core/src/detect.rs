@@ -112,7 +112,7 @@ pub async fn gather(runner: &dyn CommandRunner) -> DetectedSystem {
 /// Portage's `VIDEO_CARDS` naming differs from the kernel store's combo vocabulary
 /// (`amd`/`intel` there means "amdgpu/i915 driver family", not the USE-flag-style token
 /// make.conf expects).
-fn video_cards_value(gpu: hardware::Gpu) -> String {
+pub fn video_cards_value(gpu: hardware::Gpu) -> String {
     match gpu {
         hardware::Gpu::Nvidia => "nvidia".to_string(),
         hardware::Gpu::Nouveau => "nouveau".to_string(),

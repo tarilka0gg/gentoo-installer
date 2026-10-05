@@ -190,6 +190,28 @@ pub fn resolve(ids: &[String]) -> crate::Result<Vec<&'static Group>> {
     Ok(out)
 }
 
+/// Whether every atom of the chosen groups is already in the target's package database (`var/db/pkg`).
+/// An empty selection counts as installed; an unknown id does not.
+pub fn installed(target: &Path, ids: &[String]) -> bool {
+    let Ok(groups) = resolve(ids) else {
+        return false;
+    };
+    groups.iter().flat_map(|g| g.atoms.iter()).all(|atom| {
+        let Some((category, name)) = atom.split_once('/') else {
+            return false;
+        };
+        std::fs::read_dir(target.join("var/db/pkg").join(category))
+            .map(|d| {
+                d.filter_map(|e| e.ok()).any(|e| {
+                    let n = e.file_name().to_string_lossy().to_string();
+                    n.strip_prefix(&format!("{name}-"))
+                        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// Emerges every atom of the chosen groups in one transaction (`--noreplace`, so a re-run
 /// is a no-op), inside the usual chroot bootstrap. Nothing runs for an empty selection.
 pub async fn install(
@@ -457,6 +479,26 @@ mod use_tests {
         assert!(
             emerge_at < first_rc,
             "services are enabled only after the packages are installed"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn installed_looks_at_the_package_database_not_at_the_atoms_text() {
+        let dir = std::env::temp_dir().join(format!("gi-pkgs-installed-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(installed(&dir, &[]), "nothing selected, nothing to install");
+        assert!(!installed(&dir, &["browser".into()]));
+        assert!(!installed(&dir, &["no-such-group".into()]));
+
+        std::fs::create_dir_all(dir.join("var/db/pkg/www-client/firefox-bin-157.0")).unwrap();
+        assert!(installed(&dir, &["browser".into()]));
+        // `firefox-bin-157.0` must not satisfy a package that merely starts with the same letters.
+        std::fs::create_dir_all(dir.join("var/db/pkg/app-editors")).unwrap();
+        std::fs::create_dir_all(dir.join("var/db/pkg/app-editors/micro-extra-1")).unwrap();
+        assert!(
+            !installed(&dir, &["tools".into()]),
+            "micro itself is not there"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

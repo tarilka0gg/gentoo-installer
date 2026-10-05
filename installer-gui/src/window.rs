@@ -2000,7 +2000,7 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
             }
             let widgets = installing.borrow().as_ref().unwrap().clone();
             nav.push(&widgets.page);
-            spawn_install(opts, widgets);
+            spawn_install(opts, widgets, installer_core::phase::RunMode::Fresh);
         });
     }
 
@@ -2110,6 +2110,10 @@ struct InstallingWidgets {
     progress: gtk::ProgressBar,
     status_label: gtk::Label,
     log_label: gtk::Label,
+    /// Shown after a failed install: continues it from where it stopped instead of starting over.
+    retry_button: gtk::Button,
+    /// What the retry button re-runs; set by `spawn_install` on every start.
+    retry_opts: Rc<RefCell<Option<install::InstallOptions>>>,
 }
 
 /// Ported from elementary installer's `ProgressView`: a determinate progress bar with a
@@ -2151,9 +2155,16 @@ fn installing_page_build(nav: adw::NavigationView) -> InstallingWidgets {
         .margin_top(48)
         .margin_bottom(24)
         .build();
+    let retry_button = gtk::Button::builder()
+        .label("Resume the install")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::Center)
+        .visible(false)
+        .build();
     content.append(&status_label);
     content.append(&progress);
     content.append(&details);
+    content.append(&retry_button);
 
     let clamp = adw::Clamp::builder()
         .child(&content)
@@ -2166,13 +2177,30 @@ fn installing_page_build(nav: adw::NavigationView) -> InstallingWidgets {
         .build();
     page.set_tag(Some("installing"));
 
-    InstallingWidgets {
+    let widgets = InstallingWidgets {
         nav,
         page,
         progress,
         status_label,
         log_label,
+        retry_button: retry_button.clone(),
+        retry_opts: Rc::new(RefCell::new(None)),
+    };
+    {
+        let widgets = widgets.clone();
+        retry_button.connect_clicked(move |b| {
+            b.set_visible(false);
+            let opts = widgets.retry_opts.borrow().clone();
+            if let Some(opts) = opts {
+                spawn_install(
+                    opts,
+                    widgets.clone(),
+                    installer_core::phase::RunMode::Resume,
+                );
+            }
+        });
     }
+    widgets
 }
 
 /// Bridges `install::run`'s tokio-channel progress into the GTK main loop: the install
@@ -2180,22 +2208,30 @@ fn installing_page_build(nav: adw::NavigationView) -> InstallingWidgets {
 /// async), and progress is relayed through a `std::sync::mpsc` channel that a
 /// `glib::timeout_add_local` on the main thread drains every 200ms — the same
 /// non-blocking-poll approach the CLI uses per ratatui frame.
-fn spawn_install(opts: install::InstallOptions, widgets: InstallingWidgets) {
+fn spawn_install(
+    opts: install::InstallOptions,
+    widgets: InstallingWidgets,
+    mode: installer_core::phase::RunMode,
+) {
+    use installer_core::event::{Event as InstallEvent, Level};
+    use installer_core::phase::{self, PhaseId};
+
     #[derive(Debug)]
-    enum Event {
-        Progress(install::Progress),
+    enum Msg {
+        Event(InstallEvent),
         Finished(Result<(), String>),
     }
 
-    let (tx, rx) = std_mpsc::channel::<Event>();
+    *widgets.retry_opts.borrow_mut() = Some(opts.clone());
+    let (tx, rx) = std_mpsc::channel::<Msg>();
 
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async {
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
-            let handle = tokio::spawn(install::run(opts, progress_tx));
-            while let Some(p) = progress_rx.recv().await {
-                if tx.send(Event::Progress(p)).is_err() {
+            let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+            let handle = tokio::spawn(install::run(opts, events_tx, mode));
+            while let Some(e) = events_rx.recv().await {
+                if tx.send(Msg::Event(e)).is_err() {
                     return;
                 }
             }
@@ -2204,42 +2240,68 @@ fn spawn_install(opts: install::InstallOptions, widgets: InstallingWidgets) {
                 Ok(Err(e)) => Err(e.to_string()),
                 Err(e) => Err(format!("install task panicked: {e}")),
             };
-            let _ = tx.send(Event::Finished(result));
+            let _ = tx.send(Msg::Finished(result));
         });
     });
 
+    let mut finished: Vec<PhaseId> = Vec::new();
     glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
         let mut log = widgets.log_label.label().to_string();
-        while let Ok(event) = rx.try_recv() {
-            match event {
-                Event::Progress(p) => {
-                    widgets.progress.set_fraction(progress_fraction(&p));
-                    let line = describe(&p);
-                    widgets.status_label.set_label(&line);
-                    if !log.is_empty() {
-                        log.push('\n');
-                    }
-                    log.push_str(&line);
+        let mut push = |line: &str| {
+            if !log.is_empty() {
+                log.push('\n');
+            }
+            log.push_str(line);
+        };
+        let mut keep_polling = true;
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                Msg::Event(InstallEvent::PhaseStarted { label, .. }) => {
+                    widgets.status_label.set_label(&label);
+                    push(&label);
                 }
-                Event::Finished(Ok(())) => {
+                Msg::Event(InstallEvent::PhaseFinished { id, .. }) => {
+                    finished.push(id);
+                    widgets
+                        .progress
+                        .set_fraction(phase::fraction_done(&finished));
+                }
+                Msg::Event(InstallEvent::Log { line, level }) => {
+                    push(&match level {
+                        Level::Info => format!("  {line}"),
+                        Level::Warn => format!("  warning: {line}"),
+                        Level::Error => format!("  error: {line}"),
+                    });
+                }
+                Msg::Event(
+                    InstallEvent::Failed { .. }
+                    | InstallEvent::Progress { .. }
+                    | InstallEvent::Complete,
+                ) => {}
+                Msg::Finished(Ok(())) => {
                     widgets.progress.set_fraction(1.0);
                     let done_page = done_page_build();
                     widgets.nav.add(&done_page);
                     widgets.nav.push(&done_page);
+                    keep_polling = false;
                 }
-                Event::Finished(Err(e)) => {
+                Msg::Finished(Err(e)) => {
                     widgets
                         .status_label
                         .set_label(&format!("Install failed: {e}"));
-                    if !log.is_empty() {
-                        log.push('\n');
-                    }
-                    log.push_str(&format!("ERROR: {e}"));
+                    push(&format!("ERROR: {e}"));
+                    // A failure is not the end: what is done stays done, and the install can go on.
+                    widgets.retry_button.set_visible(!simulate_mode());
+                    keep_polling = false;
                 }
             }
         }
         widgets.log_label.set_label(&log);
-        glib::ControlFlow::Continue
+        if keep_polling {
+            glib::ControlFlow::Continue
+        } else {
+            glib::ControlFlow::Break
+        }
     });
 }
 
@@ -2293,57 +2355,4 @@ fn done_page_build() -> adw::NavigationPage {
         .build();
     page.set_tag(Some("done"));
     page
-}
-
-const TOTAL_STEPS: f64 = 13.0;
-
-fn progress_fraction(p: &install::Progress) -> f64 {
-    let step = match p {
-        install::Progress::Partitioning => 0.0,
-        install::Progress::DownloadingStage3 => 1.0,
-        install::Progress::UnpackingStage3 => 2.0,
-        install::Progress::WritingMakeConf => 3.0,
-        install::Progress::ConfiguringStore => 4.0,
-        install::Progress::InstallingKernel { .. } => 5.0,
-        install::Progress::InstallingGpuDriver => 6.0,
-        install::Progress::WritingFstab => 7.0,
-        install::Progress::SettingKeyboard => 8.0,
-        install::Progress::SettingTimezone => 9.0,
-        install::Progress::CreatingAccount => 10.0,
-        install::Progress::InstallingDesktop => 11.0,
-        install::Progress::InstallingBootloader => 12.0,
-        install::Progress::Done => 13.0,
-    };
-    step / TOTAL_STEPS
-}
-
-/// Screen script §11 phase labels, applied to the phases this codebase actually
-/// performs — the doc's own list includes steps nothing here does yet (building a
-/// startup image), so those aren't claimed. Where our mechanism differs from the doc's
-/// assumed squashfs image copy (we download+unpack an official stage3 instead), the
-/// label says what's actually happening rather than borrowing the doc's phrase for a
-/// different mechanism.
-fn describe(p: &install::Progress) -> String {
-    match p {
-        install::Progress::Partitioning => "Preparing the disk".into(),
-        install::Progress::DownloadingStage3 => "Downloading the base system".into(),
-        install::Progress::UnpackingStage3 => "Setting up the base system".into(),
-        install::Progress::WritingMakeConf => "Tuning build settings for your hardware".into(),
-        install::Progress::ConfiguringStore => "Setting up package sources".into(),
-        install::Progress::InstallingKernel { atom, degraded_by } => {
-            if *degraded_by == 0 {
-                format!("Installing your kernel ({atom}, exact hardware match)")
-            } else {
-                format!("Installing your kernel ({atom}, closest available match)")
-            }
-        }
-        install::Progress::InstallingGpuDriver => "Building your Nvidia driver".into(),
-        install::Progress::WritingFstab => "Setting up the file system".into(),
-        install::Progress::SettingKeyboard => "Setting your keyboard layout".into(),
-        install::Progress::SettingTimezone => "Setting your time zone".into(),
-        install::Progress::CreatingAccount => "Creating your account".into(),
-        install::Progress::InstallingDesktop => "Setting up your desktop".into(),
-        install::Progress::InstallingBootloader => "Installing the bootloader".into(),
-        install::Progress::Done => "Finishing up".into(),
-    }
 }

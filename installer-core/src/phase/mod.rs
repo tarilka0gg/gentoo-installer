@@ -11,23 +11,31 @@
 
 mod bootloader;
 mod deploy;
+mod desktop;
 mod finalize;
 mod fstab;
+mod gpu;
 mod locale;
 mod mount;
+mod packages;
 mod partition;
 mod portage_config;
+mod post_hooks;
 mod preflight;
 mod users;
 
 pub use bootloader::BootloaderPhase;
 pub use deploy::DeployPhase;
+pub use desktop::DesktopPhase;
 pub use finalize::FinalizePhase;
 pub use fstab::FstabPhase;
+pub use gpu::GpuPhase;
 pub use locale::LocalePhase;
 pub use mount::MountPhase;
+pub use packages::PackagesPhase;
 pub use partition::{FormatPhase, PartitionPhase};
 pub use portage_config::PortageConfigPhase;
+pub use post_hooks::PostHooksPhase;
 pub use preflight::PreflightPhase;
 pub use users::UsersPhase;
 
@@ -50,25 +58,35 @@ pub enum PhaseId {
     Locale,
     Users,
     PortageConfig,
+    /// Not implemented: the live kernel boots without one (see `bootloader`). Kept so a journal written by
+    /// an older version still deserialises.
     Initramfs,
     Bootloader,
     PostHooks,
     Finalize,
+    Gpu,
+    Desktop,
+    Packages,
 }
 
 impl PhaseId {
-    /// The fixed install order (spec §3's table).
-    pub const ORDER: [PhaseId; 13] = [
+    /// The fixed install order. `PortageConfig` (make.conf) comes right after `Deploy`: every emerge after
+    /// it — `doas`, the driver, the desktop, the packages — must see the tuned `MAKEOPTS`, binhost settings and
+    /// `VIDEO_CARDS`. The git history of `/etc/portage` is recorded last (`PostHooks`), after those
+    /// emerges wrote their `package.use`/`package.accept_keywords`, so it describes the finished system.
+    pub const ORDER: [PhaseId; 15] = [
         PhaseId::Preflight,
         PhaseId::Partition,
         PhaseId::Format,
         PhaseId::Mount,
         PhaseId::Deploy,
+        PhaseId::PortageConfig,
         PhaseId::Fstab,
         PhaseId::Locale,
         PhaseId::Users,
-        PhaseId::PortageConfig,
-        PhaseId::Initramfs,
+        PhaseId::Gpu,
+        PhaseId::Desktop,
+        PhaseId::Packages,
         PhaseId::Bootloader,
         PhaseId::PostHooks,
         PhaseId::Finalize,
@@ -98,6 +116,13 @@ pub trait Phase: Send + Sync {
 
     /// Can the user still abort safely before this phase starts?
     fn reversible(&self) -> bool;
+
+    /// Destructive phases that cannot be probed afterwards (partitioning, formatting) are skipped on a
+    /// resumed run on the strength of the journal alone; everything else must also still pass
+    /// [`Phase::is_satisfied`]. A guess here would re-format a disk that already holds the install.
+    fn trusts_journal(&self) -> bool {
+        false
+    }
 }
 
 /// What the user chose on the wizard's settings pages, as the `Locale` and `Users`
@@ -116,6 +141,15 @@ pub struct Settings {
     pub account: Option<Account>,
     /// Custom stage3 tarball; `None` means the official mirror's latest.
     pub stage3: Option<crate::stage3::Stage3Source>,
+    pub wm: crate::wm::WmChoice,
+    /// Git URL of the wm-configs repository the desktop step clones.
+    pub wm_configs_git_url: String,
+    /// Ids from `packages::GROUPS` to install after the desktop.
+    pub packages: Vec<String>,
+    /// Replaces the detected GPU (kernel build, driver, `VIDEO_CARDS`); `None` keeps detection.
+    pub gpu_override: Option<crate::hardware::Gpu>,
+    pub opt_level: crate::make_conf::OptLevel,
+    pub package_mode: crate::make_conf::PackageMode,
 }
 
 impl Default for Settings {
@@ -127,6 +161,12 @@ impl Default for Settings {
             hostname: "gentoo".to_string(),
             account: None,
             stage3: None,
+            wm: crate::wm::WmChoice::default(),
+            wm_configs_git_url: String::new(),
+            packages: Vec::new(),
+            gpu_override: None,
+            opt_level: crate::make_conf::OptLevel::default(),
+            package_mode: crate::make_conf::PackageMode::default(),
         }
     }
 }
@@ -180,14 +220,10 @@ impl Ctx {
     }
 }
 
-/// The phase list in order — what `installer-cli`/`installer-gtk` drive.
+/// The phase list in the order of [`PhaseId::ORDER`] — what the frontends and `--headless` drive.
 ///
-/// 11 of the 13 `PhaseId::ORDER` phases are implemented. `Initramfs` and `PostHooks`
-/// (dracut, machine-id/eix seeding, and installing the escalation tool `Users` only
-/// configures) are still missing. They are left out entirely rather than stubbed with a
-/// fake no-op `run()`, since a phase that silently "succeeds" without doing anything is
-/// exactly the kind of invisible debt §0 warns against — `PhaseId` keeps all 13 variants
-/// so the journal format doesn't change shape when they're added for real.
+/// `Initramfs` is the one id left out: the live kernel boots without one, and a phase that silently
+/// "succeeds" without doing anything is exactly the invisible debt worth refusing.
 pub fn all_phases() -> Vec<Box<dyn Phase>> {
     vec![
         Box::new(PreflightPhase),
@@ -195,50 +231,176 @@ pub fn all_phases() -> Vec<Box<dyn Phase>> {
         Box::new(FormatPhase),
         Box::new(MountPhase),
         Box::new(DeployPhase),
+        Box::new(PortageConfigPhase),
         Box::new(FstabPhase),
         Box::new(LocalePhase),
         Box::new(UsersPhase),
-        Box::new(PortageConfigPhase),
+        Box::new(GpuPhase),
+        Box::new(DesktopPhase),
+        Box::new(PackagesPhase),
         Box::new(BootloaderPhase),
+        Box::new(PostHooksPhase),
         Box::new(FinalizePhase),
     ]
 }
 
-/// Runs every phase of [`all_phases`] in order on `ctx`. A phase whose [`Phase::is_satisfied`]
-/// is true is skipped (that is what makes re-running after a crash safe); the first failure
-/// sends [`Event::Failed`] and is returned, nothing after it runs. Sends [`Event::Complete`]
-/// when all phases are done.
-pub async fn run_all(ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
+/// Sum of every phase's weight: what 100 % of the progress bar is made of.
+pub fn total_weight() -> u32 {
+    all_phases().iter().map(|p| p.weight()).sum()
+}
+
+/// Progress after the phases in `finished` are done, 0.0..=1.0.
+pub fn fraction_done(finished: &[PhaseId]) -> f64 {
+    let total = total_weight().max(1) as f64;
+    let done: u32 = all_phases()
+        .iter()
+        .filter(|p| finished.contains(&p.id()))
+        .map(|p| p.weight())
+        .sum();
+    f64::from(done) / total
+}
+
+/// Whether a run starts from the beginning or continues one that stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    /// Every phase runs, whatever the disk already holds (a reinstall must not inherit an old system).
+    Fresh,
+    /// Continue the run the journal describes: phases it records as done are skipped.
+    Resume,
+}
+
+/// Runs every phase of [`all_phases`] in order on `ctx`, writing `journal_path` (if given) after each step.
+///
+/// * [`RunMode::Fresh`]: nothing is skipped and a new journal replaces the old one.
+/// * [`RunMode::Resume`]: the journal must describe an unfinished run on the same disk. A phase it records
+///   as done is skipped (destructive ones on that alone, see [`Phase::trusts_journal`]; the others also
+///   have to pass `is_satisfied`); everything else runs again.
+///
+/// The first failure sends [`Event::Failed`], is recorded in the journal and returned; nothing after it
+/// runs. [`Event::Complete`] is sent when all phases are done.
+pub async fn run_phases(
+    ctx: &mut Ctx,
+    tx: &EventTx,
+    mode: RunMode,
+    journal_path: Option<&std::path::Path>,
+) -> crate::Result<()> {
+    run_phase_list(ctx, tx, all_phases(), mode, journal_path).await
+}
+
+/// [`run_phases`] over an explicit list (the executor itself; split out so its resume rules can be tested
+/// with small stand-in phases instead of a disk).
+pub async fn run_phase_list(
+    ctx: &mut Ctx,
+    tx: &EventTx,
+    phases: Vec<Box<dyn Phase>>,
+    mode: RunMode,
+    journal_path: Option<&std::path::Path>,
+) -> crate::Result<()> {
     use crate::event::{Event, Level};
-    for phase in all_phases() {
-        let id = phase.id();
-        match phase.is_satisfied(ctx).await {
-            Ok(true) => {
-                let _ = tx.send(Event::Log {
-                    line: format!("{}: already done, skipping", phase.label()),
-                    level: Level::Info,
-                });
-                continue;
+    use crate::journal::{Journal, PhaseStatus};
+
+    let ids: Vec<PhaseId> = phases.iter().map(|p| p.id()).collect();
+    let plan = serde_json::json!({ "disk": ctx.layout.disk, "hostname": ctx.settings.hostname });
+
+    let mut journal = match (mode, journal_path) {
+        (RunMode::Resume, Some(path)) => {
+            let loaded = Journal::load(path).await?.ok_or_else(|| {
+                crate::Error::Other(anyhow::anyhow!(
+                    "nothing to resume: there is no journal at {}",
+                    path.display()
+                ))
+            })?;
+            let same_disk =
+                loaded.plan.get("disk").and_then(|d| d.as_str()) == Some(ctx.layout.disk.as_str());
+            if !same_disk || !loaded.is_resumable() {
+                return Err(crate::Error::Other(anyhow::anyhow!(
+                    "the journal does not describe an unfinished install on {}",
+                    ctx.layout.disk
+                )));
             }
-            Ok(false) => {}
-            Err(e) => {
-                let _ = tx.send(Event::Failed {
-                    id,
-                    error: e.to_string(),
-                });
-                return Err(e);
+            if loaded
+                .phases
+                .get(&PhaseId::Partition)
+                .is_some_and(|r| r.status == PhaseStatus::Done)
+            {
+                ctx.parts = Some(partition_mod::partitions_for(&ctx.layout));
+            }
+            Some(loaded)
+        }
+        (RunMode::Resume, None) => {
+            return Err(crate::Error::Other(anyhow::anyhow!(
+                "resuming needs a journal path"
+            )));
+        }
+        (RunMode::Fresh, Some(_)) => Some(Journal::new(plan, &ids)),
+        (RunMode::Fresh, None) => None,
+    };
+
+    macro_rules! record {
+        ($j:ident . $m:ident ( $($a:expr),* )) => {
+            if let (Some($j), Some(path)) = (journal.as_mut(), journal_path) {
+                $j.$m($($a),*);
+                let _ = $j.save(path).await;
+            }
+        };
+    }
+    if let (Some(j), Some(path)) = (journal.as_ref(), journal_path) {
+        let _ = j.save(path).await;
+    }
+
+    for phase in phases {
+        let id = phase.id();
+        if mode == RunMode::Resume {
+            let done_before = journal
+                .as_ref()
+                .and_then(|j| j.phases.get(&id))
+                .is_some_and(|r| r.status == PhaseStatus::Done);
+            if done_before {
+                let skip = if phase.trusts_journal() {
+                    true
+                } else {
+                    match phase.is_satisfied(ctx).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let _ = tx.send(Event::Failed {
+                                id,
+                                error: e.to_string(),
+                            });
+                            return Err(e);
+                        }
+                    }
+                };
+                if skip {
+                    let _ = tx.send(Event::Log {
+                        line: format!("{}: already done, skipping", phase.label()),
+                        level: Level::Info,
+                    });
+                    let _ = tx.send(Event::PhaseFinished {
+                        id,
+                        duration: std::time::Duration::default(),
+                    });
+                    continue;
+                }
             }
         }
+        record!(journal.mark_running(id));
         if let Err(e) = phase.run(ctx, tx).await {
+            record!(journal.mark_failed(id, e.to_string()));
             let _ = tx.send(Event::Failed {
                 id,
                 error: e.to_string(),
             });
             return Err(e);
         }
+        record!(journal.mark_done(id));
     }
     let _ = tx.send(Event::Complete);
     Ok(())
+}
+
+/// [`run_phases`] in [`RunMode::Fresh`] without a journal: the whole chain, nothing skipped.
+pub async fn run_all(ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
+    run_phases(ctx, tx, RunMode::Fresh, None).await
 }
 
 #[cfg(test)]
@@ -331,7 +493,7 @@ mod tests {
                 username: "solomiya".into(),
                 password: "hunter2".into(),
             }),
-            stage3: None,
+            ..Settings::default()
         }
     }
 
@@ -709,6 +871,203 @@ mod tests {
             "phases out of install order: {ids:?}"
         );
         assert!(ids.contains(&PhaseId::Locale) && ids.contains(&PhaseId::Users));
-        assert_eq!(ids.len(), 11);
+        assert_eq!(ids.len(), 15);
+    }
+
+    /// A stand-in phase that counts its runs and reports a fixed `is_satisfied`.
+    struct Counting {
+        id: PhaseId,
+        satisfied: bool,
+        trusts: bool,
+        fail: bool,
+        runs: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Phase for Counting {
+        fn id(&self) -> PhaseId {
+            self.id
+        }
+        fn label(&self) -> &str {
+            "counting"
+        }
+        async fn is_satisfied(&self, _ctx: &Ctx) -> crate::Result<bool> {
+            Ok(self.satisfied)
+        }
+        async fn run(&self, _ctx: &mut Ctx, _tx: &EventTx) -> crate::Result<()> {
+            self.runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail {
+                Err(crate::Error::Other(anyhow::anyhow!("{:?} failed", self.id)))
+            } else {
+                Ok(())
+            }
+        }
+        fn weight(&self) -> u32 {
+            1
+        }
+        fn reversible(&self) -> bool {
+            false
+        }
+        fn trusts_journal(&self) -> bool {
+            self.trusts
+        }
+    }
+
+    fn counting(
+        id: PhaseId,
+        satisfied: bool,
+        trusts: bool,
+        fail: bool,
+    ) -> (Box<dyn Phase>, Arc<std::sync::atomic::AtomicUsize>) {
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        (
+            Box::new(Counting {
+                id,
+                satisfied,
+                trusts,
+                fail,
+                runs: runs.clone(),
+            }),
+            runs,
+        )
+    }
+
+    fn runs(r: &Arc<std::sync::atomic::AtomicUsize>) -> usize {
+        r.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn a_failed_run_resumes_after_what_is_done_and_never_reformats() {
+        let dir = std::env::temp_dir().join(format!("gi-resume-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let journal = dir.join("journal.json");
+        let mut ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // First attempt: Partition and Format succeed, Mount fails.
+        let (p1, partition_runs) = counting(PhaseId::Partition, false, true, false);
+        let (p2, format_runs) = counting(PhaseId::Format, false, true, false);
+        let (p3, mount_runs) = counting(PhaseId::Mount, false, false, true);
+        let r = run_phase_list(
+            &mut ctx,
+            &tx,
+            vec![p1, p2, p3],
+            RunMode::Fresh,
+            Some(&journal),
+        )
+        .await;
+        assert!(r.is_err());
+        assert_eq!(
+            (runs(&partition_runs), runs(&format_runs), runs(&mount_runs)),
+            (1, 1, 1)
+        );
+
+        // Resume: the destructive phases are skipped on the journal alone (their is_satisfied says false —
+        // they cannot be probed), Mount runs again and now succeeds.
+        let (p1, partition_runs) = counting(PhaseId::Partition, false, true, false);
+        let (p2, format_runs) = counting(PhaseId::Format, false, true, false);
+        let (p3, mount_runs) = counting(PhaseId::Mount, false, false, false);
+        run_phase_list(
+            &mut ctx,
+            &tx,
+            vec![p1, p2, p3],
+            RunMode::Resume,
+            Some(&journal),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (runs(&partition_runs), runs(&format_runs), runs(&mount_runs)),
+            (0, 0, 1),
+            "nothing already done is redone"
+        );
+        assert!(
+            ctx.parts.is_some(),
+            "the device names are rebuilt from the layout"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_done_phase_that_no_longer_checks_out_is_run_again() {
+        let dir = std::env::temp_dir().join(format!("gi-resume2-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let journal = dir.join("journal.json");
+        let mut ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let (a, _) = counting(PhaseId::Deploy, true, false, false);
+        let (b, _) = counting(PhaseId::Fstab, true, false, true);
+        assert!(
+            run_phase_list(&mut ctx, &tx, vec![a, b], RunMode::Fresh, Some(&journal))
+                .await
+                .is_err()
+        );
+
+        // On resume Deploy is recorded done and still satisfied -> skipped; Fstab failed -> runs.
+        let (a, deploy_runs) = counting(PhaseId::Deploy, true, false, false);
+        let (b, fstab_runs) = counting(PhaseId::Fstab, true, false, false);
+        run_phase_list(&mut ctx, &tx, vec![a, b], RunMode::Resume, Some(&journal))
+            .await
+            .unwrap();
+        assert_eq!((runs(&deploy_runs), runs(&fstab_runs)), (0, 1));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn resuming_on_another_disk_or_without_a_journal_is_refused_and_a_fresh_run_ignores_old_state(
+    ) {
+        let dir = std::env::temp_dir().join(format!("gi-resume3-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let journal = dir.join("journal.json");
+        let mut ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let (p, _) = counting(PhaseId::Mount, true, false, false);
+        let err = run_phase_list(&mut ctx, &tx, vec![p], RunMode::Resume, Some(&journal))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no journal"), "{err}");
+
+        // An old unfinished run on /dev/other; this ctx installs to /dev/sda.
+        let (a, _) = counting(PhaseId::Deploy, true, false, false);
+        let (b, _) = counting(PhaseId::Fstab, true, false, true);
+        let mut other = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
+        other.layout.disk = "/dev/other".into();
+        let _ = run_phase_list(&mut other, &tx, vec![a, b], RunMode::Fresh, Some(&journal)).await;
+        let (p, _) = counting(PhaseId::Deploy, true, false, false);
+        assert!(
+            run_phase_list(&mut ctx, &tx, vec![p], RunMode::Resume, Some(&journal))
+                .await
+                .is_err()
+        );
+
+        // Fresh ignores whatever is on disk, even phases that claim to be satisfied.
+        let (p, p_runs) = counting(PhaseId::Deploy, true, false, false);
+        run_phase_list(&mut ctx, &tx, vec![p], RunMode::Fresh, Some(&journal))
+            .await
+            .unwrap();
+        assert_eq!(
+            runs(&p_runs),
+            1,
+            "a reinstall must not inherit an old system"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

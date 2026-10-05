@@ -30,7 +30,13 @@ impl Phase for BootloaderPhase {
         let parts = ctx.parts.as_ref().ok_or_else(|| {
             crate::Error::Other(anyhow::anyhow!("bootloader phase ran before partitioning"))
         })?;
-        bootloader::configure(ctx.runner.as_ref(), &ctx.target, &ctx.layout, parts).await?;
+        // The proprietary NVIDIA driver needs kernel modesetting for a Wayland session to get an output.
+        let extra = if ctx.profile.as_ref().map(|p| p.gpu) == Some(crate::hardware::Gpu::Nvidia) {
+            "nvidia-drm.modeset=1"
+        } else {
+            ""
+        };
+        bootloader::configure(ctx.runner.as_ref(), &ctx.target, &ctx.layout, parts, extra).await?;
         bootloader::install(ctx.runner.as_ref(), &ctx.target, &ctx.layout.disk).await?;
         let _ = tx.send(Event::PhaseFinished {
             id: self.id(),

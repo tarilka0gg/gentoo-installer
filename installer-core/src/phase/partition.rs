@@ -45,6 +45,10 @@ impl Phase for PartitionPhase {
     fn reversible(&self) -> bool {
         false
     }
+
+    fn trusts_journal(&self) -> bool {
+        true
+    }
 }
 
 pub struct FormatPhase;
@@ -86,5 +90,9 @@ impl Phase for FormatPhase {
 
     fn reversible(&self) -> bool {
         false
+    }
+
+    fn trusts_journal(&self) -> bool {
+        true
     }
 }

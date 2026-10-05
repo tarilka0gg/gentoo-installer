@@ -28,7 +28,10 @@ impl Phase for PreflightPhase {
             label: self.label().to_string(),
         });
 
-        let profile = hardware::Profile::detect()?;
+        let mut profile = hardware::Profile::detect()?;
+        if let Some(gpu) = ctx.settings.gpu_override {
+            profile.gpu = gpu;
+        }
         let _ = tx.send(log(format!(
             "Detected: {} ({} GiB RAM)",
             profile.combo(),

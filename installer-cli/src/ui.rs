@@ -9,16 +9,20 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use installer_core::{
     config::StoreEnv,
-    disk, hardware, install,
+    disk,
+    event::{Event as InstallEvent, Level},
+    hardware, install,
     make_conf::{OptLevel, PackageMode},
-    network, partition, store,
+    network, partition,
+    phase::{self, PhaseId, RunMode},
+    store,
     wm::WmChoice,
 };
 use ratatui::{
     layout::{Constraint, Layout as RtLayout},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
     DefaultTerminal,
 };
 use tokio::sync::mpsc;
@@ -31,7 +35,11 @@ pub struct AppState {
     pub selected_disk: usize,
     pub status: String,
     pub install_log: Vec<String>,
-    pub install_rx: Option<mpsc::UnboundedReceiver<install::Progress>>,
+    pub install_rx: Option<mpsc::UnboundedReceiver<InstallEvent>>,
+    /// Phases that have finished so far; the progress bar is made from their weights.
+    pub finished: Vec<PhaseId>,
+    /// An earlier unfinished install on the selected disk, if the live session still remembers one.
+    pub resume: Option<install::ResumeInfo>,
     pub install_task: Option<tokio::task::JoinHandle<installer_core::Result<()>>>,
     pub install_finished: bool,
     /// Wi-Fi screen (only used while there is no Ethernet link).
@@ -57,6 +65,8 @@ impl AppState {
             status: String::new(),
             install_log: Vec::new(),
             install_rx: None,
+            finished: Vec::new(),
+            resume: None,
             install_task: None,
             install_finished: false,
             wifi: WifiState::new(),
@@ -98,7 +108,7 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
                     match state.account_form.handle_key(key.code) {
                         AccountOutcome::Submit(a) => {
                             state.account = Some(a);
-                            state.step = Step::Confirm;
+                            enter_confirm(&mut state).await;
                         }
                         AccountOutcome::Back => state.step = Step::DiskSelect,
                         AccountOutcome::None => {}
@@ -116,6 +126,9 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
                         state.selected_disk = state.selected_disk.saturating_sub(1);
                     }
                     KeyCode::Enter => advance(&mut state).await,
+                    KeyCode::Char('r') if state.step == Step::Confirm && state.resume.is_some() => {
+                        start_install(&mut state, RunMode::Resume);
+                    }
                     _ => {}
                 }
             }
@@ -131,21 +144,26 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
 /// the install runs on its own tokio task, this just reflects it into the log.
 async fn drain_install_progress(state: &mut AppState) {
     if let Some(rx) = &mut state.install_rx {
-        while let Ok(progress) = rx.try_recv() {
-            state.install_log.push(describe(&progress));
-            if matches!(progress, install::Progress::Done) {
+        while let Ok(event) = rx.try_recv() {
+            if let InstallEvent::PhaseFinished { id, .. } = &event {
+                state.finished.push(*id);
+            }
+            if matches!(event, InstallEvent::Complete) {
                 state.install_finished = true;
+            }
+            if let Some(line) = describe(&event) {
+                state.install_log.push(line);
             }
         }
     }
 
-    // A failed install never sends `Progress::Done`, so waiting for it alone left the screen frozen on the
+    // A failed install never sends `Event::Complete`, so waiting for it alone left the screen frozen on the
     // last step with no error (found in a real VM run). The task ending is the signal; its result says how.
     let ended = state.install_task.as_ref().is_some_and(|t| t.is_finished());
     if state.install_finished || ended {
         if let Some(task) = state.install_task.take() {
             match task.await {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => state.install_log.push("Install complete.".into()),
                 Ok(Err(e)) => state.install_log.push(format!("ERROR: {e}")),
                 Err(e) => state
                     .install_log
@@ -156,30 +174,26 @@ async fn drain_install_progress(state: &mut AppState) {
     }
 }
 
-fn describe(p: &install::Progress) -> String {
-    match p {
-        install::Progress::Partitioning => "Partitioning disk...".into(),
-        install::Progress::DownloadingStage3 => "Downloading stage3...".into(),
-        install::Progress::UnpackingStage3 => "Unpacking stage3...".into(),
-        install::Progress::WritingMakeConf => "Tuning make.conf for your hardware...".into(),
-        install::Progress::ConfiguringStore => "Configuring portage store...".into(),
-        install::Progress::InstallingKernel { atom, degraded_by } => {
-            if *degraded_by == 0 {
-                format!("Installing kernel: {atom} (exact hardware match)")
-            } else {
-                format!("Installing kernel: {atom} (generalized, degraded {degraded_by} step(s))")
-            }
-        }
-        install::Progress::InstallingGpuDriver => {
-            "Building the Nvidia driver for your kernel...".into()
-        }
-        install::Progress::WritingFstab => "Writing fstab...".into(),
-        install::Progress::SettingKeyboard => "Setting keyboard layout...".into(),
-        install::Progress::SettingTimezone => "Setting time zone...".into(),
-        install::Progress::CreatingAccount => "Creating your account...".into(),
-        install::Progress::InstallingDesktop => "Installing desktop environment...".into(),
-        install::Progress::InstallingBootloader => "Installing Limine...".into(),
-        install::Progress::Done => "Install complete.".into(),
+/// One line of the log for an event, or `None` for the ones that only drive the progress bar.
+fn describe(event: &InstallEvent) -> Option<String> {
+    match event {
+        InstallEvent::PhaseStarted { label, .. } => Some(format!("{label}...")),
+        InstallEvent::Log {
+            line,
+            level: Level::Info,
+        } => Some(format!("  {line}")),
+        InstallEvent::Log {
+            line,
+            level: Level::Warn,
+        } => Some(format!("  warning: {line}")),
+        InstallEvent::Log {
+            line,
+            level: Level::Error,
+        } => Some(format!("  error: {line}")),
+        InstallEvent::Failed { error, .. } => Some(format!("ERROR: {error}")),
+        InstallEvent::PhaseFinished { .. }
+        | InstallEvent::Progress { .. }
+        | InstallEvent::Complete => None,
     }
 }
 
@@ -231,6 +245,16 @@ async fn perform_wifi(state: &mut AppState) {
     }
 }
 
+/// Goes to the confirm screen, noting whether this live session still holds an unfinished install on the
+/// chosen disk (the journal lives in `/run`, so it is only ever there within one session).
+async fn enter_confirm(state: &mut AppState) {
+    state.resume = match state.disks.get(state.selected_disk) {
+        Some(d) if !simulate_mode() => install::resumable(&d.path).await,
+        _ => None,
+    };
+    state.step = Step::Confirm;
+}
+
 async fn advance(state: &mut AppState) {
     match state.step {
         Step::Network => {
@@ -249,16 +273,16 @@ async fn advance(state: &mut AppState) {
             if state.disks.get(state.selected_disk).is_some() {
                 let from_env = std::env::var("GENTOO_INSTALLER_USERNAME").is_ok()
                     && std::env::var("GENTOO_INSTALLER_PASSWORD").is_ok();
-                state.step = if from_env || simulate_mode() {
-                    Step::Confirm
+                if from_env || simulate_mode() {
+                    enter_confirm(state).await;
                 } else {
-                    Step::Account
-                };
+                    state.step = Step::Account;
+                }
             }
         }
         // The form submits itself (see the key loop); Enter here is never reached for it.
         Step::Account => {}
-        Step::Confirm => start_install(state),
+        Step::Confirm => start_install(state, RunMode::Fresh),
         Step::Installing => {}
         // After a finished install: Enter reboots (OpenRC's `reboot`; the disk was unmounted by
         // the installer). Not offered if the log has an error — rebooting into a half-installed
@@ -284,7 +308,7 @@ fn simulate_mode() -> bool {
     std::env::var("GENTOO_INSTALLER_SIMULATE").is_ok()
 }
 
-fn start_install(state: &mut AppState) {
+fn start_install(state: &mut AppState, mode: RunMode) {
     let Some(disk) = state.disks.get(state.selected_disk).cloned() else {
         return;
     };
@@ -430,8 +454,9 @@ fn start_install(state: &mut AppState) {
 
     let (tx, rx) = mpsc::unbounded_channel();
     state.install_rx = Some(rx);
-    state.install_task = Some(tokio::spawn(install::run(opts, tx)));
+    state.install_task = Some(tokio::spawn(install::run(opts, tx, mode)));
     state.install_log.clear();
+    state.finished.clear();
     state.step = Step::Installing;
 }
 
@@ -605,12 +630,24 @@ fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
             disk::format_size(d.size_bytes),
             state.status,
         ),
-        Some(d) => format!(
-            "About to WIPE {} ({}) and install: ESP 512MiB, swap, btrfs root with @/@home/@var/@log subvolumes, Limine bootloader.\n\n[Enter] confirm and install  [q] abort\n\n{}",
-            d.path,
-            disk::format_size(d.size_bytes),
-            state.status,
-        ),
+        Some(d) => {
+            let resume = state.resume.as_ref().map(|r| {
+                format!(
+                    "An earlier install on this disk stopped after {} of {} steps{}.\n[r] RESUME it (keeps what is already installed)\n\n",
+                    r.phases_done,
+                    r.phases_total,
+                    r.error.as_deref().map(|e| format!(" ({e})")).unwrap_or_default(),
+                )
+            });
+            format!(
+                "{}About to WIPE {} ({}) and install: ESP 512MiB, swap, btrfs root with @/@home/@var/@log subvolumes, Limine bootloader.\n\n[Enter] {} and install  [q] abort\n\n{}",
+                resume.unwrap_or_default(),
+                d.path,
+                disk::format_size(d.size_bytes),
+                if state.resume.is_some() { "START OVER (erases the disk)" } else { "confirm" },
+                state.status,
+            )
+        }
         None => "No disk selected.".to_string(),
     };
     frame.render_widget(
@@ -620,15 +657,34 @@ fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
 }
 
 fn draw_installing(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let log = state.install_log.join("\n");
-    let title = match (state.step == Step::Done, install_failed(&state.install_log)) {
+    let chunks = RtLayout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
+    let done = state.step == Step::Done;
+    let failed = install_failed(&state.install_log);
+    let fraction = if done && !failed {
+        1.0
+    } else {
+        phase::fraction_done(&state.finished)
+    };
+    frame.render_widget(
+        Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Progress"))
+            .gauge_style(Style::default().fg(if failed { Color::Red } else { Color::Cyan }))
+            .ratio(fraction.clamp(0.0, 1.0)),
+        chunks[0],
+    );
+
+    // Show the tail: a long install outgrows the pane, and the newest line is the one that matters.
+    let height = chunks[1].height.saturating_sub(2) as usize;
+    let skip = state.install_log.len().saturating_sub(height);
+    let log = state.install_log[skip..].join("\n");
+    let title = match (done, failed) {
         (true, true) => "Failed [q] quit",
         (true, false) => "Done - [Enter] reboot  [q] quit",
         _ => "Installing",
     };
     frame.render_widget(
         Paragraph::new(log).block(Block::default().borders(Borders::ALL).title(title)),
-        area,
+        chunks[1],
     );
 }
 

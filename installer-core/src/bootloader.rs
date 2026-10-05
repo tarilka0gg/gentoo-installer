@@ -10,16 +10,22 @@ pub fn generate_config(
     kernel_file: &str,
     root_partuuid: &str,
     root_subvol: Option<&str>,
+    extra_cmdline: &str,
 ) -> String {
     let rootflags = root_subvol
         .map(|s| format!(" rootflags=subvol={s}"))
         .unwrap_or_default();
+    let extra = if extra_cmdline.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" {}", extra_cmdline.trim())
+    };
     format!(
         "timeout: 3\n\n\
          /Gentoo\n\
          \tprotocol: linux\n\
          \tkernel_path: boot():/{kernel_file}\n\
-         \tcmdline: root=PARTUUID={root_partuuid}{rootflags} rw\n"
+         \tcmdline: root=PARTUUID={root_partuuid}{rootflags} rw{extra}\n"
     )
 }
 
@@ -56,6 +62,7 @@ pub async fn configure(
     target: &Path,
     layout: &crate::partition::Layout,
     parts: &crate::partition::Partitions,
+    extra_cmdline: &str,
 ) -> crate::Result<()> {
     let kernel = find_kernel(target)?;
     let out = runner
@@ -71,7 +78,7 @@ pub async fn configure(
     let subvol = matches!(layout.root_fs, crate::partition::RootFs::Btrfs).then_some("@");
     write_config(
         &target.join("boot"),
-        &generate_config(&kernel, partuuid, subvol),
+        &generate_config(&kernel, partuuid, subvol, extra_cmdline),
     )
     .await
 }
@@ -133,14 +140,14 @@ mod tests {
 
     #[test]
     fn config_has_expected_shape() {
-        let cfg = generate_config("vmlinuz-6.1-generic", "ABCD-1234", Some("@"));
+        let cfg = generate_config("vmlinuz-6.1-generic", "ABCD-1234", Some("@"), "");
         assert!(cfg.contains("kernel_path: boot():/vmlinuz-6.1-generic\n"));
         assert!(cfg.contains("root=PARTUUID=ABCD-1234 rootflags=subvol=@ rw"));
     }
 
     #[test]
     fn ext4_root_gets_no_rootflags() {
-        let cfg = generate_config("vmlinuz-x", "ABCD-1234", None);
+        let cfg = generate_config("vmlinuz-x", "ABCD-1234", None, "");
         assert!(!cfg.contains("rootflags"), "{cfg}");
     }
 
@@ -172,5 +179,11 @@ mod tests {
         std::fs::write(dir.join("boot/vmlinuz-b"), "").unwrap();
         assert!(find_kernel(&dir).is_err());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn extra_kernel_parameters_are_appended_after_rw() {
+        let cfg = generate_config("vmlinuz-x", "ABCD-1234", None, "  nvidia-drm.modeset=1 ");
+        assert!(cfg.contains("rw nvidia-drm.modeset=1\n"), "{cfg}");
     }
 }

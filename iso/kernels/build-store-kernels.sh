@@ -36,6 +36,11 @@ for t in "$@"; do
     # the per-target source copy is several GB; the products are in the store now
     [ -d "$d/srctree" ] && [ "${KEEP_TREES:-0}" != 1 ] && rm -rf --one-file-system "$d/srctree"
 done
-# merge with what the store already lists
-cat "$STORE/Packages" "$STORE/Packages.new" 2>/dev/null | awk 'BEGIN{RS="";ORS="\n\n"} !seen[$0]++' > "$STORE/Packages.merged" && mv "$STORE/Packages.merged" "$STORE/Packages"
+# Packages is derived from what is really in the store (a kernel counts only with its modules tarball), so it
+# cannot drift from the files: one CPV stanza per <combo>.vmlinuz that has a <combo>-modules.tar.xz.
+: > "$STORE/Packages"
+for v in "$STORE"/kernels/*.vmlinuz; do
+    c=$(basename "$v" .vmlinuz)
+    [ -f "$STORE/kernels/$c-modules.tar.xz" ] && printf 'CPV: sys-kernel/gentoo-diy-kernel-bin-%s-1\n\n' "$c" >> "$STORE/Packages"
+done
 rm -f "$STORE/Packages.new"; echo "done: $(grep -c '^CPV' "$STORE/Packages") packages in $STORE/Packages"

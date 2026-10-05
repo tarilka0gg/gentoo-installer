@@ -72,7 +72,10 @@ impl Phase for DeployPhase {
         let profile = match &ctx.profile {
             Some(p) => p.clone(),
             None => {
-                let p = hardware::Profile::detect()?;
+                let mut p = hardware::Profile::detect()?;
+                if let Some(gpu) = ctx.settings.gpu_override {
+                    p.gpu = gpu;
+                }
                 ctx.profile = Some(p.clone());
                 p
             }

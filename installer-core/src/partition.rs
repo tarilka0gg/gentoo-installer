@@ -71,6 +71,17 @@ fn part_device(disk: &str, index: u32) -> String {
     }
 }
 
+/// The device paths [`create_partitions`] produces for `layout`, without touching the disk: the names
+/// follow only from the disk and the fixed ESP/swap/root order. A resumed install needs them again and
+/// cannot get them from the partitioning step it is skipping.
+pub fn partitions_for(layout: &Layout) -> Partitions {
+    Partitions {
+        esp: part_device(&layout.disk, 1),
+        swap: part_device(&layout.disk, 2),
+        root: part_device(&layout.disk, 3),
+    }
+}
+
 /// Writes a fresh GPT with ESP/swap/root and returns the resulting device paths.
 /// Destructive — callers must have already confirmed with the user. Wipes any existing
 /// partition table on the disk. Does not format anything; see `format_partitions`.
@@ -133,11 +144,7 @@ pub async fn create_partitions(
     // Re-read the partition table so the new device nodes exist before mkfs.
     runner.run_status("partprobe", &[disk]).await.ok();
 
-    Ok(Partitions {
-        esp: part_device(disk, 1),
-        swap: part_device(disk, 2),
-        root: part_device(disk, 3),
-    })
+    Ok(partitions_for(layout))
 }
 
 /// Formats each partition per `layout.root_fs`, creating the btrfs subvolume layout if
