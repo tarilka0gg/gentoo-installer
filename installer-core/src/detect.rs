@@ -64,7 +64,10 @@ pub async fn gather(runner: &dyn CommandRunner) -> DetectedSystem {
         Ok(text) => crate::gpu::parse_lspci(&text),
         Err(_) => Vec::new(),
     };
-    let nouveau = matches!(profile.as_ref().map(|p| p.gpu), Some(hardware::Gpu::Nouveau));
+    let nouveau = matches!(
+        profile.as_ref().map(|p| p.gpu),
+        Some(hardware::Gpu::Nouveau)
+    );
     // Every adapter gets its driver; fall back to the single-GPU guess if `lspci` showed nothing.
     let video_cards = if gpus.is_empty() {
         profile.as_ref().map(|p| video_cards_value(p.gpu))
@@ -145,7 +148,10 @@ mod tests {
         assert_eq!(video_cards_value(hardware::Gpu::Amd), "amdgpu radeonsi");
         assert_eq!(video_cards_value(hardware::Gpu::Intel), "intel");
         assert_eq!(video_cards_value(hardware::Gpu::Xe), "intel");
-        assert_eq!(video_cards_value(hardware::Gpu::RadeonLegacy), "radeon r300 r600");
+        assert_eq!(
+            video_cards_value(hardware::Gpu::RadeonLegacy),
+            "radeon r300 r600"
+        );
     }
 
     #[tokio::test]

@@ -45,7 +45,10 @@ impl Phase for DesktopPhase {
             Err(_) => Vec::new(),
         };
         let nouveau = ctx.settings.gpu_override == Some(crate::hardware::Gpu::Nouveau)
-            || ctx.profile.as_ref().is_some_and(|p| p.gpu == crate::hardware::Gpu::Nouveau);
+            || ctx
+                .profile
+                .as_ref()
+                .is_some_and(|p| p.gpu == crate::hardware::Gpu::Nouveau);
         let render = crate::gpu::RenderPlan::new(&gpus, ctx.settings.render, nouveau);
         wm::install(
             ctx.runner.as_ref(),

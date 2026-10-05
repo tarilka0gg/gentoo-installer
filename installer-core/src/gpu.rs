@@ -69,7 +69,12 @@ impl GpuDevice {
     pub fn is_discrete(&self, all: &[GpuDevice]) -> bool {
         match self.vendor {
             Vendor::Nvidia | Vendor::IntelArc => true,
-            Vendor::Amd => all.iter().any(|d| d.vendor == Vendor::Intel) && !all.iter().any(|d| matches!(d.vendor, Vendor::Nvidia | Vendor::IntelArc)),
+            Vendor::Amd => {
+                all.iter().any(|d| d.vendor == Vendor::Intel)
+                    && !all
+                        .iter()
+                        .any(|d| matches!(d.vendor, Vendor::Nvidia | Vendor::IntelArc))
+            }
             _ => false,
         }
     }
@@ -90,18 +95,26 @@ pub fn parse_lspci(text: &str) -> Vec<GpuDevice> {
         .filter_map(|line| {
             let (addr, rest) = line.split_once(' ')?;
             // `[0300]` VGA, `[0302]` 3D controller, `[0380]` other display controller.
-            if !(rest.contains("[0300]") || rest.contains("[0302]") || rest.contains("[0380]")) || !addr.contains(':') {
+            if !(rest.contains("[0300]") || rest.contains("[0302]") || rest.contains("[0380]"))
+                || !addr.contains(':')
+            {
                 return None;
             }
             let id_start = rest.rfind("] [").or_else(|| rest.rfind(" ["))?; // …[vendor:device] (rev xx)
-            let ids = rest[id_start..].split(['[', ']']).find(|s| s.len() == 9 && s.as_bytes().get(4) == Some(&b':'))?;
+            let ids = rest[id_start..]
+                .split(['[', ']'])
+                .find(|s| s.len() == 9 && s.as_bytes().get(4) == Some(&b':'))?;
             let (vendor_id, device_id) = ids.split_once(':')?;
             let vendor = match vendor_id.to_ascii_lowercase().as_str() {
                 "10de" => Vendor::Nvidia,
                 "1002" => Vendor::Amd,
                 "8086" => {
                     let d = device_id.to_ascii_lowercase();
-                    if d.starts_with("56") || d.starts_with("e2") { Vendor::IntelArc } else { Vendor::Intel }
+                    if d.starts_with("56") || d.starts_with("e2") {
+                        Vendor::IntelArc
+                    } else {
+                        Vendor::Intel
+                    }
                 }
                 "1af4" => Vendor::Virtio,
                 "15ad" => Vendor::Vmware,
@@ -109,8 +122,17 @@ pub fn parse_lspci(text: &str) -> Vec<GpuDevice> {
                 _ => Vendor::Other,
             };
             // `0000:01:00.0` → keep the domain; older lspci prints `01:00.0` without it.
-            let pci_addr = if addr.matches(':').count() == 1 { format!("0000:{addr}") } else { addr.to_string() };
-            Some(GpuDevice { vendor, pci_addr, device_id: device_id.to_ascii_lowercase(), description: rest.trim().to_string() })
+            let pci_addr = if addr.matches(':').count() == 1 {
+                format!("0000:{addr}")
+            } else {
+                addr.to_string()
+            };
+            Some(GpuDevice {
+                vendor,
+                pci_addr,
+                device_id: device_id.to_ascii_lowercase(),
+                description: rest.trim().to_string(),
+            })
         })
         .collect()
 }
@@ -156,7 +178,11 @@ pub fn video_cards(devices: &[GpuDevice], extra: Option<Gpu>, nouveau: bool) -> 
 /// [`RenderPreference::Integrated`] the least capable. `None` when the machine has no adapter.
 pub fn pick_render(devices: &[GpuDevice], pref: RenderPreference) -> Option<&GpuDevice> {
     let physical: Vec<&GpuDevice> = devices.iter().filter(|d| !d.vendor.is_virtual()).collect();
-    let pool: Vec<&GpuDevice> = if physical.is_empty() { devices.iter().collect() } else { physical };
+    let pool: Vec<&GpuDevice> = if physical.is_empty() {
+        devices.iter().collect()
+    } else {
+        physical
+    };
     match pref {
         RenderPreference::Auto => pool.into_iter().max_by_key(|d| d.vendor.rank()),
         RenderPreference::Integrated => pool.into_iter().min_by_key(|d| d.vendor.rank()),
@@ -209,8 +235,14 @@ mod tests {
     fn parses_the_adapters_and_ignores_everything_else() {
         let d = parse_lspci(HYBRID);
         assert_eq!(d.len(), 2);
-        assert_eq!((d[0].vendor, d[0].pci_addr.as_str(), d[0].device_id.as_str()), (Vendor::Intel, "0000:00:02.0", "a78b"));
-        assert_eq!((d[1].vendor, d[1].pci_addr.as_str()), (Vendor::Nvidia, "0000:01:00.0"));
+        assert_eq!(
+            (d[0].vendor, d[0].pci_addr.as_str(), d[0].device_id.as_str()),
+            (Vendor::Intel, "0000:00:02.0", "a78b")
+        );
+        assert_eq!(
+            (d[1].vendor, d[1].pci_addr.as_str()),
+            (Vendor::Nvidia, "0000:01:00.0")
+        );
         assert!(parse_lspci("").is_empty() && parse_lspci("garbage\n[0300]\n").is_empty());
     }
 
@@ -218,14 +250,23 @@ mod tests {
     fn an_address_without_the_domain_gets_one() {
         let d = parse_lspci("01:00.0 3D controller [0302]: NVIDIA Corporation GA107 [10de:25a0]\n");
         assert_eq!(d[0].pci_addr, "0000:01:00.0");
-        assert_eq!(d[0].render_node(), "/dev/dri/by-path/pci-0000:01:00.0-render");
+        assert_eq!(
+            d[0].render_node(),
+            "/dev/dri/by-path/pci-0000:01:00.0-render"
+        );
     }
 
     #[test]
     fn a_hybrid_laptop_gets_a_driver_for_both_adapters_discrete_first() {
         // The old code wrote only `nvidia`, leaving Mesa without a driver for the iGPU the panel hangs off.
-        assert_eq!(video_cards(&parse_lspci(HYBRID), None, false), ["nvidia", "intel"]);
-        assert_eq!(video_cards(&parse_lspci(HYBRID), None, true), ["nouveau", "intel"]);
+        assert_eq!(
+            video_cards(&parse_lspci(HYBRID), None, false),
+            ["nvidia", "intel"]
+        );
+        assert_eq!(
+            video_cards(&parse_lspci(HYBRID), None, true),
+            ["nouveau", "intel"]
+        );
     }
 
     #[test]
@@ -234,7 +275,11 @@ mod tests {
         assert_eq!(video_cards(&amd, None, false), ["amdgpu", "radeonsi"]);
         let arc = parse_lspci("0000:03:00.0 VGA compatible controller [0300]: Intel Corporation DG2 [Arc A770] [8086:56a0]\n");
         assert_eq!(arc[0].vendor, Vendor::IntelArc);
-        assert_eq!(video_cards(&arc, None, false), ["intel"], "Arc is `intel`, not `xe` or `i915`");
+        assert_eq!(
+            video_cards(&arc, None, false),
+            ["intel"],
+            "Arc is `intel`, not `xe` or `i915`"
+        );
     }
 
     #[test]
@@ -245,26 +290,46 @@ mod tests {
 
     #[test]
     fn a_hand_picked_gpu_adds_to_the_detected_ones() {
-        assert_eq!(video_cards(&parse_lspci(VIRTIO), Some(Gpu::Amd), false), ["virgl", "amdgpu", "radeonsi"]);
+        assert_eq!(
+            video_cards(&parse_lspci(VIRTIO), Some(Gpu::Amd), false),
+            ["virgl", "amdgpu", "radeonsi"]
+        );
     }
 
     #[test]
     fn the_discrete_gpu_renders_unless_the_integrated_one_is_asked_for() {
         let d = parse_lspci(HYBRID);
-        assert_eq!(pick_render(&d, RenderPreference::Auto).unwrap().vendor, Vendor::Nvidia);
-        assert_eq!(pick_render(&d, RenderPreference::Integrated).unwrap().vendor, Vendor::Intel);
+        assert_eq!(
+            pick_render(&d, RenderPreference::Auto).unwrap().vendor,
+            Vendor::Nvidia
+        );
+        assert_eq!(
+            pick_render(&d, RenderPreference::Integrated)
+                .unwrap()
+                .vendor,
+            Vendor::Intel
+        );
         assert!(pick_render(&[], RenderPreference::Auto).is_none());
     }
 
     #[test]
     fn a_physical_adapter_beats_a_virtual_one_and_amd_is_discrete_only_next_to_an_intel_igpu() {
         let mixed = parse_lspci(&format!("{VIRTIO}0000:01:00.0 VGA compatible controller [0300]: AMD/ATI Navi 23 [1002:73ff]\n0000:00:02.0 VGA compatible controller [0300]: Intel Raptor Lake [8086:a780]\n"));
-        assert_eq!(pick_render(&mixed, RenderPreference::Auto).unwrap().vendor, Vendor::Amd);
+        assert_eq!(
+            pick_render(&mixed, RenderPreference::Auto).unwrap().vendor,
+            Vendor::Amd
+        );
         let amd = mixed.iter().find(|d| d.vendor == Vendor::Amd).unwrap();
         assert!(amd.is_discrete(&mixed));
         let apu_plus_nvidia = parse_lspci("0000:05:00.0 VGA [0300]: AMD Phoenix [1002:15bf]\n0000:01:00.0 VGA [0300]: NVIDIA AD107 [10de:28a0]\n");
-        let apu = apu_plus_nvidia.iter().find(|d| d.vendor == Vendor::Amd).unwrap();
-        assert!(!apu.is_discrete(&apu_plus_nvidia), "an AMD APU next to an NVIDIA card is the integrated one");
+        let apu = apu_plus_nvidia
+            .iter()
+            .find(|d| d.vendor == Vendor::Amd)
+            .unwrap();
+        assert!(
+            !apu.is_discrete(&apu_plus_nvidia),
+            "an AMD APU next to an NVIDIA card is the integrated one"
+        );
     }
 
     #[test]
@@ -273,18 +338,33 @@ mod tests {
         let nv = pick_render(&d, RenderPreference::Auto);
         assert!(renders_on_proprietary_nvidia(nv, false));
         assert!(!renders_on_proprietary_nvidia(nv, true));
-        assert!(!renders_on_proprietary_nvidia(pick_render(&d, RenderPreference::Integrated), false));
+        assert!(!renders_on_proprietary_nvidia(
+            pick_render(&d, RenderPreference::Integrated),
+            false
+        ));
     }
 
     #[test]
     fn the_plan_pins_a_device_only_on_a_multi_gpu_machine() {
         let hybrid = RenderPlan::new(&parse_lspci(HYBRID), RenderPreference::Auto, false);
-        assert_eq!(hybrid.render_node.as_deref(), Some("/dev/dri/by-path/pci-0000:01:00.0-render"));
-        assert_eq!(hybrid.card_node.as_deref(), Some("/dev/dri/by-path/pci-0000:01:00.0-card"));
+        assert_eq!(
+            hybrid.render_node.as_deref(),
+            Some("/dev/dri/by-path/pci-0000:01:00.0-render")
+        );
+        assert_eq!(
+            hybrid.card_node.as_deref(),
+            Some("/dev/dri/by-path/pci-0000:01:00.0-card")
+        );
         assert!(hybrid.proprietary_nvidia);
         let igpu = RenderPlan::new(&parse_lspci(HYBRID), RenderPreference::Integrated, false);
-        assert_eq!(igpu.render_node.as_deref(), Some("/dev/dri/by-path/pci-0000:00:02.0-render"));
+        assert_eq!(
+            igpu.render_node.as_deref(),
+            Some("/dev/dri/by-path/pci-0000:00:02.0-render")
+        );
         assert!(!igpu.proprietary_nvidia);
-        assert_eq!(RenderPlan::new(&parse_lspci(VIRTIO), RenderPreference::Auto, false), RenderPlan::default());
+        assert_eq!(
+            RenderPlan::new(&parse_lspci(VIRTIO), RenderPreference::Auto, false),
+            RenderPlan::default()
+        );
     }
 }

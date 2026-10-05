@@ -466,7 +466,10 @@ async fn apply_preset_from_dir(
     tune_for_gpu(&config_dir, choice_of(spec), render).await?;
 
     let tmpl = tokio::fs::read_to_string(preset_root.join("bash_profile.tmpl")).await?;
-    let launch = format!("dbus-run-session -- {}", launch_with_gpu(spec.launch_cmd, render));
+    let launch = format!(
+        "dbus-run-session -- {}",
+        launch_with_gpu(spec.launch_cmd, render)
+    );
     let rendered = tmpl.replace("{{LAUNCH_CMD}}", &launch);
     tokio::fs::write(
         home.join(".bash_profile"),
@@ -516,7 +519,10 @@ fn set_toml_bool(text: &mut String, key: &str, value: bool) -> bool {
             let is_key = t.starts_with(key) && t[key.len()..].trim_start().starts_with('=');
             if is_key && !found {
                 found = true;
-                let comment = line.find('#').map(|i| format!("  {}", &line[i..])).unwrap_or_default();
+                let comment = line
+                    .find('#')
+                    .map(|i| format!("  {}", &line[i..]))
+                    .unwrap_or_default();
                 format!("{key} = {value}{comment}")
             } else {
                 line.to_string()
@@ -544,11 +550,18 @@ fn launch_with_gpu(launch: &str, render: &crate::gpu::RenderPlan) -> String {
 }
 
 fn choice_of(spec: &WmSpec) -> WmChoice {
-    WmChoice::ALL.into_iter().find(|c| self::spec(*c).atom == spec.atom).unwrap_or_default()
+    WmChoice::ALL
+        .into_iter()
+        .find(|c| self::spec(*c).atom == spec.atom)
+        .unwrap_or_default()
 }
 
 /// Applies the GPU decision to the copied configs: niri's `render-drm-device` and Noctalia's GL context.
-async fn tune_for_gpu(config_dir: &Path, choice: WmChoice, render: &crate::gpu::RenderPlan) -> crate::Result<()> {
+async fn tune_for_gpu(
+    config_dir: &Path,
+    choice: WmChoice,
+    render: &crate::gpu::RenderPlan,
+) -> crate::Result<()> {
     if choice == WmChoice::Niri {
         if let Some(node) = &render.render_node {
             let path = config_dir.join("niri/config.kdl");
@@ -891,28 +904,50 @@ mod tests {
 
     #[test]
     fn noctalia_gl_context_is_switched_off_keeping_the_comment() {
-        let mut t = "a = 1\nshared_gl_context     = true         # startup-only\nb = 2\n".to_string();
+        let mut t =
+            "a = 1\nshared_gl_context     = true         # startup-only\nb = 2\n".to_string();
         assert!(set_toml_bool(&mut t, "shared_gl_context", false));
-        assert_eq!(t, "a = 1\nshared_gl_context = false  # startup-only\nb = 2\n");
+        assert_eq!(
+            t,
+            "a = 1\nshared_gl_context = false  # startup-only\nb = 2\n"
+        );
         assert!(!set_toml_bool(&mut t, "missing", true));
     }
 
     #[test]
     fn the_launch_command_pins_the_gpu_for_each_compositor_family() {
-        let plan = crate::gpu::RenderPlan { card_node: Some("/dev/dri/by-path/pci-0000:01:00.0-card".into()), ..Default::default() };
-        assert_eq!(launch_with_gpu("Hyprland", &plan), "env AQ_DRM_DEVICES=/dev/dri/by-path/pci-0000:01:00.0-card Hyprland");
-        assert_eq!(launch_with_gpu("dwl -s noctalia", &plan), "env WLR_DRM_DEVICES=/dev/dri/by-path/pci-0000:01:00.0-card dwl -s noctalia");
-        assert_eq!(launch_with_gpu("niri --session", &plan), "niri --session", "niri uses its config file");
+        let plan = crate::gpu::RenderPlan {
+            card_node: Some("/dev/dri/by-path/pci-0000:01:00.0-card".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            launch_with_gpu("Hyprland", &plan),
+            "env AQ_DRM_DEVICES=/dev/dri/by-path/pci-0000:01:00.0-card Hyprland"
+        );
+        assert_eq!(
+            launch_with_gpu("dwl -s noctalia", &plan),
+            "env WLR_DRM_DEVICES=/dev/dri/by-path/pci-0000:01:00.0-card dwl -s noctalia"
+        );
+        assert_eq!(
+            launch_with_gpu("niri --session", &plan),
+            "niri --session",
+            "niri uses its config file"
+        );
         assert_eq!(launch_with_gpu("sway", &Default::default()), "sway");
     }
 
     #[tokio::test]
     async fn niri_and_noctalia_configs_follow_the_gpu_plan() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-gpu-tune-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-gpu-tune-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("niri")).unwrap();
         std::fs::create_dir_all(dir.join("noctalia")).unwrap();
         std::fs::write(dir.join("niri/config.kdl"), "input {}\n").unwrap();
-        std::fs::write(dir.join("noctalia/config.toml"), "shared_gl_context = true # x\n").unwrap();
+        std::fs::write(
+            dir.join("noctalia/config.toml"),
+            "shared_gl_context = true # x\n",
+        )
+        .unwrap();
         let plan = crate::gpu::RenderPlan {
             render_node: Some("/dev/dri/by-path/pci-0000:01:00.0-render".into()),
             card_node: None,
@@ -923,7 +958,9 @@ mod tests {
         let kdl = std::fs::read_to_string(dir.join("niri/config.kdl")).unwrap();
         assert_eq!(kdl.matches("render-drm-device").count(), 1, "{kdl}");
         assert!(kdl.contains("pci-0000:01:00.0-render"));
-        assert!(std::fs::read_to_string(dir.join("noctalia/config.toml")).unwrap().contains("shared_gl_context = false"));
+        assert!(std::fs::read_to_string(dir.join("noctalia/config.toml"))
+            .unwrap()
+            .contains("shared_gl_context = false"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

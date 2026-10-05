@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries for the GTK frontend
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Build
+        run: cargo build --workspace --locked
+      - name: Tests
+        # The ignored tests need root, a real stage3 or QEMU; they stay for the rigs described in iso/README.md.
+        run: cargo test --workspace --locked
+
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax and ShellCheck
+        run: |
+          for f in iso/*.sh iso/secureboot/*.sh iso/test/*.sh; do bash -n "$f"; done
+          shellcheck --severity=error iso/*.sh iso/secureboot/*.sh

@@ -1978,7 +1978,10 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                 keyboard_layout: state.keyboard_layout.borrow().clone(),
                 timezone: state.timezone.borrow().clone(),
                 hostname: "gentoo".into(),
-                locales: installer_core::autodetect::guess_for_layout(&state.keyboard_layout.borrow()).locales,
+                locales: installer_core::autodetect::guess_for_layout(
+                    &state.keyboard_layout.borrow(),
+                )
+                .locales,
                 account,
                 gpu_override: state.gpu.get(),
                 render: Default::default(),

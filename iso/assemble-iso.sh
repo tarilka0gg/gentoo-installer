@@ -171,7 +171,7 @@ FWPY
 # squashfs + xorriso inside the builder chroot
 cat > "$W/inner.sh" <<INNER
 set -e
-mksquashfs /mnt/live-root /mnt/work/isoroot/LiveOS/squashfs.img -comp zstd -Xcompression-level 12 -b 256K -noappend -no-progress -ef /mnt/work/squashfs-excludes.txt
+mksquashfs /mnt/live-root /mnt/work/isoroot/LiveOS/squashfs.img -comp zstd -Xcompression-level 19 -b 1M -noappend -no-progress -ef /mnt/work/squashfs-excludes.txt
 xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid $LABEL -R -J \
   -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
   --efi-boot boot/efiboot.img -efi-boot-part --efi-boot-image --protective-msdos-label \
