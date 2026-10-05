@@ -75,7 +75,11 @@ impl WizardState {
             existing_os: RefCell::new(None),
             advanced: Cell::new(false),
             keyboard_layout: RefCell::new(keyboard::detect_current()),
-            timezone: RefCell::new(tz::detect_current().unwrap_or_else(|| "UTC".to_string())),
+            timezone: RefCell::new(
+                installer_core::autodetect::guess_here()
+                    .timezone
+                    .unwrap_or_else(|| "UTC".to_string()),
+            ),
             wm: Cell::new(WmChoice::default()),
             gpu: Cell::new(None),
             packages: RefCell::new(installer_core::packages::default_ids()),
@@ -1974,7 +1978,7 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                 keyboard_layout: state.keyboard_layout.borrow().clone(),
                 timezone: state.timezone.borrow().clone(),
                 hostname: "gentoo".into(),
-                locales: vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
+                locales: installer_core::autodetect::guess_for_layout(&state.keyboard_layout.borrow()).locales,
                 account,
                 gpu_override: state.gpu.get(),
                 render: Default::default(),

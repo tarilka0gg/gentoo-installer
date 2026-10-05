@@ -381,9 +381,10 @@ fn start_install(state: &mut AppState, mode: RunMode) {
     };
 
     let hostname = std::env::var("GENTOO_INSTALLER_HOSTNAME").unwrap_or_else(|_| "gentoo".into());
+    let guessed = installer_core::autodetect::guess_here();
     let locales: Vec<String> = match std::env::var("GENTOO_INSTALLER_LOCALES") {
         Ok(v) if !v.trim().is_empty() => v.split(',').map(|l| l.trim().to_string()).collect(),
-        _ => vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
+        _ => guessed.locales.clone(),
     };
 
     let gpu_override = match std::env::var("GENTOO_INSTALLER_GPU").as_deref() {
@@ -438,7 +439,7 @@ fn start_install(state: &mut AppState, mode: RunMode) {
             .map(|e| e.kernel_base_name)
             .unwrap_or_else(|| "gentoo-diy-kernel".into()),
         keyboard_layout: installer_core::keyboard::detect_current(),
-        timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
+        timezone: guessed.timezone.clone().unwrap_or_else(|| "UTC".into()),
         hostname,
         locales,
         gpu_override,

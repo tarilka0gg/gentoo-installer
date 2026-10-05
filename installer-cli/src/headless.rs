@@ -50,6 +50,15 @@ pub async fn run() -> Result<()> {
         username: need("GENTOO_INSTALLER_USERNAME")?,
         password: need("GENTOO_INSTALLER_PASSWORD")?,
     });
+    // Language and zone follow the keyboard layout unless the environment says otherwise.
+    let guessed = installer_core::autodetect::guess_for_layout(
+        &std::env::var("GENTOO_INSTALLER_KEYBOARD")
+            .unwrap_or_else(|_| installer_core::keyboard::detect_current()),
+    );
+    settings.locales = guessed.locales;
+    if let Some(zone) = guessed.timezone {
+        settings.timezone = zone;
+    }
     if let Ok(v) = std::env::var("GENTOO_INSTALLER_HOSTNAME") {
         settings.hostname = v;
     }
