@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Gentoo Installer (text)
+GenericName=System Installer
+Comment=The same installer in a terminal
+Exec=installer-cli
+Icon=gentoo-installer
+Terminal=true
+Categories=System;
+Keywords=install;gentoo;disk;

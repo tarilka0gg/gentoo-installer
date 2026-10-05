@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.tarilka0gg.GentooInstaller</id>
+  <name>Gentoo Installer</name>
+  <developer id="io.github.tarilka0gg"><name>tarilka0gg</name></developer>
+  <summary>Install Gentoo to a disk, with a kernel matched to the hardware</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <description>
+    <p>
+      An installer for Gentoo with a GTK4/libadwaita window and a terminal interface that share one phase
+      pipeline. It partitions the disk (btrfs, ESP, swap), unpacks a stage3, installs a prebuilt kernel chosen
+      for the CPU and GPU, tunes make.conf, sets up the account, the desktop and Limine, and can resume an
+      install that failed halfway. OpenRC only.
+    </p>
+    <p>It erases the disk you pick. Run it from a live system, not from the system it would overwrite.</p>
+  </description>
+  <launchable type="desktop-id">io.github.tarilka0gg.GentooInstaller.desktop</launchable>
+  <categories><category>System</category></categories>
+  <url type="homepage">https://github.com/tarilka0gg/gentoo-installer</url>
+  <url type="bugtracker">https://github.com/tarilka0gg/gentoo-installer/issues</url>
+  <provides>
+    <binary>installer-cli</binary>
+    <binary>installer-gui</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-05"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

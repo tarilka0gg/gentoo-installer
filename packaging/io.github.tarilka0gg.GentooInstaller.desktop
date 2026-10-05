@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Gentoo Installer
+GenericName=System Installer
+Comment=Install Gentoo to a disk: btrfs layout, per-hardware kernel, Limine
+Exec=installer-gui
+Icon=gentoo-installer
+Terminal=false
+Categories=System;
+StartupNotify=true
+StartupWMClass=installer-gui
+Keywords=install;gentoo;disk;

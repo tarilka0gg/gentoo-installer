@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>216761460+tarilka0gg@users.noreply.github.com</email>
+		<name>tarilka0gg</name>
+	</maintainer>
+	<longdescription>
+		A Gentoo installer with a GTK4/libadwaita frontend and a text frontend over one phase pipeline:
+		btrfs partitioning, stage3, a prebuilt per-hardware kernel, make.conf tuning, Limine, a desktop,
+		and resume after a failed install. OpenRC only.
+	</longdescription>
+	<use>
+		<flag name="gui">Build the GTK4/libadwaita frontend (installer-gui)</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">tarilka0gg/gentoo-installer</remote-id>
+		<bugs-to>https://github.com/tarilka0gg/gentoo-installer/issues</bugs-to>
+	</upstream>
+</pkgmetadata>
