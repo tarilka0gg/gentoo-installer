@@ -8,12 +8,12 @@
 # Chain: firmware (db) -> Limine -> config -> kernel and initramfs. The paths are resolved under <root>.
 set -euo pipefail
 KEYS=$(readlink -f "${1:?keys dir}"); CONF=$(readlink -f "${2:?limine.conf}"); EFI=$(readlink -f "${3:?BOOTX64.EFI}")
-ROOT=${ROOT:?ROOT = the directory boot():/ points at}
+ROOT=${ROOT:?ROOT = the directory that boot() or fslabel() in the config maps to}
 tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
 while IFS= read -r line; do
     case $line in
         *kernel_path:*|*module_path:*)
-            p=${line#*boot():}; p=${p%%#*}
+            p=${line#*):}; p=${p%%#*}   # the path after boot(): or fslabel(NAME):
             [ -f "$ROOT$p" ] || { echo "sign.sh: $ROOT$p missing" >&2; exit 1; }
             printf '%s#%s\n' "${line%%#*}" "$(b2sum "$ROOT$p" | cut -d' ' -f1)" ;;
         *) printf '%s\n' "$line" ;;

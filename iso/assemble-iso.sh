@@ -132,6 +132,8 @@ usr/lib/llvm/22/lib64/libclang.so.22.1.8"
 else
     LLVM_EXCLUDES="usr/lib/llvm"
 fi
+# Toolchains installed under /opt only to build things (Rust, Zig): the live system compiles nothing.
+OPT_EXCLUDES=$(cd "$W/$ROOTFS" && ls -d opt/rust-bin-* opt/zig-bin-* 2>/dev/null || true)
 cat > "$W/squashfs-excludes.txt" <<EXCL
 var/db/repos/gentoo
 var/db/repos/guru
@@ -144,6 +146,7 @@ var/tmp/portage
 var/cache/distfiles
 var/cache/binpkgs
 $LLVM_EXCLUDES
+$OPT_EXCLUDES
 usr/include
 usr/share/locale
 usr/share/i18n
