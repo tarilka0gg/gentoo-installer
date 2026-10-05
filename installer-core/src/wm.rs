@@ -168,6 +168,7 @@ pub async fn install(
         }
         emerge_wm_packages(runner, target, &spec).await?;
         enable_session_services(runner, target, username).await?;
+        write_runtime_dir_script(target).await?;
         apply_preset_from_dir(runner, target, &staging, &spec, username).await
     }
     .await;
@@ -186,6 +187,57 @@ async fn install_savedconfig(preset_root: &Path, target: &Path, spec: &WmSpec) -
     let portage_dir = target.join("etc/portage");
     write_portage_entry(&portage_dir.join("package.use"), "gentoo-installer-dwl", &format!("{} savedconfig\n", spec.atom)).await?;
     Ok(())
+}
+
+/// Created at boot by `/etc/local.d`: `/run/user/<uid>` for every regular user.
+///
+/// Nothing else makes it on this system — no systemd, and no `elogind` (whose PAM module normally does) —
+/// and a compositor cannot start without `XDG_RUNTIME_DIR`. Found by booting a finished install: the
+/// directory did not exist. `local` runs `*.start` files from `/etc/local.d` in the default runlevel.
+pub const RUNTIME_DIR_SCRIPT: &str = "#!/bin/sh
+# Written by the installer: XDG_RUNTIME_DIR for regular users (no elogind or systemd here to create it).
+awk -F: '$3 >= 1000 && $3 < 60000 { print $3 \":\" $4 }' /etc/passwd | while IFS=: read -r uid gid; do
+    install -d -m 0700 -o \"$uid\" -g \"$gid\" \"/run/user/$uid\"
+done
+";
+
+async fn write_runtime_dir_script(target: &Path) -> crate::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = target.join("etc/local.d");
+    tokio::fs::create_dir_all(&dir).await?;
+    let path = dir.join("10-xdg-runtime.start");
+    tokio::fs::write(&path, RUNTIME_DIR_SCRIPT).await?;
+    tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).await?;
+    Ok(())
+}
+
+/// If `/run/user/<uid>` is missing at login (the boot script has not run, or ran before the user
+/// existed), use a private directory under `~/.cache` instead of failing to start the session.
+fn with_runtime_dir_fallback(profile: &str) -> String {
+    const EXPORT: &str = "export XDG_RUNTIME_DIR=/run/user/$(id -u)";
+    const FALLBACK: &str = "[ -d \"$XDG_RUNTIME_DIR\" ] || { export XDG_RUNTIME_DIR=\"$HOME/.cache/xdg-runtime\"; mkdir -p -m 700 \"$XDG_RUNTIME_DIR\"; }";
+    if profile.contains(EXPORT) {
+        profile.replacen(EXPORT, &format!("{EXPORT}\n{FALLBACK}"), 1)
+    } else {
+        profile.to_string()
+    }
+}
+
+/// Start the compositor from tty1 for a fish login shell, the counterpart of the template's
+/// `.bash_profile` block (same launch command, same runtime-directory fallback).
+fn fish_session_snippet(launch: &str) -> String {
+    format!(
+        "# Written by the installer: start the session on tty1 (fish does not read ~/.bash_profile).
+if status is-login; and test (tty) = /dev/tty1; and not set -q WAYLAND_DISPLAY
+    set -gx XDG_RUNTIME_DIR /run/user/(id -u)
+    if not test -d $XDG_RUNTIME_DIR
+        set -gx XDG_RUNTIME_DIR $HOME/.cache/xdg-runtime
+        mkdir -p -m 700 $XDG_RUNTIME_DIR
+    end
+    exec {launch}
+end
+"
+    )
 }
 
 /// What a compositor session needs from the OS and the stage3 does not give: the system bus
@@ -321,8 +373,17 @@ async fn apply_preset_from_dir(runner: &dyn CommandRunner, target: &Path, preset
     copy_dir(&preset_root.join("noctalia"), &config_dir.join("noctalia")).await?;
 
     let tmpl = tokio::fs::read_to_string(preset_root.join("bash_profile.tmpl")).await?;
-    let rendered = tmpl.replace("{{LAUNCH_CMD}}", &format!("dbus-run-session -- {}", spec.launch_cmd));
-    tokio::fs::write(home.join(".bash_profile"), rendered).await?;
+    let launch = format!("dbus-run-session -- {}", spec.launch_cmd);
+    let rendered = tmpl.replace("{{LAUNCH_CMD}}", &launch);
+    tokio::fs::write(home.join(".bash_profile"), with_runtime_dir_fallback(&rendered)).await?;
+
+    // The user's login shell is fish when the stage has it (a custom stage does), and fish does not read
+    // `.bash_profile` — the first real install booted to a fish prompt on tty1 and never started niri.
+    if target.join("usr/bin/fish").is_file() {
+        let fish_dir = config_dir.join("fish/conf.d");
+        tokio::fs::create_dir_all(&fish_dir).await?;
+        tokio::fs::write(fish_dir.join("10-session.fish"), fish_session_snippet(&launch)).await?;
+    }
 
     let target_str = target
         .to_str()
@@ -470,5 +531,50 @@ mod tests {
         let err = install(&runner, Path::new("/mnt/gentoo"), WmChoice::Niri, "  ", "solomiya").await.unwrap_err();
         assert!(err.to_string().contains("wm-configs"), "{err}");
         assert!(runner.calls().is_empty(), "nothing may run: {:?}", runner.calls());
+    }
+
+    #[tokio::test]
+    async fn the_boot_script_that_makes_the_runtime_dir_is_executable_and_targets_regular_users() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-rundir-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        write_runtime_dir_script(&dir).await.unwrap();
+        let p = dir.join("etc/local.d/10-xdg-runtime.start");
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o755);
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(text.starts_with("#!/bin/sh") && text.contains("/run/user/$uid") && text.contains(">= 1000"), "{text}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_bash_profile_gets_a_runtime_dir_fallback_right_after_the_template_export() {
+        let tmpl = "export XDG_RUNTIME_DIR=/run/user/$(id -u)\n\nif [ \"$(tty)\" = \"/dev/tty1\" ]; then\n\texec dbus-run-session -- niri --session\nfi\n";
+        let out = with_runtime_dir_fallback(tmpl);
+        let export_at = out.find("export XDG_RUNTIME_DIR=/run/user").unwrap();
+        let fallback_at = out.find(".cache/xdg-runtime").unwrap();
+        let exec_at = out.find("exec dbus-run-session").unwrap();
+        assert!(export_at < fallback_at && fallback_at < exec_at, "{out}");
+        assert_eq!(with_runtime_dir_fallback("no export here\n"), "no export here\n");
+    }
+
+    #[tokio::test]
+    async fn a_stage_with_fish_gets_the_session_started_from_fish_too() {
+        let root = std::env::temp_dir().join(format!("gentoo-installer-fishsess-{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let (preset, target) = (root.join("preset"), root.join("target"));
+        make_preset_repo(&preset, "niri");
+
+        // Without fish: no fish snippet.
+        apply_preset_from_dir(&FakeCommandRunner::new(), &target, &preset, &spec(WmChoice::Niri), "solomiya").await.unwrap();
+        assert!(!target.join("home/solomiya/.config/fish").exists());
+
+        // With fish (a custom stage): the snippet exists and starts the same command.
+        std::fs::create_dir_all(target.join("usr/bin")).unwrap();
+        std::fs::write(target.join("usr/bin/fish"), "").unwrap();
+        apply_preset_from_dir(&FakeCommandRunner::new(), &target, &preset, &spec(WmChoice::Niri), "solomiya").await.unwrap();
+        let snippet = std::fs::read_to_string(target.join("home/solomiya/.config/fish/conf.d/10-session.fish")).unwrap();
+        assert!(snippet.contains("exec dbus-run-session -- niri --session"), "{snippet}");
+        assert!(snippet.contains("/dev/tty1") && snippet.contains("xdg-runtime"), "{snippet}");
+        std::fs::remove_dir_all(&root).ok();
     }
 }

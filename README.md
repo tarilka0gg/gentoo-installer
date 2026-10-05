@@ -239,6 +239,26 @@ After a finished install the legacy path now runs `sync` and `umount -R` on the 
 stays on its Done screen (Enter reboots, but only if no step failed; `q` leaves) and the GUI button runs `reboot`.
 Not run end to end yet: the desktop and Wi-Fi steps on a real target (they need a long compile and the network).
 
+## A full run through the TUI, in a VM
+
+The minimal image was booted in QEMU, the TUI driven with the keyboard exactly as a person would (network → disk → *new*
+account screen → confirm), against a local test store, with the desktop (niri + Noctalia, 157 packages, most of them binary
+from Gentoo's binhost) and the Wi-Fi group. It finished with "Install complete", offered a reboot, and the reboot happened.
+The installed disk then booted by itself; the created user logged in with fish, in `wheel`, `seat`, `video`, `render`,
+`input` and `audio`; `dbus`, `seatd` and `iwd` were in the default runlevel and running; `niri`, `noctalia`, `iwctl` and 686
+firmware entries were present; `doas` asked for the user's password.
+
+The run also found, and the code now fixes (each with a test): the TUI read the wm-configs URL from a variable the store config
+does not use and then hid the resulting error (it only reported errors after a `Done` that a failure never sends); the user's
+login shell is fish on a custom stage and fish ignores `~/.bash_profile`, so niri was never started (a fish snippet is written
+now); and nothing created `XDG_RUNTIME_DIR` (`/run/user/<uid>`), because there is neither systemd nor elogind — an
+`/etc/local.d` script does it at boot, with a fallback under `~/.cache`.
+
+With those files in place the session did start (`niri --session` running, seatd up, the runtime directory owned by the user),
+but on that VM niri found no output: the target's Mesa has `iris`/`radeonsi`/`nouveau`/`swrast` and no driver for the virtual GPU,
+and `make.conf` has no `VIDEO_CARDS` when the hardware is a VM. So **a picture of the installed desktop has not been seen**, on real
+hardware or in the VM. Real GPUs have drivers in that Mesa build, but that is an expectation, not a test.
+
 ## Wi-Fi in the TUI
 
 With no Ethernet link the TUI scans through `iwd` (the same `IwdClient` the GUI uses), lists the networks
