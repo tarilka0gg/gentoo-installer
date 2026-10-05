@@ -80,6 +80,31 @@ if [ -n "${SECUREBOOT_KEYS:-}" ]; then
 fi
 cp "$ISO/limine.conf" "$ISO/boot/limine/limine.conf"
 
+# Ventoy ignores limine.conf: it reads GRUB-style menus ("Boot in grub2 mode", and the normal mode for Linux ISOs), loads
+# the kernel itself, and injects the hook that makes the ISO visible as /dev/mapper/ventoy. Same entries as Limine's.
+mkdir -p "$ISO/boot/grub"
+cat > "$ISO/boot/grub/grub.cfg" <<GRUBCFG
+set timeout=5
+set default=0
+
+menuentry "Simple Linux (live)" {
+    linux /boot/vmlinuz $BASE console=tty0 loglevel=5 ${EXTRA_CMDLINE:-}
+    initrd /boot/initramfs.img
+}
+menuentry "Simple Linux - safe graphics (nomodeset, text installer)" {
+    linux /boot/vmlinuz $BASE console=tty0 loglevel=5 nomodeset ${EXTRA_CMDLINE:-}
+    initrd /boot/initramfs.img
+}
+menuentry "Simple Linux - USB workaround (legacy enumeration, no autosuspend)" {
+    linux /boot/vmlinuz $BASE console=tty0 loglevel=5 usbcore.old_scheme_first=1 usbcore.autosuspend=-1 ${EXTRA_CMDLINE:-}
+    initrd /boot/initramfs.img
+}
+menuentry "Simple Linux - verbose (every kernel and initramfs message)" {
+    linux /boot/vmlinuz $BASE console=tty0 loglevel=7 rd.debug ${EXTRA_CMDLINE:-}
+    initrd /boot/initramfs.img
+}
+GRUBCFG
+
 # UEFI: El Torito boots a small FAT image holding Limine; it finds boot() there, so the
 # kernel and initramfs are copied in too (~30 MB - cheaper than a second config dialect).
 EFI=$W/efiboot.img
