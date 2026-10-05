@@ -8,11 +8,9 @@ shared core:
 - **main ISO** — niri + a shell package preinstalled on the target,
   GTK4 + libadwaita installer (`installer-gui`).
 
-Target architecture is a formal build spec (`INSTALLER-SPEC.md`-equivalent,
-kept in conversation history) built around a linear `Phase` state machine with
-journal/resume, an `Event` stream, and a `CommandRunner` abstraction for
-testing without root or real disks. `installer-core` is partway migrated onto
-it — see **Architecture** below for what's real vs. still legacy.
+Both frontends and `--headless` run the same phase pipeline (`installer-core/src/phase/`), which writes a journal so
+a failed install can be resumed. Everything shells out through a `CommandRunner`, so it is tested without root or a real
+disk. OpenRC only.
 
 ## Base system
 
@@ -60,29 +58,35 @@ it — see **Architecture** below for what's real vs. still legacy.
 ```
 installer-core/     lib crate — all real logic, no UI code
 
-  Spec-aligned (new):
-  phase/             Phase trait + PhaseId + Ctx — the state machine
+  phase/             Phase trait, PhaseId, Ctx, Settings, run_phases — the state machine (15 phases, in order)
     preflight.rs        disk/firmware/battery/network checks
     partition.rs        PartitionPhase + FormatPhase (parted, then mkfs)
     mount.rs             MountPhase
     deploy.rs            stage3 unpack + kernel match+deploy (~70% of wall-clock)
+    portage_config.rs   hardware-tuned make.conf (written right after Deploy, before any emerge)
     fstab.rs              FstabPhase
     locale.rs             LocalePhase: keyboard, time zone, hostname, locale-gen
     users.rs              UsersPhase: first account + /etc/doas.conf
-    portage_config.rs   make.conf + git init/commit
+    gpu.rs                GpuPhase: on-target Nvidia driver when needed
+    desktop.rs            DesktopPhase: compositor + Noctalia + the user's session files (skipped with WM=none)
+    packages.rs           PackagesPhase: the software groups chosen
     bootloader.rs        Limine
+    post_hooks.rs        records /etc/portage history
     finalize.rs          sync + unmount
+  install.rs         InstallOptions -> Settings; run(opts, tx, RunMode::{Fresh,Resume}); the frontends' entry point
   event.rs           Event enum (PhaseStarted/Progress/Log/PhaseFinished/Failed/Complete)
-  journal.rs         on-disk resume state (JSON), is_satisfied()-driven skip logic
+  journal.rs         on-disk resume state (/run/installer/journal.json)
   command.rs         CommandRunner trait + Real/Fake — every shell-out goes through this
   detect.rs          env/hardware inference for make.conf + confirm screen
+  gpu.rs             every graphics adapter from lspci: VIDEO_CARDS, discrete-first render device
+  autodetect.rs      locales + time zone guessed from the keyboard layout
 
-  Step logic (called by phases above, and still by legacy install.rs):
+  Step logic (called by the phases):
   hardware.rs        CPU/GPU/platform detection -> Profile (3-axis combo)
   kernel.rs          Profile -> matching build + direct-copy deploy (no emerge)
   disk.rs            lsblk-backed disk enumeration
   partition.rs       layout planning + swap sizing + create/format/mount
-  stage3.rs          resolve/download/verify/unpack official stage3
+  stage3.rs          resolve/download/verify/unpack a stage3 (official, custom URL, or bundled on the medium)
   bootloader.rs      Limine config generation + install
   store.rs           writes repos.conf/binrepos.conf, git-clones the overlay
   fstab.rs           UUID-based /etc/fstab generation
@@ -90,100 +94,77 @@ installer-core/     lib crate — all real logic, no UI code
   account.rs         useradd (-R target) + doas.conf; timezone.rs / keyboard.rs likewise
   make_conf.rs       hardware-tuned /etc/portage/make.conf (-march=, MAKEOPTS, ...)
   gpu_driver.rs       on-target Nvidia driver build against the exact kernel
-  wm.rs              compositor + Noctalia install, preset config from wm-configs
+  wm.rs              compositor + Noctalia install, preset config from wm-configs, GPU tuning of those configs
+  services.rs        rc-update for dbus, seatd, iwd, ...
+  packages.rs        software groups
   chroot_emerge.rs   shared chroot/emerge bootstrap (resolv.conf, tree sync, bind mounts)
   http.rs            tiny shared download helper
   network.rs         iwd client (zbus) + ethernet link check
   config.rs          StoreEnv (env-var-sourced store config, shared by frontends)
 
-  Legacy (still what installer-cli/installer-gui actually drive):
-  install.rs         monolithic orchestrator, same step functions as phase/, no journal
-
-installer-cli/    ratatui TUI binary — minimal ISO only, drives install.rs today
-installer-gui/    gtk4-rs + libadwaita binary — main ISO only, drives install.rs today
+installer-cli/    ratatui TUI (and `--headless`) — minimal ISO
+installer-gui/    gtk4-rs + libadwaita — main ISO
 ```
 
-Both frontends call into `installer-core` only; no step logic is duplicated
-between the phase system and `install.rs` — phases call the exact same
-functions (`partition::create_partitions`, `stage3::download`, `kernel::deploy`,
-...) that `install.rs` does, just with journal/resume/event-stream bookkeeping
-around them.
-
-**Why two orchestrators right now**: the target spec's own build order says
-build the phase/journal/CommandRunner foundation and prove it headless *before*
-touching the GUI. `installer-gui` predates that spec and is built on
-libadwaita's `AdwNavigationView`/`AdwStatusPage` — which the spec explicitly
-rules out for the primary path (GNOME layout grammar, not this installer's
-interaction model). Rewriting it is deliberately the last step, not skipped.
+Both frontends call into `installer-core` only; no step logic lives in them.
 
 ## Status
 
-Workspace builds and passes clippy clean across all three crates, 82 unit/
-integration tests passing (plus 5 real-stage3 tests, run separately), including a `Partition→Format→Mount→Fstab`
-end-to-end run against `FakeCommandRunner` with no root and no real disk.
-Hardware detection was live-verified on this machine (Victus 16, i7-14650HX +
-RTX 4070): `Profile::detect()` produces `intel-raptorlake-nvidia-laptop`, an
-exact match against rank #3 of the real 304-kernel build.
+Workspace builds and passes `cargo fmt --check`, build and tests in CI (GitHub Actions): 138 core and 17 CLI tests, plus
+tests that need root, a stage3 or QEMU and are run by hand (see below).
 
-`make.conf` generation (`make_conf`) and desktop install (`wm`) are both real
-and wired into `install::run`: `make.conf` gets a hardware-real `-march=`,
-`MAKEOPTS` sized to core count, and `CPU_FLAGS_X86`/`VIDEO_CARDS` from
-`detect::gather`, with `Advanced` setup choosing `-O2`/`-O3` and
-binary-vs-source packages (`GENTOO_INSTALLER_OPT_LEVEL`/`_PACKAGE_MODE` env
-vars in the CLI, dedicated pages in the GUI). `wm` installs Noctalia plus one
-of niri (default)/Hyprland/Sway/Labwc/MangoWC — every atom/overlay/keyword
-requirement live-verified against a real synced tree, GURU, and hyproverlay —
-then clones and applies `wm_configs_git_url`'s preset for the chosen
-compositor. Both share new `chroot_emerge` bootstrap plumbing (resolv.conf,
-Portage tree sync, bind mounts) with `gpu_driver`, which itself gained real
-`package.license`/`package.accept_keywords`/`package.use` overrides — emerging
-`nvidia-drivers` unconditionally failed before this, since Portage never
-auto-accepts its license or resolves its USE deps without them.
+What works, each exercised in a VM or QEMU rather than only in unit tests:
 
-CLI (`installer-cli`) and GUI (`installer-gui`) both drive the legacy
-`install.rs` orchestrator end to end: Network → DiskSelect → Confirm →
-Installing, with `GENTOO_INSTALLER_SIMULATE=1` for a real click-through with no
-disk/network/chroot access (fakes the `Progress` sequence with sleeps; hardware
-detection still runs for real). Requires `GENTOO_STORE_BINHOST_URL` /
-`GENTOO_STORE_OVERLAY_URL` in the environment for real runs — the store isn't
-published under a fixed URL yet (still a local overlay, see
-`~/portage-store-architecture.md`), so these are deliberately not hardcoded.
+- **One pipeline.** TUI, GUI and `--headless` run the same phases. A failed install can be **resumed** (`r` in the TUI, a
+  button in the GUI, `--resume`): destructive phases are skipped on the journal alone, the others only if their result is
+  still on the disk. The VM test of this found that Deploy could not run twice (fixed: stage-unpacked marker, overlay re-clone).
+- **Hardware.** `Profile::detect()` picks a kernel combo from CPU, GPU and form factor; `make.conf` gets a real `-march=`,
+  `MAKEOPTS`, `CPU_FLAGS_X86` and `VIDEO_CARDS` for **every** adapter (`amdgpu radeonsi`, `intel`, `nvidia`, `virgl` in a VM).
+  The compositor renders on the discrete GPU unless `GENTOO_INSTALLER_RENDER=integrated`: niri's `render-drm-device`,
+  `WLR_DRM_DEVICES`/`AQ_DRM_DEVICES` for the others, and Noctalia's shared GL context off for the proprietary NVIDIA driver.
+- **Language and zone** follow the keyboard layout (`ua` gives `uk_UA` + `en_US` and `Europe/Kyiv`); only unambiguous countries get a zone.
+- **Desktop** (`wm`): Noctalia plus niri (default), Hyprland, Sway, Labwc, MangoWC or dwl, from a wm-configs preset;
+  `GENTOO_INSTALLER_WM=none` installs no desktop.
+- **Kernels** come from a per-hardware store; a full install used `generic-x86-64-v3-none-desktop` from it.
 
-**Known gap**: `CommandRunner` covers shell-outs, not HTTP — `stage3::download`,
-`store::list_binhost_atoms`, and `kernel::deploy`'s fetches are real `reqwest`
-calls with no fake/injectable layer yet, so `Deploy`/`PortageConfig` phases
-can't be exercised in the no-network test environment spec §10 requires. The
-`phase::tests` integration test covers `Partition`→`Fstab` for exactly this
-reason — that's as far as the current fake goes.
+Needs `GENTOO_STORE_BINHOST_URL` / `GENTOO_STORE_OVERLAY_URL` for real runs (the store has no fixed public URL yet);
+`GENTOO_INSTALLER_SIMULATE=1` gives a click-through with no disk, network or chroot.
 
-Not yet done (see spec for the full list): `installer-cli`/`installer-gui`
-driving the new phase/journal system instead of legacy `install.rs`; a
-non-interactive `installer-cli` plan-JSON driver (spec's step 4, the one that
-proves the installer works headless); `Initramfs`/`PostHooks` phases (dracut, machine-id/eix seeding — genuinely new
-territory, nothing here does this yet); the
-non-libadwaita `installer-gtk` rewrite and its 13-page flow; preset/edition
-integration from `portage_store`; a WM picker in `installer-cli`'s TUI (it
-reads `GENTOO_INSTALLER_WM`/`_WM_CONFIGS_URL` env vars instead — same gap
-already true for account creation); the iwd passphrase agent (secured-network
-connect currently hangs/fails — open networks work); wifi-connect UI in either
-frontend; and real binhost/overlay URLs once the store is published
-externally.
+**Not done:** `Initramfs` is unused (the kernel store ships ready-made initramfs-less builds); a plan-JSON driver;
+preset/edition integration from `portage_store`; the iwd passphrase agent is only exercised against a fake (no Wi-Fi radio in the VM);
+LUKS; Secure Boot for the *installed* system; a translated installer UI (only locale defaults are guessed); any real hardware.
 
-### Known gaps found while adding `Locale`/`Users`
+**Known gap**: `CommandRunner` covers shell-outs, not HTTP — `stage3::download`, `store::list_binhost_atoms` and `kernel::deploy`'s
+fetches are real `reqwest` calls with no fake layer, so Deploy is tested in a VM, not in `cargo test`.
+
+## Images, Ventoy, old CPUs
+
+`iso/` builds the live images (see `iso/README.md`). Published as [Simple Linux](https://github.com/tarilka0gg/simple-linux).
+Things the tests of the images found, now fixed: the installer binaries carried a "needs x86-64-v3" note from the build
+machine's libc and did not start on pre-Haswell CPUs (`iso/strip-isa-note.sh`); the images carry `boot/grub/grub.cfg` so
+**Ventoy** can boot them (grub2 mode; BIOS normal mode does not work); `SECUREBOOT_KEYS=` signs Limine and pins the config,
+kernel and initramfs by hash (`iso/secureboot/`).
+
+## Packaging
+
+`packaging/package.sh` builds `dist/gentoo-installer-<version>-linux-<arch>.tar.gz` (binaries, desktop entries, icon,
+metainfo, `install.sh`); `packaging/gentoo/` has a live ebuild. See `packaging/README.md`.
+
+## Known gaps found while adding `Locale`/`Users`
 
 - ~~**The installed system had no way to become root.**~~ **Fixed and verified on a
   real stage3.** Root is deliberately left locked (`*` in `/etc/shadow`) and the first
   user goes in `wheel`, but a stage3 ships neither `sudo` nor `doas`, so the account
   could never administer the machine. `account::configure_privilege` now writes
   `/etc/doas.conf` (`permit :wheel`) and `account::install_doas` emerges
-  `app-admin/doas`; both `UsersPhase` and the legacy `install.rs` (what the frontends
+  `app-admin/doas`; both `UsersPhase` and `install.rs` (what the frontends
   drive) call them. A real-target test has a `wheel` user enter their password on a
   pty and get a root shell, and checks that a wrong password, and a user outside
   `wheel`, do not. The rule has no `persist` on purpose: Gentoo builds `doas` with
   `-persist` by default, where the keyword is accepted and silently ignored, and even
   with `USE=persist` the password was still asked on every call in the chroot test.
 - **Frontends: hostname and locale are wired, but not asked.** `InstallOptions` now has
-  `hostname` and `locales`, and the legacy `install.rs` applies them (`locale::apply_hostname`,
+  `hostname` and `locales`, and `install.rs` applies them (`locale::apply_hostname`,
   then `locale::apply`). The TUI reads `GENTOO_INSTALLER_HOSTNAME` / `GENTOO_INSTALLER_LOCALES`
   (comma-separated); the GUI has no page for them yet and uses `gentoo` / `en_US.UTF-8`.
   The phase system (`Settings`) is still not driven by either frontend.
@@ -197,7 +178,7 @@ externally.
   refuse to set. Unchanged; noted because a weak password on an account that can
   `doas` to root matters more than it used to.
 
-### Testing against a real stage3
+## Testing against a real stage3
 
 `installer-core/tests/real_target.rs` runs the `Locale`/`Users` steps with the real
 command runner against an unpacked stage3 and asks the *target's own tools* what came
@@ -235,7 +216,7 @@ compositor install (without a seat manager niri cannot open the GPU), and `dbus`
 laptop can reach the network without Ethernet. Everything else that touches init is plain files that OpenRC reads:
 `/etc/conf.d/hostname`, `/etc/conf.d/keymaps`, `/etc/env.d/02locale`, `/etc/timezone`.
 
-After a finished install the legacy path now runs `sync` and `umount -R` on the target, and the frontends offer a reboot: the TUI
+After a finished install the pipeline runs `sync` and `umount -R` on the target, and the frontends offer a reboot: the TUI
 stays on its Done screen (Enter reboots, but only if no step failed; `q` leaves) and the GUI button runs `reboot`.
 Not run end to end yet: the desktop and Wi-Fi steps on a real target (they need a long compile and the network).
 

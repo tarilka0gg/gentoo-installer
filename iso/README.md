@@ -163,6 +163,18 @@ so a missing live medium drops to a shell instead of hanging.
 
 `test/run-gl-vm.sh` and `test/guest-shot.py` are the GL-VM test described below, kept in the repo.
 
+## Ventoy, and CPUs older than Haswell
+
+**Ventoy** ignores `limine.conf`; `assemble-iso.sh` also writes `boot/grub/grub.cfg` with the same entries. Checked with Ventoy
+1.1.17 on a loop-backed disk image in QEMU: *Boot in grub2 mode* works on BIOS and UEFI, *normal mode* on UEFI; on BIOS normal
+mode Ventoy chain-loads the ISO's Limine boot sector, which stops with "Could not determine boot drive". (Ventoy under SeaBIOS needs
+the stick attached as a SATA/IDE disk in QEMU, not as `usb-storage`.)
+
+**Older CPUs:** a binary linked on a machine whose libc is built with `-march=native` gets an "x86-64-v3 needed" ELF note and glibc
+refuses to run it elsewhere (`CPU ISA level is lower than required`). `prepare-rootfs.sh` runs `strip-isa-note.sh` on the installer
+binaries. Checked in QEMU with Westmere, Sandy Bridge and `qemu64` CPUs, BIOS and UEFI, 1-4 CPUs and 1-3 GB of RAM. Any other
+binary added to the image from the build machine needs the same treatment (the stage3's own packages are generic).
+
 ## Shell and tools
 
 Both images use **fish** as root's shell, with the author's aliases in `/etc/fish/conf.d/10-house.fish`
