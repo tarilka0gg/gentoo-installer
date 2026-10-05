@@ -83,31 +83,60 @@ window-rule {
     open-floating true
 }
 NIRILIVE
+    install -d "$ROOT/usr/local/bin"
+    cat > "$ROOT/usr/local/bin/live-gui" <<'LIVEGUI'
+#!/bin/sh
+# live-gui: the graphical live session with two fallbacks; the caller starts the text installer afterwards.
+#   1. niri on real graphics. niri refuses software rendering, so without a usable GPU it never gets an output.
+#   2. cage (wlroots' pixman renderer) + GTK's cairo renderer: a graphical installer with no 3D at all.
+# Everything is logged to /var/log/live-gui.log. Processes are stopped by PID, not by name.
+LOG=/var/log/live-gui.log
+log() { echo "$(date +%T) $*" >> "$LOG"; }
+export XDG_RUNTIME_DIR=/run/user/0 LIBSEAT_BACKEND=seatd
+mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+
+dbus-run-session -- niri --session 2>/var/log/niri-session.log &
+pid=$!
+i=0
+while [ "$i" -lt 25 ] && kill -0 "$pid" 2>/dev/null; do sleep 1; i=$((i + 1)); done
+
+if kill -0 "$pid" 2>/dev/null; then
+    sock=$(ls /run/user/0 2>/dev/null | grep -m1 '^niri\..*\.sock$')
+    out=
+    [ -n "$sock" ] && out=$(NIRI_SOCKET="/run/user/0/$sock" niri msg outputs 2>/dev/null)
+    if [ -n "$out" ]; then
+        log "niri has an output after ${i}s; leaving the session running"
+        wait "$pid"
+        log "niri session ended (status $?)"
+        exit 0
+    fi
+    kids=$(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ')
+    log "niri has no output after ${i}s (socket=[$sock]); stopping dbus-run-session $pid and children [$kids]"
+    kill -TERM $kids "$pid" >> "$LOG" 2>&1
+    sleep 3
+    kill -KILL $kids "$pid" >> "$LOG" 2>&1
+    pkill -KILL -x installer-gui >> "$LOG" 2>&1
+    wait "$pid" 2>/dev/null
+    log "niri stopped; still alive: [$(pgrep -x niri | tr '\n' ' ')]"
+else
+    wait "$pid"
+    log "niri exited by itself within ${i}s (status $?)"
+fi
+
+echo "No hardware-accelerated graphics (niri needs it). Trying a software-rendered window..."
+log "starting cage with the pixman renderer"
+env WLR_RENDERER=pixman WLR_NO_HARDWARE_CURSORS=1 GSK_RENDERER=cairo cage -s -- installer-gui 2>/var/log/cage-session.log
+log "cage exited (status $?)"
+echo "The graphical session ended; starting the text installer. Logs: /var/log/live-gui.log, niri-session.log, cage-session.log"
+LIVEGUI
+    chmod 755 "$ROOT/usr/local/bin/live-gui"
     cat > "$ROOT/root/.bash_profile" <<'PROFILE'
 if [ -z "${INSTALLER_STARTED:-}" ]; then
     export INSTALLER_STARTED=1
     case "$(tty)" in
     /dev/tty1)
         export XDG_RUNTIME_DIR=/run/user/0 LIBSEAT_BACKEND=seatd
-        mkdir -p -m 700 "$XDG_RUNTIME_DIR"
-        # niri refuses software rendering and needs a real output. If no output exists 25 s
-        # in (no hardware GL, e.g. a VM without 3D), stop it rather than leave a black screen.
-        rm -f /run/live-gui-failed
-        (
-            sleep 25
-            sock=$(ls /run/user/0/niri.*.sock 2>/dev/null | head -1)
-            if [ -z "$sock" ] || [ -z "$(NIRI_SOCKET=$sock niri msg outputs 2>/dev/null)" ]; then
-                touch /run/live-gui-failed
-                pkill -x niri
-            fi
-        ) &
-        dbus-run-session -- niri --session 2>/var/log/niri-session.log
-        if [ -e /run/live-gui-failed ]; then
-            echo "No usable graphics output (niri needs hardware-accelerated graphics)."
-            echo "Log: /var/log/niri-session.log. Starting the text installer."
-        else
-            echo "The graphical session ended; starting the text installer."
-        fi
+        live-gui
         installer-cli
         ;;
     /dev/ttyS0)
@@ -158,26 +187,7 @@ if status is-login; and not set -q INSTALLER_STARTED
     set -gx INSTALLER_STARTED 1
     switch (tty)
     case /dev/tty1
-        set -gx XDG_RUNTIME_DIR /run/user/0
-        set -gx LIBSEAT_BACKEND seatd
-        mkdir -p -m 700 $XDG_RUNTIME_DIR
-        # niri needs a real output; if there is none after 25 s (no hardware GL), stop it.
-        rm -f /run/live-gui-failed
-        begin
-            sleep 25
-            set -l sock (ls /run/user/0/niri.*.sock 2>/dev/null | head -1)
-            if test -z "$sock"; or test -z (env NIRI_SOCKET=$sock niri msg outputs 2>/dev/null | string collect)
-                touch /run/live-gui-failed
-                pkill -x niri
-            end
-        end &
-        dbus-run-session -- niri --session 2>/var/log/niri-session.log
-        if test -e /run/live-gui-failed
-            echo "No usable graphics output (niri needs hardware-accelerated graphics)."
-            echo "Log: /var/log/niri-session.log. Starting the text installer."
-        else
-            echo "The graphical session ended; starting the text installer."
-        end
+        live-gui
         installer-cli
     case /dev/ttyS0
         grep -qw live.debug /proc/cmdline; or installer-cli

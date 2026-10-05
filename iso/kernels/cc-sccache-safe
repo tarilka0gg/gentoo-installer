@@ -1,0 +1,12 @@
+#!/bin/sh
+# gcc behind sccache, except when the output is /dev/null.
+#
+# sccache stores its result by rename(2)-ing a file onto the output path. Kconfig's compiler probes run
+# `gcc ... -o /dev/null`, so with sccache in front they REPLACE THE DEVICE NODE /dev/null WITH A REGULAR
+# FILE — on the build host, system-wide, as root. (Found with an inotify watch: MOVED_TO null, from
+# `sccache gcc -x c - -c -o /dev/null`; the desktop session and everything else that writes to /dev/null
+# then misbehaves.) Those probes are not worth caching anyway.
+for a in "$@"; do
+    [ "$a" = /dev/null ] && exec gcc "$@"
+done
+exec sccache gcc "$@"
