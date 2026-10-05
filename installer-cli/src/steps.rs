@@ -7,6 +7,7 @@
 pub enum Step {
     Network,
     DiskSelect,
+    Account,
     Confirm,
     Installing,
     Done,

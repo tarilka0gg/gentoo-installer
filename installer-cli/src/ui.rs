@@ -2,6 +2,7 @@
 //! lsblk, hardware detection); Confirm kicks off `installer_core::install::run` in the
 //! background and Installing streams its progress until it finishes or errors.
 
+use crate::account_form::{AccountForm, Outcome as AccountOutcome};
 use crate::steps::Step;
 use crate::wifi::{Action, Mode as WifiMode, WifiState};
 use anyhow::Result;
@@ -39,6 +40,9 @@ pub struct AppState {
     pub wifi_action: Option<Action>,
     /// Set when the user chose to reboot after a finished install; `run` then returns.
     pub exit: bool,
+    /// The "create your user" screen, and its result once submitted.
+    pub account_form: AccountForm,
+    pub account: Option<installer_core::account::Account>,
 }
 
 impl AppState {
@@ -58,6 +62,8 @@ impl AppState {
             iwd: None,
             wifi_action: None,
             exit: false,
+            account_form: AccountForm::new(),
+            account: None,
         }
     }
 }
@@ -84,6 +90,17 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
                         Some(Action::Continue) => advance(&mut state).await,
                         Some(a) => state.wifi_action = Some(a),
                         None => {}
+                    }
+                    continue;
+                }
+                if state.step == Step::Account {
+                    match state.account_form.handle_key(key.code) {
+                        AccountOutcome::Submit(a) => {
+                            state.account = Some(a);
+                            state.step = Step::Confirm;
+                        }
+                        AccountOutcome::Back => state.step = Step::DiskSelect,
+                        AccountOutcome::None => {}
                     }
                     continue;
                 }
@@ -214,9 +231,12 @@ async fn advance(state: &mut AppState) {
         }
         Step::DiskSelect => {
             if state.disks.get(state.selected_disk).is_some() {
-                state.step = Step::Confirm;
+                let from_env = std::env::var("GENTOO_INSTALLER_USERNAME").is_ok() && std::env::var("GENTOO_INSTALLER_PASSWORD").is_ok();
+                state.step = if from_env || simulate_mode() { Step::Confirm } else { Step::Account };
             }
         }
+        // The form submits itself (see the key loop); Enter here is never reached for it.
+        Step::Account => {}
         Step::Confirm => start_install(state),
         Step::Installing => {}
         // After a finished install: Enter reboots (OpenRC's `reboot`; the disk was unmounted by
@@ -269,6 +289,8 @@ fn start_install(state: &mut AppState) {
     // doesn't need real credentials at all.
     let account = if simulate {
         installer_core::account::Account { username: "gentoo".into(), password: String::new() }
+    } else if let Some(a) = state.account.clone() {
+        a
     } else {
         let username = std::env::var("GENTOO_INSTALLER_USERNAME");
         let password = std::env::var("GENTOO_INSTALLER_PASSWORD");
@@ -376,6 +398,7 @@ fn draw(frame: &mut ratatui::Frame, state: &AppState) {
     match state.step {
         Step::Network => draw_network(frame, chunks[1], state),
         Step::DiskSelect => draw_disk_select(frame, chunks[1], state),
+        Step::Account => draw_account(frame, chunks[1], state),
         Step::Confirm => draw_confirm(frame, chunks[1], state),
         Step::Installing | Step::Done => draw_installing(frame, chunks[1], state),
     }
@@ -467,6 +490,27 @@ fn draw_disk_select(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, sta
             .title("Select disk [Up/Down, Enter to confirm]"),
     );
     frame.render_widget(list, chunks[1]);
+}
+
+fn draw_account(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
+    use crate::account_form::Field;
+    let f = &state.account_form;
+    let mark = |field: Field| if f.field == field { "> " } else { "  " };
+    let text = format!(
+        "Create the user for the new system (it joins the wheel group and can use doas; root stays locked).\n\n\
+         {}Username:         {}\n\
+         {}Password:         {}\n\
+         {}Repeat password:  {}\n\n\
+         [Tab/Enter] next field  [Enter on the last] continue  [Esc] back\n\n{}",
+        mark(Field::Username),
+        f.username,
+        mark(Field::Password),
+        "*".repeat(f.password.chars().count()),
+        mark(Field::Confirm),
+        "*".repeat(f.confirm.chars().count()),
+        f.message,
+    );
+    frame.render_widget(Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Account")), area);
 }
 
 fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {

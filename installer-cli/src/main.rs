@@ -1,6 +1,7 @@
 //! TUI installer for the minimal ISO (no GUI/DE/WM on that image at all).
 //! Steps: network (skip if ethernet already up) -> disk select -> confirm -> install.
 
+mod account_form;
 mod headless;
 mod steps;
 mod ui;

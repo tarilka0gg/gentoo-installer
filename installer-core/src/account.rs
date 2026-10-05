@@ -6,10 +6,17 @@ use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensu
 use crate::command::CommandRunner;
 use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Account {
     pub username: String,
     pub password: String,
+}
+
+// Not derived: a derived `Debug` would print the password into any log or panic message.
+impl std::fmt::Debug for Account {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Account").field("username", &self.username).field("password", &"<hidden>").finish()
+    }
 }
 
 /// Login names `useradd` accepts on Gentoo, and nothing looser: a leading letter or `_`,
@@ -286,5 +293,12 @@ mod tests {
         assert_eq!(n.iter().filter(|c| *c == "mount").count(), 3);
         assert_eq!(n.iter().filter(|c| *c == "umount").count(), 3, "{n:?}");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn debug_output_never_contains_the_password() {
+        let a = Account { username: "solomiya".into(), password: "hunter2-secret".into() };
+        let shown = format!("{a:?}");
+        assert!(shown.contains("solomiya") && !shown.contains("hunter2"), "{shown}");
     }
 }
