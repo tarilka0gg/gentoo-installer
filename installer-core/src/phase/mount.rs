@@ -24,11 +24,20 @@ impl Phase for MountPhase {
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
-        let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
-        let parts = ctx.parts.clone().expect("Partition phase must run before Mount");
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
+        let parts = ctx
+            .parts
+            .clone()
+            .expect("Partition phase must run before Mount");
         let target_str = ctx.target_str()?.to_string();
         partition::mount_target(ctx.runner.as_ref(), &ctx.layout, &parts, &target_str).await?;
-        let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
         Ok(())
     }
 

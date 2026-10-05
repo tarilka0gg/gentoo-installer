@@ -18,7 +18,11 @@ pub struct StoreConfig {
 /// overlay up and keeps it current on the *installed* system's own first sync, the
 /// installer just needs it present so the app store / first `emerge` on first boot has
 /// something to work with immediately.
-pub async fn configure(runner: &dyn CommandRunner, target_root: &Path, cfg: &StoreConfig) -> crate::Result<()> {
+pub async fn configure(
+    runner: &dyn CommandRunner,
+    target_root: &Path,
+    cfg: &StoreConfig,
+) -> crate::Result<()> {
     let repos_conf_dir = target_root.join("etc/portage/repos.conf");
     let binrepos_conf_dir = target_root.join("etc/portage/binrepos.conf");
     tokio::fs::create_dir_all(&repos_conf_dir).await?;
@@ -33,7 +37,11 @@ pub async fn configure(runner: &dyn CommandRunner, target_root: &Path, cfg: &Sto
         name = cfg.overlay_name,
         url = cfg.overlay_git_url,
     );
-    tokio::fs::write(repos_conf_dir.join(format!("{}.conf", cfg.overlay_name)), repos_conf).await?;
+    tokio::fs::write(
+        repos_conf_dir.join(format!("{}.conf", cfg.overlay_name)),
+        repos_conf,
+    )
+    .await?;
 
     let binrepos_conf = format!(
         "[{name}]\n\
@@ -52,7 +60,12 @@ pub async fn configure(runner: &dyn CommandRunner, target_root: &Path, cfg: &Sto
     let repo_dir_str = repo_dir
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 overlay path")))?;
-    runner.run_status("git", &["clone", "--depth", "1", &cfg.overlay_git_url, repo_dir_str]).await?;
+    runner
+        .run_status(
+            "git",
+            &["clone", "--depth", "1", &cfg.overlay_git_url, repo_dir_str],
+        )
+        .await?;
 
     Ok(())
 }

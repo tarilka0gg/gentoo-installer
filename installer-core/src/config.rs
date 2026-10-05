@@ -19,7 +19,8 @@ impl StoreEnv {
         Ok(Self {
             binhost_url: get("GENTOO_STORE_BINHOST_URL")?,
             overlay_git_url: get("GENTOO_STORE_OVERLAY_URL")?,
-            overlay_name: std::env::var("GENTOO_STORE_OVERLAY_NAME").unwrap_or_else(|_| "localrepo".into()),
+            overlay_name: std::env::var("GENTOO_STORE_OVERLAY_NAME")
+                .unwrap_or_else(|_| "localrepo".into()),
             kernel_base_name: std::env::var("GENTOO_KERNEL_BASE_NAME")
                 .unwrap_or_else(|_| "gentoo-diy-kernel".into()),
             wm_configs_git_url: get("GENTOO_WM_CONFIGS_URL")?,

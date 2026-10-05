@@ -52,33 +52,46 @@ pub async fn gather(runner: &dyn CommandRunner) -> DetectedSystem {
 
     let cpu_flags = runner.run("cpuid2cpuflags", &[]).await.ok().map(|s| {
         // Real output is "CPU_FLAGS_X86=\"...\"" on one line; keep only the value.
-        s.trim().trim_start_matches("CPU_FLAGS_X86=").trim_matches('"').to_string()
+        s.trim()
+            .trim_start_matches("CPU_FLAGS_X86=")
+            .trim_matches('"')
+            .to_string()
     });
 
     let video_cards = profile.as_ref().map(|p| video_cards_value(p.gpu));
 
-    let firmware = if std::path::Path::new("/sys/firmware/efi").is_dir() { Firmware::Uefi } else { Firmware::Bios };
+    let firmware = if std::path::Path::new("/sys/firmware/efi").is_dir() {
+        Firmware::Uefi
+    } else {
+        Firmware::Bios
+    };
 
     let disks = disk::list(runner).await.unwrap_or_default();
 
     let existing_os = runner.run("os-prober", &[]).await.ok().and_then(|out| {
-        out.lines().next().map(|l| l.split(':').nth(1).unwrap_or(l).trim().to_string())
+        out.lines()
+            .next()
+            .map(|l| l.split(':').nth(1).unwrap_or(l).trim().to_string())
     });
 
     let timezone = std::fs::read_to_string("/etc/timezone")
         .ok()
         .map(|s| s.trim().to_string())
         .or_else(|| {
-            std::fs::read_link("/etc/localtime")
-                .ok()
-                .and_then(|p| p.strip_prefix("/usr/share/zoneinfo/").ok().map(|p| p.display().to_string()))
+            std::fs::read_link("/etc/localtime").ok().and_then(|p| {
+                p.strip_prefix("/usr/share/zoneinfo/")
+                    .ok()
+                    .map(|p| p.display().to_string())
+            })
         });
 
     let locale = std::env::var("LANG").ok();
 
     let ram_mb = profile.as_ref().map(|p| p.ram_bytes / 1024 / 1024);
 
-    let on_battery = std::fs::read_to_string("/sys/class/power_supply/AC/online").ok().map(|s| s.trim() == "0");
+    let on_battery = std::fs::read_to_string("/sys/class/power_supply/AC/online")
+        .ok()
+        .map(|s| s.trim() == "0");
 
     let network_up = network::IwdClient::ethernet_link_up();
 

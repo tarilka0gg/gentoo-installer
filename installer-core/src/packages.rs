@@ -7,7 +7,10 @@
 //! acceptance — more than an unattended step should decide for the user) and Discord
 //! (proprietary licence).
 
-use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs, write_portage_entry};
+use crate::chroot_emerge::{
+    bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs,
+    write_portage_entry,
+};
 use crate::command::CommandRunner;
 use std::path::Path;
 
@@ -161,7 +164,11 @@ pub fn find(id: &str) -> Option<&'static Group> {
 
 /// The ids ticked before the user touches anything.
 pub fn default_ids() -> Vec<String> {
-    GROUPS.iter().filter(|g| g.default).map(|g| g.id.to_string()).collect()
+    GROUPS
+        .iter()
+        .filter(|g| g.default)
+        .map(|g| g.id.to_string())
+        .collect()
 }
 
 /// Unknown ids are an error, not silently skipped: a typo in
@@ -171,7 +178,10 @@ pub fn resolve(ids: &[String]) -> crate::Result<Vec<&'static Group>> {
     for id in ids {
         let group = find(id).ok_or_else(|| {
             let known: Vec<_> = GROUPS.iter().map(|g| g.id).collect();
-            crate::Error::Other(anyhow::anyhow!("unknown package group {id:?}; known: {}", known.join(", ")))
+            crate::Error::Other(anyhow::anyhow!(
+                "unknown package group {id:?}; known: {}",
+                known.join(", ")
+            ))
         })?;
         if !out.iter().any(|g| g.id == group.id) {
             out.push(group);
@@ -182,7 +192,11 @@ pub fn resolve(ids: &[String]) -> crate::Result<Vec<&'static Group>> {
 
 /// Emerges every atom of the chosen groups in one transaction (`--noreplace`, so a re-run
 /// is a no-op), inside the usual chroot bootstrap. Nothing runs for an empty selection.
-pub async fn install(runner: &dyn CommandRunner, target: &Path, ids: &[String]) -> crate::Result<()> {
+pub async fn install(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    ids: &[String],
+) -> crate::Result<()> {
     let groups = resolve(ids)?;
     if groups.is_empty() {
         return Ok(());
@@ -191,7 +205,10 @@ pub async fn install(runner: &dyn CommandRunner, target: &Path, ids: &[String]) 
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
 
-    let mut atoms: Vec<&str> = groups.iter().flat_map(|g| g.atoms.iter().copied()).collect();
+    let mut atoms: Vec<&str> = groups
+        .iter()
+        .flat_map(|g| g.atoms.iter().copied())
+        .collect();
     atoms.dedup();
     let mut testing = String::new();
     for atom in groups.iter().flat_map(|g| g.testing.iter()) {
@@ -205,22 +222,53 @@ pub async fn install(runner: &dyn CommandRunner, target: &Path, ids: &[String]) 
         let portage_dir = target.join("etc/portage");
         tokio::fs::create_dir_all(&portage_dir).await?;
         if !testing.is_empty() {
-            write_portage_entry(&portage_dir.join("package.accept_keywords"), "gentoo-installer-packages", &testing).await?;
+            write_portage_entry(
+                &portage_dir.join("package.accept_keywords"),
+                "gentoo-installer-packages",
+                &testing,
+            )
+            .await?;
         }
-        let use_lines: String = groups.iter().flat_map(|g| g.use_flags.iter()).map(|l| format!("{l}\n")).collect();
+        let use_lines: String = groups
+            .iter()
+            .flat_map(|g| g.use_flags.iter())
+            .map(|l| format!("{l}\n"))
+            .collect();
         if !use_lines.is_empty() {
-            write_portage_entry(&portage_dir.join("package.use"), "gentoo-installer-packages", &use_lines).await?;
+            write_portage_entry(
+                &portage_dir.join("package.use"),
+                "gentoo-installer-packages",
+                &use_lines,
+            )
+            .await?;
         }
         // A bare stage3 profile needs point USE changes for desktop software (harfbuzz for
         // freetype, nftables for iptables, X for vulkan-loader...), different for every
         // atom. `--autounmask-write --autounmask-continue` lets Portage write and apply
         // them; `CONFIG_PROTECT_MASK` makes it write `/etc/portage` directly instead of
         // `._cfg` files nobody would dispatch. Verified with `emerge -f` on a real stage3.
-        let license_lines: String = groups.iter().flat_map(|g| g.licenses.iter()).map(|l| format!("{l}\n")).collect();
+        let license_lines: String = groups
+            .iter()
+            .flat_map(|g| g.licenses.iter())
+            .map(|l| format!("{l}\n"))
+            .collect();
         if !license_lines.is_empty() {
-            write_portage_entry(&portage_dir.join("package.license"), "gentoo-installer-packages", &license_lines).await?;
+            write_portage_entry(
+                &portage_dir.join("package.license"),
+                "gentoo-installer-packages",
+                &license_lines,
+            )
+            .await?;
         }
-        let mut argv = vec![target_str, "env", "CONFIG_PROTECT_MASK=/etc/portage", "emerge", "--noreplace", "--autounmask-write", "--autounmask-continue"];
+        let mut argv = vec![
+            target_str,
+            "env",
+            "CONFIG_PROTECT_MASK=/etc/portage",
+            "emerge",
+            "--noreplace",
+            "--autounmask-write",
+            "--autounmask-continue",
+        ];
         argv.extend(atoms.iter().copied());
         runner.run_status("chroot", &argv).await?;
         // Services only after the packages that ship their init scripts are really there.
@@ -243,7 +291,10 @@ mod tests {
     use crate::command::FakeCommandRunner;
 
     fn temp_target(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-pkgs-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-pkgs-{tag}-{}",
+            std::process::id()
+        ));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
@@ -258,10 +309,17 @@ mod tests {
             assert!(seen.insert(g.id), "duplicate group id {}", g.id);
             assert!(!g.atoms.is_empty());
             for a in g.atoms {
-                assert!(a.split('/').count() == 2 && !a.starts_with('=') && !a.contains(' '), "{a}");
+                assert!(
+                    a.split('/').count() == 2 && !a.starts_with('=') && !a.contains(' '),
+                    "{a}"
+                );
             }
             for t in g.testing {
-                assert!(g.atoms.contains(t), "{t} is marked testing but is not in {}", g.id);
+                assert!(
+                    g.atoms.contains(t),
+                    "{t} is marked testing but is not in {}",
+                    g.id
+                );
             }
         }
     }
@@ -279,7 +337,9 @@ mod tests {
     #[tokio::test]
     async fn empty_selection_runs_nothing() {
         let runner = FakeCommandRunner::new();
-        install(&runner, Path::new("/nonexistent"), &[]).await.unwrap();
+        install(&runner, Path::new("/nonexistent"), &[])
+            .await
+            .unwrap();
         assert!(runner.calls().is_empty());
     }
 
@@ -287,10 +347,15 @@ mod tests {
     async fn emerges_all_atoms_in_one_call_and_unmounts() {
         let dir = temp_target("ok");
         let runner = FakeCommandRunner::new();
-        install(&runner, &dir, &["browser".into(), "gaming".into()]).await.unwrap();
+        install(&runner, &dir, &["browser".into(), "gaming".into()])
+            .await
+            .unwrap();
 
         let calls = runner.calls();
-        let emerge = calls.iter().find(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("env")).unwrap();
+        let emerge = calls
+            .iter()
+            .find(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("env"))
+            .unwrap();
         assert_eq!(
             emerge.1[2..],
             [
@@ -306,9 +371,17 @@ mod tests {
         );
         assert_eq!(calls.iter().filter(|(c, _)| c == "umount").count(), 3);
         let kw = std::fs::read_to_string(dir.join("etc/portage/package.accept_keywords")).unwrap();
-        assert!(kw.contains("games-util/gamemode ~amd64") && kw.contains("games-util/mangohud ~amd64") && !kw.contains("firefox"), "{kw}");
+        assert!(
+            kw.contains("games-util/gamemode ~amd64")
+                && kw.contains("games-util/mangohud ~amd64")
+                && !kw.contains("firefox"),
+            "{kw}"
+        );
         let uses = std::fs::read_to_string(dir.join("etc/portage/package.use")).unwrap();
-        assert!(uses.contains("games-util/gamemode elogind") && !uses.contains("ghostty"), "{uses}");
+        assert!(
+            uses.contains("games-util/gamemode elogind") && !uses.contains("ghostty"),
+            "{uses}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -318,7 +391,10 @@ mod tests {
         let runner = FakeCommandRunner::new();
         runner.fail("chroot", "emerge: blocked");
         assert!(install(&runner, &dir, &["media".into()]).await.is_err());
-        assert_eq!(runner.calls().iter().filter(|(c, _)| c == "umount").count(), 3);
+        assert_eq!(
+            runner.calls().iter().filter(|(c, _)| c == "umount").count(),
+            3
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }
@@ -330,13 +406,16 @@ mod use_tests {
 
     #[tokio::test]
     async fn terminal_group_turns_on_wayland_for_ghostty() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-pkgs-use-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-pkgs-use-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         std::fs::write(dir.join("etc/resolv.conf"), "x\n").ok();
 
-        install(&FakeCommandRunner::new(), &dir, &["terminal".into()]).await.unwrap();
+        install(&FakeCommandRunner::new(), &dir, &["terminal".into()])
+            .await
+            .unwrap();
 
         let text = std::fs::read_to_string(dir.join("etc/portage/package.use")).unwrap();
         assert!(text.contains("x11-terms/ghostty wayland"), "{text}");
@@ -345,7 +424,8 @@ mod use_tests {
 
     #[tokio::test]
     async fn the_wifi_group_accepts_the_firmware_licence_and_enables_dbus_then_iwd() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-pkgs-wifi-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-pkgs-wifi-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
@@ -355,13 +435,29 @@ mod use_tests {
         install(&runner, &dir, &["wifi".into()]).await.unwrap();
 
         let lic = std::fs::read_to_string(dir.join("etc/portage/package.license")).unwrap();
-        assert!(lic.contains("sys-kernel/linux-firmware linux-fw-redistributable"), "{lic}");
+        assert!(
+            lic.contains("sys-kernel/linux-firmware linux-fw-redistributable"),
+            "{lic}"
+        );
         let calls = runner.calls();
-        let rc: Vec<&str> = calls.iter().filter(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("rc-update")).map(|(_, a)| a[3].as_str()).collect();
+        let rc: Vec<&str> = calls
+            .iter()
+            .filter(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("rc-update"))
+            .map(|(_, a)| a[3].as_str())
+            .collect();
         assert_eq!(rc, ["dbus", "iwd"]);
-        let emerge_at = calls.iter().position(|(_, a)| a.iter().any(|x| x == "emerge")).unwrap();
-        let first_rc = calls.iter().position(|(_, a)| a.iter().any(|x| x == "rc-update")).unwrap();
-        assert!(emerge_at < first_rc, "services are enabled only after the packages are installed");
+        let emerge_at = calls
+            .iter()
+            .position(|(_, a)| a.iter().any(|x| x == "emerge"))
+            .unwrap();
+        let first_rc = calls
+            .iter()
+            .position(|(_, a)| a.iter().any(|x| x == "rc-update"))
+            .unwrap();
+        assert!(
+            emerge_at < first_rc,
+            "services are enabled only after the packages are installed"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -18,7 +18,9 @@
 use adw::prelude::*;
 use gtk::glib;
 use installer_core::{
-    account::Account, config::StoreEnv, disk, hardware, install, keyboard,
+    account::Account,
+    config::StoreEnv,
+    disk, hardware, install, keyboard,
     make_conf::{OptLevel, PackageMode},
     network, partition, store, timezone as tz,
     wm::WmChoice,
@@ -87,8 +89,15 @@ impl WizardState {
     }
 
     fn swap_gib(&self) -> u64 {
-        let ram_bytes = self.profile.borrow().as_ref().map(|p| p.ram_bytes).unwrap_or(0);
-        self.manual_swap_gib.borrow().unwrap_or_else(|| partition::swap_size_gib(ram_bytes))
+        let ram_bytes = self
+            .profile
+            .borrow()
+            .as_ref()
+            .map(|p| p.ram_bytes)
+            .unwrap_or(0);
+        self.manual_swap_gib
+            .borrow()
+            .unwrap_or_else(|| partition::swap_size_gib(ram_bytes))
     }
 }
 
@@ -108,28 +117,43 @@ pub fn build(app: &adw::Application) {
         });
     }
 
-    let menu_button = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text("More").build();
+    let menu_button = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .tooltip_text("More")
+        .build();
     let page_menus: PageMenus = Rc::new(RefCell::new(HashMap::new()));
 
     let header = adw::HeaderBar::new();
     header.pack_start(&back_button);
     header.pack_end(&menu_button);
 
-    page_menus.borrow_mut().insert("welcome".to_string(), advanced_setup_popover(state.clone()));
+    page_menus
+        .borrow_mut()
+        .insert("welcome".to_string(), advanced_setup_popover(state.clone()));
 
     let disk_page = disk_select_page(nav.clone(), state.clone(), page_menus.clone());
     let network_page = network_page_build(nav.clone(), disk_page.clone());
     // Screen script §4: skipped silently if already connected — checked once at
     // startup, not re-checked live, since link state genuinely won't change mid-wizard
     // on installer hardware.
-    let target_after_prelude = if network::IwdClient::ethernet_link_up() { disk_page.clone() } else { network_page.clone() };
-    let opt_level_page = opt_level_select_page(nav.clone(), state.clone(), target_after_prelude.clone());
+    let target_after_prelude = if network::IwdClient::ethernet_link_up() {
+        disk_page.clone()
+    } else {
+        network_page.clone()
+    };
+    let opt_level_page =
+        opt_level_select_page(nav.clone(), state.clone(), target_after_prelude.clone());
     let packages_page = packages_select_page(nav.clone(), state.clone(), opt_level_page.clone());
     let gpu_page = gpu_select_page(nav.clone(), state.clone(), packages_page.clone());
     let wm_page = wm_select_page(nav.clone(), state.clone(), gpu_page.clone());
     let timezone_page = timezone_select_page(nav.clone(), state.clone(), wm_page.clone());
     let keyboard_page = keyboard_select_page(nav.clone(), state.clone(), timezone_page.clone());
-    nav.add(&welcome_page(&nav, state.clone(), keyboard_page.clone(), target_after_prelude));
+    nav.add(&welcome_page(
+        &nav,
+        state.clone(),
+        keyboard_page.clone(),
+        target_after_prelude,
+    ));
     nav.add(&keyboard_page);
     nav.add(&timezone_page);
     nav.add(&wm_page);
@@ -151,13 +175,19 @@ pub fn build(app: &adw::Application) {
         let menu_button = menu_button.clone();
         let page_menus = page_menus.clone();
         nav.connect_visible_page_notify(move |nav| {
-            let tag = nav.visible_page().and_then(|p| p.tag()).map(|t| t.to_string());
+            let tag = nav
+                .visible_page()
+                .and_then(|p| p.tag())
+                .map(|t| t.to_string());
             let hidden = matches!(
                 tag.as_deref(),
                 Some("welcome") | Some("confirm") | Some("installing") | Some("done") | None
             );
             back_button.set_visible(!hidden);
-            match tag.as_deref().and_then(|t| page_menus.borrow().get(t).cloned()) {
+            match tag
+                .as_deref()
+                .and_then(|t| page_menus.borrow().get(t).cloned())
+            {
                 Some(popover) => {
                     menu_button.set_visible(true);
                     menu_button.set_popover(Some(&popover));
@@ -230,14 +260,28 @@ fn install_css() {
 }
 
 fn advanced_setup_popover(state: Rc<WizardState>) -> gtk::Popover {
-    let label = gtk::Label::builder().label("Advanced setup").halign(gtk::Align::Start).hexpand(true).build();
-    let switch = gtk::Switch::builder().active(state.advanced.get()).valign(gtk::Align::Center).build();
+    let label = gtk::Label::builder()
+        .label("Advanced setup")
+        .halign(gtk::Align::Start)
+        .hexpand(true)
+        .build();
+    let switch = gtk::Switch::builder()
+        .active(state.advanced.get())
+        .valign(gtk::Align::Center)
+        .build();
     switch.connect_state_set(move |_, active| {
         state.advanced.set(active);
         glib::Propagation::Proceed
     });
 
-    let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(6).margin_bottom(6).margin_start(6).margin_end(6).build();
+    let row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .margin_top(6)
+        .margin_bottom(6)
+        .margin_start(6)
+        .margin_end(6)
+        .build();
     row.append(&label);
     row.append(&switch);
 
@@ -259,23 +303,61 @@ fn welcome_page(
     } else {
         "Automated btrfs partitioning, kernel profile detection, Limine boot setup."
     };
-    let title = gtk::Label::builder().label("Gentoo Installer").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Center).build();
-    let subtitle = gtk::Label::builder().label(description).css_classes(vec!["dim-label".to_string()]).wrap(true).justify(gtk::Justification::Center).build();
+    let title = gtk::Label::builder()
+        .label("Gentoo Installer")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Center)
+        .build();
+    let subtitle = gtk::Label::builder()
+        .label(description)
+        .css_classes(vec!["dim-label".to_string()])
+        .wrap(true)
+        .justify(gtk::Justification::Center)
+        .build();
 
     // Three at-a-glance facts as tiles, the way the store's detail page shows download
     // size / build time — what the installer will do, before asking anything.
-    let tiles = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).homogeneous(true).margin_top(12).build();
+    let tiles = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .homogeneous(true)
+        .margin_top(12)
+        .build();
     for (icon, head, text) in [
-        ("drive-harddisk-symbolic", "Disk", "btrfs, ESP and swap laid out for you"),
+        (
+            "drive-harddisk-symbolic",
+            "Disk",
+            "btrfs, ESP and swap laid out for you",
+        ),
         ("cpu-symbolic", "Kernel", "prebuilt for your CPU and GPU"),
         ("system-run-symbolic", "Boot", "Limine, UEFI or BIOS"),
     ] {
-        let image = gtk::Image::builder().icon_name(icon).pixel_size(22).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
-        let badge = gtk::Box::builder().css_classes(vec!["info-tile-icon".to_string()]).halign(gtk::Align::Center).build();
+        let image = gtk::Image::builder()
+            .icon_name(icon)
+            .pixel_size(22)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .build();
+        let badge = gtk::Box::builder()
+            .css_classes(vec!["info-tile-icon".to_string()])
+            .halign(gtk::Align::Center)
+            .build();
         badge.append(&image);
-        let head = gtk::Label::builder().label(head).css_classes(vec!["section-heading".to_string()]).build();
-        let text = gtk::Label::builder().label(text).css_classes(vec!["dim-label".to_string(), "caption".to_string()]).wrap(true).justify(gtk::Justification::Center).build();
-        let tile = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).css_classes(vec!["card".to_string(), "info-tile".to_string()]).build();
+        let head = gtk::Label::builder()
+            .label(head)
+            .css_classes(vec!["section-heading".to_string()])
+            .build();
+        let text = gtk::Label::builder()
+            .label(text)
+            .css_classes(vec!["dim-label".to_string(), "caption".to_string()])
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+        let tile = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(6)
+            .css_classes(vec!["card".to_string(), "info-tile".to_string()])
+            .build();
         tile.append(&badge);
         tile.append(&head);
         tile.append(&text);
@@ -289,12 +371,22 @@ fn welcome_page(
         .margin_top(24)
         .build();
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).valign(gtk::Align::Center).margin_start(24).margin_end(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(8)
+        .valign(gtk::Align::Center)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
     content.append(&title);
     content.append(&subtitle);
     content.append(&tiles);
     content.append(&button);
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(680).valign(gtk::Align::Center).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(680)
+        .valign(gtk::Align::Center)
+        .build();
 
     let page = adw::NavigationPage::builder()
         .title("Welcome")
@@ -315,17 +407,40 @@ fn welcome_page(
 }
 
 /// Advanced-setup only: keyboard layout, auto-detected default via `keyboard::detect_current`.
-fn keyboard_select_page(nav: adw::NavigationView, state: Rc<WizardState>, timezone_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Keyboard layout").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
-    let body = gtk::Label::builder().label("Type below to check it's right.").css_classes(vec!["dim-label".to_string()]).halign(gtk::Align::Start).build();
+fn keyboard_select_page(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+    timezone_page: adw::NavigationPage,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Keyboard layout")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
+    let body = gtk::Label::builder()
+        .label("Type below to check it's right.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
 
     let layouts = keyboard::list_layouts();
     let current = state.keyboard_layout.borrow().clone();
-    let display_strings: Vec<String> = layouts.iter().map(|l| format!("{} — {}", l.code, l.description)).collect();
+    let display_strings: Vec<String> = layouts
+        .iter()
+        .map(|l| format!("{} — {}", l.code, l.description))
+        .collect();
     let selected_index = layouts.iter().position(|l| l.code == current).unwrap_or(0) as u32;
 
-    let model = gtk::StringList::new(&display_strings.iter().map(String::as_str).collect::<Vec<_>>());
-    let dropdown = gtk::DropDown::builder().model(&model).selected(selected_index).build();
+    let model = gtk::StringList::new(
+        &display_strings
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    let dropdown = gtk::DropDown::builder()
+        .model(&model)
+        .selected(selected_index)
+        .build();
     dropdown.set_enable_search(true);
 
     {
@@ -338,39 +453,74 @@ fn keyboard_select_page(nav: adw::NavigationView, state: Rc<WizardState>, timezo
         });
     }
 
-    let test_field = gtk::Entry::builder().placeholder_text("Type here to test").build();
+    let test_field = gtk::Entry::builder()
+        .placeholder_text("Type here to test")
+        .build();
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&dropdown);
     content.append(&test_field);
 
-    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let next_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&next_button);
     {
         let nav = nav.clone();
         next_button.connect_clicked(move |_| nav.push(&timezone_page));
     }
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Keyboard").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Keyboard")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("keyboard"));
     page
 }
 
 /// Advanced-setup only: time zone, auto-detected default via `timezone::detect_current`.
 /// `next_page` is Disk directly if there's already an ethernet link, else Network.
-fn timezone_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Where are you?").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
-    let body = gtk::Label::builder().label("This sets your time zone and clock.").css_classes(vec!["dim-label".to_string()]).halign(gtk::Align::Start).build();
+fn timezone_select_page(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+    next_page: adw::NavigationPage,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Where are you?")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
+    let body = gtk::Label::builder()
+        .label("This sets your time zone and clock.")
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
 
     let zones = tz::list_zones();
     let current = state.timezone.borrow().clone();
     let selected_index = zones.iter().position(|z| *z == current).unwrap_or(0) as u32;
 
     let model = gtk::StringList::new(&zones.iter().map(String::as_str).collect::<Vec<_>>());
-    let dropdown = gtk::DropDown::builder().model(&model).selected(selected_index).build();
+    let dropdown = gtk::DropDown::builder()
+        .model(&model)
+        .selected(selected_index)
+        .build();
     dropdown.set_enable_search(true);
 
     {
@@ -383,20 +533,38 @@ fn timezone_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_p
         });
     }
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&dropdown);
 
-    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let next_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&next_button);
     {
         let nav = nav.clone();
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Time zone").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Time zone")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("timezone"));
     page
 }
@@ -404,8 +572,16 @@ fn timezone_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_p
 /// Advanced-setup only: compositor choice, niri preselected (the silent default when
 /// Advanced setup is off entirely). `next_page` is Disk directly if there's already an
 /// ethernet link, else Network — same choice `timezone_select_page` makes.
-fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Desktop").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+fn wm_select_page(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+    next_page: adw::NavigationPage,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Desktop")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
     let body = gtk::Label::builder()
         .label("Pick a compositor. Noctalia (the shell/bar) is installed alongside any of these.")
         .css_classes(vec!["dim-label".to_string()])
@@ -425,7 +601,10 @@ fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: a
     for (i, choice) in WmChoice::ALL.iter().enumerate() {
         let tile = gtk::ToggleButton::builder()
             .label(choice.display_name())
-            .css_classes(vec!["category-tile".to_string(), format!("category-tile-{}", i % 6)])
+            .css_classes(vec![
+                "category-tile".to_string(),
+                format!("category-tile-{}", i % 6),
+            ])
             .active(*choice == current)
             .build();
         match &group {
@@ -442,20 +621,38 @@ fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: a
         grid.insert(&tile, -1);
     }
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&grid);
 
-    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let next_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&next_button);
     {
         let nav = nav.clone();
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Desktop").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Desktop")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("wm"));
     page
 }
@@ -463,8 +660,16 @@ fn wm_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: a
 /// Advanced-setup only: which GPU driver/kernel build to use. Detection picks the default
 /// (listed first and marked); the rest are for machines where the hardware can't say what
 /// the user wants (nouveau instead of the proprietary driver, for one).
-fn gpu_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Graphics driver").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+fn gpu_select_page(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+    next_page: adw::NavigationPage,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Graphics driver")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
     let detected = hardware::Profile::detect().ok().map(|p| p.gpu);
     let body = gtk::Label::builder()
         .label("This picks the kernel build and, for NVIDIA, whether the proprietary driver is compiled for it.")
@@ -477,10 +682,21 @@ fn gpu_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: 
     if let Some(d) = detected {
         choices.push(d);
     }
-    choices.extend(hardware::Gpu::ALL.iter().copied().filter(|g| Some(*g) != detected));
+    choices.extend(
+        hardware::Gpu::ALL
+            .iter()
+            .copied()
+            .filter(|g| Some(*g) != detected),
+    );
     let labels: Vec<String> = choices
         .iter()
-        .map(|g| if Some(*g) == detected { format!("{} — detected", g.display_name()) } else { g.display_name().to_string() })
+        .map(|g| {
+            if Some(*g) == detected {
+                format!("{} — detected", g.display_name())
+            } else {
+                g.display_name().to_string()
+            }
+        })
         .collect();
     let model = gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
     let dropdown = gtk::DropDown::builder().model(&model).selected(0).build();
@@ -491,22 +707,44 @@ fn gpu_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: 
             // Index 0 is the detected GPU: leave the override unset so a failed detection
             // at install time still falls through to the normal path.
             let picked = choices.get(dd.selected() as usize).copied();
-            state.gpu.set(if dd.selected() == 0 && detected.is_some() { None } else { picked });
+            state.gpu.set(if dd.selected() == 0 && detected.is_some() {
+                None
+            } else {
+                picked
+            });
         });
     }
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&dropdown);
-    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let next_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&next_button);
     {
         let nav = nav.clone();
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Graphics").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Graphics")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("gpu"));
     page
 }
@@ -514,8 +752,16 @@ fn gpu_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: 
 /// Advanced-setup only: optional software, one switch per group in `installer_core::packages`.
 /// The defaults (terminal, browser, CLI tools) are ticked; with Advanced off they are
 /// installed anyway.
-fn packages_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Software").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+fn packages_select_page(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+    next_page: adw::NavigationPage,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Software")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
     let body = gtk::Label::builder()
         .label("Installed after the desktop. Prebuilt where Gentoo offers a binary; everything else compiles.")
         .css_classes(vec!["dim-label".to_string()])
@@ -523,10 +769,19 @@ fn packages_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_p
         .wrap(true)
         .build();
 
-    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(vec!["boxed-list".to_string()]).build();
+    let list = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .css_classes(vec!["boxed-list".to_string()])
+        .build();
     for group in installer_core::packages::GROUPS {
-        let row = adw::ActionRow::builder().title(group.name).subtitle(group.description).build();
-        let switch = gtk::Switch::builder().valign(gtk::Align::Center).active(state.packages.borrow().iter().any(|id| id == group.id)).build();
+        let row = adw::ActionRow::builder()
+            .title(group.name)
+            .subtitle(group.description)
+            .build();
+        let switch = gtk::Switch::builder()
+            .valign(gtk::Align::Center)
+            .active(state.packages.borrow().iter().any(|id| id == group.id))
+            .build();
         let state = state.clone();
         let id = group.id.to_string();
         switch.connect_state_set(move |_, on| {
@@ -542,29 +797,57 @@ fn packages_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_p
         list.append(&row);
     }
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&list);
-    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let next_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&next_button);
     {
         let nav = nav.clone();
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
-    let scroll = gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Never).build();
-    let clamp = adw::Clamp::builder().child(&scroll).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Software").child(&clamp).build();
+    let scroll = gtk::ScrolledWindow::builder()
+        .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Software")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("packages"));
     page
 }
 
-
 /// Advanced-setup only: `-O2`/`-O3` for `make.conf`, O2 preselected (the silent default
 /// when Advanced setup is off entirely — see `make_conf::OptLevel`'s doc comment for why
 /// O2 is the recommended choice, not just an arbitrary default).
-fn opt_level_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Build optimization").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+fn opt_level_select_page(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+    next_page: adw::NavigationPage,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Build optimization")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
     let body = gtk::Label::builder()
         .label("-O3 rarely measurably outperforms -O2 outside numeric-heavy code, and makes builds slower and binaries larger. Leave this off unless you have a specific reason.")
         .css_classes(vec!["dim-label".to_string()])
@@ -572,13 +855,25 @@ fn opt_level_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_
         .wrap(true)
         .build();
 
-    let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
-    let switch_label = gtk::Label::builder().label("Use -O3").halign(gtk::Align::Start).hexpand(true).build();
-    let switch = gtk::Switch::builder().active(state.opt_level.get() == OptLevel::O3).valign(gtk::Align::Center).build();
+    let row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .build();
+    let switch_label = gtk::Label::builder()
+        .label("Use -O3")
+        .halign(gtk::Align::Start)
+        .hexpand(true)
+        .build();
+    let switch = gtk::Switch::builder()
+        .active(state.opt_level.get() == OptLevel::O3)
+        .valign(gtk::Align::Center)
+        .build();
     {
         let state = state.clone();
         switch.connect_state_set(move |_, active| {
-            state.opt_level.set(if active { OptLevel::O3 } else { OptLevel::O2 });
+            state
+                .opt_level
+                .set(if active { OptLevel::O3 } else { OptLevel::O2 });
             glib::Propagation::Proceed
         });
     }
@@ -598,42 +893,78 @@ fn opt_level_select_page(nav: adw::NavigationView, state: Rc<WizardState>, next_
         .wrap(true)
         .build();
 
-    let pkg_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(12).build();
-    let pkg_switch_label = gtk::Label::builder().label("Build everything from source").halign(gtk::Align::Start).hexpand(true).build();
-    let pkg_switch = gtk::Switch::builder().active(state.package_mode.get() == PackageMode::Source).valign(gtk::Align::Center).build();
+    let pkg_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .margin_top(12)
+        .build();
+    let pkg_switch_label = gtk::Label::builder()
+        .label("Build everything from source")
+        .halign(gtk::Align::Start)
+        .hexpand(true)
+        .build();
+    let pkg_switch = gtk::Switch::builder()
+        .active(state.package_mode.get() == PackageMode::Source)
+        .valign(gtk::Align::Center)
+        .build();
     {
         let state = state.clone();
         pkg_switch.connect_state_set(move |_, active| {
-            state.package_mode.set(if active { PackageMode::Source } else { PackageMode::default() });
+            state.package_mode.set(if active {
+                PackageMode::Source
+            } else {
+                PackageMode::default()
+            });
             glib::Propagation::Proceed
         });
     }
     pkg_row.append(&pkg_switch_label);
     pkg_row.append(&pkg_switch);
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&row);
     content.append(&pkg_body);
     content.append(&pkg_row);
 
-    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let next_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&next_button);
     {
         let nav = nav.clone();
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Optimization").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Optimization")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("opt-level"));
     page
 }
 
 enum NetCmd {
     Scan,
-    Connect { path: String, passphrase: Option<String> },
+    Connect {
+        path: String,
+        passphrase: Option<String>,
+    },
 }
 
 enum NetEvt {
@@ -650,7 +981,10 @@ enum NetEvt {
 /// in this file (e.g. `disk::list`). Commands go in over a tokio channel (send is
 /// non-blocking from the GTK thread); events come back over a `std::sync::mpsc` polled
 /// by `glib::timeout_add_local`, same bridge shape as `spawn_install`.
-fn spawn_network_worker() -> (tokio::sync::mpsc::UnboundedSender<NetCmd>, std_mpsc::Receiver<NetEvt>) {
+fn spawn_network_worker() -> (
+    tokio::sync::mpsc::UnboundedSender<NetCmd>,
+    std_mpsc::Receiver<NetEvt>,
+) {
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<NetCmd>();
     let (evt_tx, evt_rx) = std_mpsc::channel::<NetEvt>();
 
@@ -684,14 +1018,16 @@ fn spawn_network_worker() -> (tokio::sync::mpsc::UnboundedSender<NetCmd>, std_mp
                             }
                         }
                     }
-                    NetCmd::Connect { path, passphrase } => match client.connect_to(&path, passphrase.as_deref()).await {
-                        Ok(()) => {
-                            let _ = evt_tx.send(NetEvt::Connected);
+                    NetCmd::Connect { path, passphrase } => {
+                        match client.connect_to(&path, passphrase.as_deref()).await {
+                            Ok(()) => {
+                                let _ = evt_tx.send(NetEvt::Connected);
+                            }
+                            Err(e) => {
+                                let _ = evt_tx.send(NetEvt::ConnectFailed(e.to_string()));
+                            }
                         }
-                        Err(e) => {
-                            let _ = evt_tx.send(NetEvt::ConnectFailed(e.to_string()));
-                        }
-                    },
+                    }
                 }
             }
         });
@@ -705,8 +1041,15 @@ fn spawn_network_worker() -> (tokio::sync::mpsc::UnboundedSender<NetCmd>, std_mp
 /// ethernet link. Network is optional — `Continue`/`Continue without a network` both
 /// advance regardless of connection state, since everything the installer needs is
 /// already on this device.
-fn network_page_build(nav: adw::NavigationView, disk_page: adw::NavigationPage) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Connect to a network").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+fn network_page_build(
+    nav: adw::NavigationView,
+    disk_page: adw::NavigationPage,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Connect to a network")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
     let body = gtk::Label::builder()
         .label("Gentoo installs everything it needs from this device, so a connection is optional. It's used to check for updates on first start.")
         .css_classes(vec!["dim-label".to_string()])
@@ -714,18 +1057,47 @@ fn network_page_build(nav: adw::NavigationView, disk_page: adw::NavigationPage) 
         .wrap(true)
         .build();
 
-    let status_label = gtk::Label::builder().halign(gtk::Align::Start).css_classes(vec!["dim-label".to_string()]).visible(false).build();
-    let networks_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).build();
+    let status_label = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .css_classes(vec!["dim-label".to_string()])
+        .visible(false)
+        .build();
+    let networks_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .margin_top(12)
+        .build();
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&status_label);
     content.append(&networks_box);
 
-    let continue_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
-    let skip_button = gtk::Button::builder().label("Continue without a network").css_classes(vec!["flat".to_string()]).halign(gtk::Align::End).build();
-    let footer = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).halign(gtk::Align::End).margin_top(12).build();
+    let continue_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
+    let skip_button = gtk::Button::builder()
+        .label("Continue without a network")
+        .css_classes(vec!["flat".to_string()])
+        .halign(gtk::Align::End)
+        .build();
+    let footer = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .halign(gtk::Align::End)
+        .margin_top(12)
+        .build();
     footer.append(&skip_button);
     footer.append(&continue_button);
     content.append(&footer);
@@ -739,7 +1111,10 @@ fn network_page_build(nav: adw::NavigationView, disk_page: adw::NavigationPage) 
         skip_button.connect_clicked(move |_| nav.push(&disk_page));
     }
 
-    let (cmd_tx, evt_rx): (Rc<RefCell<Option<tokio::sync::mpsc::UnboundedSender<NetCmd>>>>, _) = {
+    let (cmd_tx, evt_rx): (
+        Rc<RefCell<Option<tokio::sync::mpsc::UnboundedSender<NetCmd>>>>,
+        _,
+    ) = {
         let (tx, rx) = spawn_network_worker();
         (Rc::new(RefCell::new(Some(tx))), rx)
     };
@@ -789,8 +1164,14 @@ fn network_page_build(nav: adw::NavigationView, disk_page: adw::NavigationPage) 
         glib::ControlFlow::Continue
     });
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Network").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Network")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("network"));
     page
 }
@@ -803,18 +1184,39 @@ fn network_row(
     cmd_tx: Rc<RefCell<Option<tokio::sync::mpsc::UnboundedSender<NetCmd>>>>,
     status_label: gtk::Label,
 ) -> gtk::Box {
-    let icon = gtk::Image::from_icon_name(if net.secured { "network-wireless-encrypted-symbolic" } else { "network-wireless-symbolic" });
-    let ssid_label = gtk::Label::builder().label(&net.ssid).halign(gtk::Align::Start).hexpand(true).build();
-    let connect_button = gtk::Button::builder().label("Connect").css_classes(vec!["flat".to_string()]).build();
+    let icon = gtk::Image::from_icon_name(if net.secured {
+        "network-wireless-encrypted-symbolic"
+    } else {
+        "network-wireless-symbolic"
+    });
+    let ssid_label = gtk::Label::builder()
+        .label(&net.ssid)
+        .halign(gtk::Align::Start)
+        .hexpand(true)
+        .build();
+    let connect_button = gtk::Button::builder()
+        .label("Connect")
+        .css_classes(vec!["flat".to_string()])
+        .build();
 
-    let header_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
+    let header_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
     header_row.append(&icon);
     header_row.append(&ssid_label);
     header_row.append(&connect_button);
 
-    let password_entry = gtk::PasswordEntry::builder().placeholder_text("Password").show_peek_icon(true).visible(false).build();
+    let password_entry = gtk::PasswordEntry::builder()
+        .placeholder_text("Password")
+        .show_peek_icon(true)
+        .visible(false)
+        .build();
 
-    let wrapper = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
+    let wrapper = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(4)
+        .build();
     wrapper.append(&header_row);
     wrapper.append(&password_entry);
 
@@ -827,11 +1229,18 @@ fn network_row(
             btn.set_label("Connect");
             return;
         }
-        let passphrase = if secured { Some(password_entry.text().to_string()) } else { None };
+        let passphrase = if secured {
+            Some(password_entry.text().to_string())
+        } else {
+            None
+        };
         status_label.set_label("Connecting…");
         status_label.set_visible(true);
         if let Some(tx) = cmd_tx.borrow().as_ref() {
-            let _ = tx.send(NetCmd::Connect { path: path.clone(), passphrase });
+            let _ = tx.send(NetCmd::Connect {
+                path: path.clone(),
+                passphrase,
+            });
         }
     });
 
@@ -843,7 +1252,10 @@ fn network_row(
 /// subtitle, instead of a plain row list — the selected card gets an accent border via
 /// the `:checked` CSS above.
 fn disk_card(disk: &disk::Disk, group_with: Option<&gtk::ToggleButton>) -> gtk::ToggleButton {
-    let icon = gtk::Image::builder().icon_name("drive-harddisk-symbolic").pixel_size(32).build();
+    let icon = gtk::Image::builder()
+        .icon_name("drive-harddisk-symbolic")
+        .pixel_size(32)
+        .build();
 
     let name_label = gtk::Label::builder()
         .label(&disk.path)
@@ -851,13 +1263,20 @@ fn disk_card(disk: &disk::Disk, group_with: Option<&gtk::ToggleButton>) -> gtk::
         .css_classes(vec!["heading".to_string()])
         .build();
     let subtitle_label = gtk::Label::builder()
-        .label(format!("{}  {}", disk::format_size(disk.size_bytes), disk.model))
+        .label(format!(
+            "{}  {}",
+            disk::format_size(disk.size_bytes),
+            disk.model
+        ))
         .halign(gtk::Align::Start)
         .css_classes(vec!["dim-label".to_string()])
         .ellipsize(gtk::pango::EllipsizeMode::Middle)
         .build();
 
-    let text_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).build();
+    let text_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .build();
     text_box.append(&name_label);
     text_box.append(&subtitle_label);
 
@@ -885,11 +1304,15 @@ fn disk_card(disk: &disk::Disk, group_with: Option<&gtk::ToggleButton>) -> gtk::
 /// A disk needs room for ESP + swap + a minimally usable root — same floor
 /// `phase::preflight` computes — below that it's not a real install target.
 fn min_disk_bytes() -> u64 {
-    use installer_core::partition::{SWAP_MIN_GIB, ESP_SIZE_MIB};
+    use installer_core::partition::{ESP_SIZE_MIB, SWAP_MIN_GIB};
     (ESP_SIZE_MIB + SWAP_MIN_GIB * 1024 + 8 * 1024) * 1024 * 1024
 }
 
-fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus: PageMenus) -> adw::NavigationPage {
+fn disk_select_page(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+    page_menus: PageMenus,
+) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
         .label("Where should Gentoo go?")
         .css_classes(vec!["hero-title".to_string()])
@@ -903,7 +1326,11 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus
         .wrap(true)
         .build();
 
-    let cards_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(12).build();
+    let cards_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(8)
+        .margin_top(12)
+        .build();
 
     let profile_label = gtk::Label::builder()
         .halign(gtk::Align::Start)
@@ -928,12 +1355,14 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus
     // runtime for this synchronous GTK callback context rather than threading a shared
     // one through yet.
     let (disks, existing_os_found) = std::thread::spawn(|| {
-        tokio::runtime::Runtime::new().expect("tokio runtime").block_on(async {
-            let runner = installer_core::command::RealCommandRunner;
-            let disks = disk::list(&runner).await.unwrap_or_default();
-            let detected = installer_core::detect::gather(&runner).await;
-            (disks, detected.existing_os)
-        })
+        tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(async {
+                let runner = installer_core::command::RealCommandRunner;
+                let disks = disk::list(&runner).await.unwrap_or_default();
+                let detected = installer_core::detect::gather(&runner).await;
+                (disks, detected.existing_os)
+            })
     })
     .join()
     .unwrap_or_default();
@@ -989,7 +1418,10 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus
             cards_box.append(&button);
             if !eligible {
                 let reason = gtk::Label::builder()
-                    .label(format!("Too small — needs at least {}", disk::format_size(min_bytes)))
+                    .label(format!(
+                        "Too small — needs at least {}",
+                        disk::format_size(min_bytes)
+                    ))
                     .css_classes(vec!["dim-label".to_string(), "caption".to_string()])
                     .halign(gtk::Align::Start)
                     .margin_start(12)
@@ -1030,7 +1462,10 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus
     content.append(&cards_box);
     content.append(&next_button);
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(700).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(700)
+        .build();
 
     let page = adw::NavigationPage::builder()
         .title("Select disk")
@@ -1078,7 +1513,9 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus
             }
         });
     }
-    page_menus.borrow_mut().insert("disk-select".to_string(), manual_popover);
+    page_menus
+        .borrow_mut()
+        .insert("disk-select".to_string(), manual_popover);
 
     page
 }
@@ -1088,8 +1525,15 @@ fn disk_select_page(nav: adw::NavigationView, state: Rc<WizardState>, page_menus
 /// creates exactly ESP+swap+root, not an arbitrary partition table, so that's the honest
 /// scope of "manual" here rather than a full GParted-style editor this codebase can't
 /// back.
-fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Partitions").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+fn manual_partition_page_build(
+    nav: adw::NavigationView,
+    state: Rc<WizardState>,
+) -> adw::NavigationPage {
+    let heading = gtk::Label::builder()
+        .label("Partitions")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
     let body = gtk::Label::builder()
         .label("Gentoo needs a root partition, and an EFI system partition on this machine.")
         .css_classes(vec!["dim-label".to_string()])
@@ -1097,10 +1541,26 @@ fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>)
         .wrap(true)
         .build();
 
-    let btrfs_toggle = gtk::ToggleButton::builder().label("btrfs").active(state.manual_root_fs.get() == partition::RootFs::Btrfs).build();
-    let ext4_toggle = gtk::ToggleButton::builder().label("ext4").group(&btrfs_toggle).active(state.manual_root_fs.get() == partition::RootFs::Ext4).build();
-    let fs_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
-    fs_row.append(&gtk::Label::builder().label("Root filesystem").halign(gtk::Align::Start).hexpand(true).build());
+    let btrfs_toggle = gtk::ToggleButton::builder()
+        .label("btrfs")
+        .active(state.manual_root_fs.get() == partition::RootFs::Btrfs)
+        .build();
+    let ext4_toggle = gtk::ToggleButton::builder()
+        .label("ext4")
+        .group(&btrfs_toggle)
+        .active(state.manual_root_fs.get() == partition::RootFs::Ext4)
+        .build();
+    let fs_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    fs_row.append(
+        &gtk::Label::builder()
+            .label("Root filesystem")
+            .halign(gtk::Align::Start)
+            .hexpand(true)
+            .build(),
+    );
     fs_row.append(&btrfs_toggle);
     fs_row.append(&ext4_toggle);
     {
@@ -1122,8 +1582,17 @@ fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>)
 
     let swap_adjustment = gtk::Adjustment::new(state.swap_gib() as f64, 8.0, 96.0, 1.0, 4.0, 0.0);
     let swap_spin = gtk::SpinButton::new(Some(&swap_adjustment), 1.0, 0);
-    let swap_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
-    swap_row.append(&gtk::Label::builder().label("Swap size (GiB)").halign(gtk::Align::Start).hexpand(true).build());
+    let swap_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    swap_row.append(
+        &gtk::Label::builder()
+            .label("Swap size (GiB)")
+            .halign(gtk::Align::Start)
+            .hexpand(true)
+            .build(),
+    );
     swap_row.append(&swap_spin);
     {
         let state = state.clone();
@@ -1132,13 +1601,25 @@ fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>)
         });
     }
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(20).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(20)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&fs_row);
     content.append(&swap_row);
 
-    let save_button = gtk::Button::builder().label("Use these partitions").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let save_button = gtk::Button::builder()
+        .label("Use these partitions")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&save_button);
     {
         let nav = nav.clone();
@@ -1147,8 +1628,14 @@ fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>)
         });
     }
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Partitions").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Partitions")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("manual-partition"));
     page
 }
@@ -1156,20 +1643,45 @@ fn manual_partition_page_build(nav: adw::NavigationView, state: Rc<WizardState>)
 /// Screen script §9: username + password, before Confirm. Root stays locked; this
 /// account gets `wheel` (see `installer_core::account::create`).
 fn account_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::NavigationPage {
-    let heading = gtk::Label::builder().label("Create your account").css_classes(vec!["hero-title".to_string()]).halign(gtk::Align::Start).build();
+    let heading = gtk::Label::builder()
+        .label("Create your account")
+        .css_classes(vec!["hero-title".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
     let body = gtk::Label::builder()
         .label("This account can install software and change system settings.")
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .build();
 
-    let username_entry = gtk::Entry::builder().placeholder_text("Username").text(state.username.borrow().as_str()).build();
-    let password_entry = gtk::PasswordEntry::builder().placeholder_text("Password").show_peek_icon(true).build();
-    let confirm_entry = gtk::PasswordEntry::builder().placeholder_text("Confirm password").show_peek_icon(true).build();
+    let username_entry = gtk::Entry::builder()
+        .placeholder_text("Username")
+        .text(state.username.borrow().as_str())
+        .build();
+    let password_entry = gtk::PasswordEntry::builder()
+        .placeholder_text("Password")
+        .show_peek_icon(true)
+        .build();
+    let confirm_entry = gtk::PasswordEntry::builder()
+        .placeholder_text("Confirm password")
+        .show_peek_icon(true)
+        .build();
 
-    let error_label = gtk::Label::builder().halign(gtk::Align::Start).wrap(true).visible(false).css_classes(vec!["error".to_string()]).build();
+    let error_label = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .visible(false)
+        .css_classes(vec!["error".to_string()])
+        .build();
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_start(24).margin_end(24).margin_top(48).margin_bottom(24).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(48)
+        .margin_bottom(24)
+        .build();
     content.append(&heading);
     content.append(&body);
     content.append(&username_entry);
@@ -1177,7 +1689,12 @@ fn account_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
     content.append(&confirm_entry);
     content.append(&error_label);
 
-    let next_button = gtk::Button::builder().label("Continue").css_classes(vec!["suggested-action".to_string(), "pill".to_string()]).halign(gtk::Align::End).margin_top(24).build();
+    let next_button = gtk::Button::builder()
+        .label("Continue")
+        .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     content.append(&next_button);
 
     let confirm_page = Rc::new(RefCell::new(None::<adw::NavigationPage>));
@@ -1221,8 +1738,14 @@ fn account_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
         });
     }
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Account").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Account")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("account"));
     page
 }
@@ -1239,10 +1762,18 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
 
     let simulate = simulate_mode();
     let disk = state.selected_disk.borrow().clone();
-    let sentences = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).margin_top(20).build();
+    let sentences = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(14)
+        .margin_top(20)
+        .build();
 
     let sentence = |text: &str, destructive: bool| {
-        let label = gtk::Label::builder().label(text).halign(gtk::Align::Start).wrap(true).build();
+        let label = gtk::Label::builder()
+            .label(text)
+            .halign(gtk::Align::Start)
+            .wrap(true)
+            .build();
         if destructive {
             label.add_css_class("error");
         }
@@ -1252,12 +1783,23 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
     if simulate {
         if let Some(d) = &disk {
             sentences.append(&sentence(
-                &format!("SIMULATION MODE — no real changes will be made to {} ({}).", d.path, disk::format_size(d.size_bytes)),
+                &format!(
+                    "SIMULATION MODE — no real changes will be made to {} ({}).",
+                    d.path,
+                    disk::format_size(d.size_bytes)
+                ),
                 false,
             ));
         }
     } else if let Some(d) = &disk {
-        sentences.append(&sentence(&format!("Install Gentoo on {} ({}).", d.path, disk::format_size(d.size_bytes)), false));
+        sentences.append(&sentence(
+            &format!(
+                "Install Gentoo on {} ({}).",
+                d.path,
+                disk::format_size(d.size_bytes)
+            ),
+            false,
+        ));
 
         let erase_line = match state.existing_os.borrow().as_ref() {
             Some(os) => format!("Erase everything on this disk, including {os}."),
@@ -1267,15 +1809,27 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
 
         let username = state.username.borrow().clone();
         if !username.is_empty() {
-            sentences.append(&sentence(&format!("Create an account for {username}."), false));
+            sentences.append(&sentence(
+                &format!("Create an account for {username}."),
+                false,
+            ));
         }
-        sentences.append(&sentence(&format!("Set the time zone to {}.", state.timezone.borrow()), false));
-        sentences.append(&sentence(&format!("Install {} as your desktop.", state.wm.get().display_name()), false));
+        sentences.append(&sentence(
+            &format!("Set the time zone to {}.", state.timezone.borrow()),
+            false,
+        ));
+        sentences.append(&sentence(
+            &format!("Install {} as your desktop.", state.wm.get().display_name()),
+            false,
+        ));
         if state.opt_level.get() == OptLevel::O3 {
             sentences.append(&sentence("Build with -O3 instead of -O2.", false));
         }
         if state.package_mode.get() == PackageMode::Source {
-            sentences.append(&sentence("Build everything from source instead of using prebuilt binary packages.", false));
+            sentences.append(&sentence(
+                "Build everything from source instead of using prebuilt binary packages.",
+                false,
+            ));
         }
     }
 
@@ -1293,27 +1847,59 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
     content.append(&sentences);
 
     if let Some(d) = &disk {
-        content.append(&partition_bar(d.size_bytes, state.swap_gib(), state.manual_root_fs.get()));
+        content.append(&partition_bar(
+            d.size_bytes,
+            state.swap_gib(),
+            state.manual_root_fs.get(),
+        ));
     }
 
-    let error_label = gtk::Label::builder().halign(gtk::Align::Start).wrap(true).visible(false).css_classes(vec!["error".to_string()]).build();
+    let error_label = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .visible(false)
+        .css_classes(vec!["error".to_string()])
+        .build();
     content.append(&error_label);
 
-    let back_secondary = gtk::Button::builder().label("Back").css_classes(vec!["flat".to_string()]).build();
+    let back_secondary = gtk::Button::builder()
+        .label("Back")
+        .css_classes(vec!["flat".to_string()])
+        .build();
     let install_button = gtk::Button::builder()
-        .label(if simulate { "Simulate install" } else { "Erase and install" })
+        .label(if simulate {
+            "Simulate install"
+        } else {
+            "Erase and install"
+        })
         .css_classes(vec![
-            (if simulate { "suggested-action" } else { "destructive-action" }).to_string(),
+            (if simulate {
+                "suggested-action"
+            } else {
+                "destructive-action"
+            })
+            .to_string(),
             "pill".to_string(),
         ])
         .build();
-    let footer = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).halign(gtk::Align::End).margin_top(24).build();
+    let footer = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .halign(gtk::Align::End)
+        .margin_top(24)
+        .build();
     footer.append(&back_secondary);
     footer.append(&install_button);
     content.append(&footer);
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(560).build();
-    let page = adw::NavigationPage::builder().title("Confirm").child(&clamp).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(560)
+        .build();
+    let page = adw::NavigationPage::builder()
+        .title("Confirm")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("confirm"));
 
     {
@@ -1343,24 +1929,45 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                     }
                 }
             };
-            let Some(disk) = state.selected_disk.borrow().clone() else { return };
+            let Some(disk) = state.selected_disk.borrow().clone() else {
+                return;
+            };
             btn.set_sensitive(false);
 
-            let layout = partition::plan_with_swap(&disk.path, state.manual_root_fs.get(), state.swap_gib());
+            let layout =
+                partition::plan_with_swap(&disk.path, state.manual_root_fs.get(), state.swap_gib());
             let account = if simulate {
-                Account { username: "gentoo".into(), password: String::new() }
+                Account {
+                    username: "gentoo".into(),
+                    password: String::new(),
+                }
             } else {
-                Account { username: state.username.borrow().clone(), password: state.password.borrow().clone() }
+                Account {
+                    username: state.username.borrow().clone(),
+                    password: state.password.borrow().clone(),
+                }
             };
             let opts = install::InstallOptions {
                 layout,
                 target: "/mnt/gentoo".into(),
                 store: store::StoreConfig {
-                    binhost_url: store_env.as_ref().map(|e| e.binhost_url.clone()).unwrap_or_default(),
-                    overlay_git_url: store_env.as_ref().map(|e| e.overlay_git_url.clone()).unwrap_or_default(),
-                    overlay_name: store_env.as_ref().map(|e| e.overlay_name.clone()).unwrap_or_default(),
+                    binhost_url: store_env
+                        .as_ref()
+                        .map(|e| e.binhost_url.clone())
+                        .unwrap_or_default(),
+                    overlay_git_url: store_env
+                        .as_ref()
+                        .map(|e| e.overlay_git_url.clone())
+                        .unwrap_or_default(),
+                    overlay_name: store_env
+                        .as_ref()
+                        .map(|e| e.overlay_name.clone())
+                        .unwrap_or_default(),
                 },
-                wm_configs_git_url: store_env.as_ref().map(|e| e.wm_configs_git_url.clone()).unwrap_or_default(),
+                wm_configs_git_url: store_env
+                    .as_ref()
+                    .map(|e| e.wm_configs_git_url.clone())
+                    .unwrap_or_default(),
                 kernel_base_name: store_env
                     .map(|e| e.kernel_base_name)
                     .unwrap_or_else(|| "gentoo-diy-kernel".into()),
@@ -1371,7 +1978,15 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                 account,
                 gpu_override: state.gpu.get(),
                 packages: state.packages.borrow().clone(),
-                stage3: std::env::var("GENTOO_INSTALLER_STAGE3_URL").ok().filter(|u| !u.trim().is_empty()).map(|u| installer_core::stage3::Stage3Source::custom(u.trim(), std::env::var("GENTOO_INSTALLER_STAGE3_SHA512").ok())),
+                stage3: std::env::var("GENTOO_INSTALLER_STAGE3_URL")
+                    .ok()
+                    .filter(|u| !u.trim().is_empty())
+                    .map(|u| {
+                        installer_core::stage3::Stage3Source::custom(
+                            u.trim(),
+                            std::env::var("GENTOO_INSTALLER_STAGE3_SHA512").ok(),
+                        )
+                    }),
                 wm: state.wm.get(),
                 opt_level: state.opt_level.get(),
                 package_mode: state.package_mode.get(),
@@ -1433,7 +2048,11 @@ fn partition_bar(disk_size_bytes: u64, swap_gib: u64, root_fs: partition::RootFs
         partition::RootFs::Ext4 => "ext4",
     };
 
-    let legend = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).halign(gtk::Align::Center).build();
+    let legend = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .halign(gtk::Align::Center)
+        .build();
     let legend_row = |css_class: &str, title: &str, size_bytes: u64, fs: &str| -> gtk::Box {
         let swatch = gtk::Box::builder()
             .width_request(14)
@@ -1442,19 +2061,43 @@ fn partition_bar(disk_size_bytes: u64, swap_gib: u64, root_fs: partition::RootFs
             .css_classes(vec![css_class.to_string()])
             .build();
         let label = gtk::Label::builder()
-            .label(format!("{title} — {} ({fs})", disk::format_size(size_bytes)))
+            .label(format!(
+                "{title} — {} ({fs})",
+                disk::format_size(size_bytes)
+            ))
             .halign(gtk::Align::Start)
             .build();
-        let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
+        let row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(8)
+            .build();
         row.append(&swatch);
         row.append(&label);
         row
     };
-    legend.append(&legend_row("gentoo-part-esp", "ESP", esp_mib * 1024 * 1024, "vfat"));
-    legend.append(&legend_row("gentoo-part-swap", "swap", swap_mib * 1024 * 1024, "swap"));
-    legend.append(&legend_row("gentoo-part-root", "root", root_mib * 1024 * 1024, root_fs_name));
+    legend.append(&legend_row(
+        "gentoo-part-esp",
+        "ESP",
+        esp_mib * 1024 * 1024,
+        "vfat",
+    ));
+    legend.append(&legend_row(
+        "gentoo-part-swap",
+        "swap",
+        swap_mib * 1024 * 1024,
+        "swap",
+    ));
+    legend.append(&legend_row(
+        "gentoo-part-root",
+        "root",
+        root_mib * 1024 * 1024,
+        root_fs_name,
+    ));
 
-    let wrapper = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
+    let wrapper = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .build();
     wrapper.append(&bar);
     wrapper.append(&legend);
     wrapper
@@ -1480,7 +2123,10 @@ fn installing_page_build(nav: adw::NavigationView) -> InstallingWidgets {
         .wrap(true)
         .build();
 
-    let progress = gtk::ProgressBar::builder().hexpand(true).show_text(false).build();
+    let progress = gtk::ProgressBar::builder()
+        .hexpand(true)
+        .show_text(false)
+        .build();
 
     let log_label = gtk::Label::builder()
         .halign(gtk::Align::Start)
@@ -1492,7 +2138,10 @@ fn installing_page_build(nav: adw::NavigationView) -> InstallingWidgets {
         .child(&log_label)
         .min_content_height(160)
         .build();
-    let details = gtk::Expander::builder().label("Show details").child(&log_scroller).build();
+    let details = gtk::Expander::builder()
+        .label("Show details")
+        .child(&log_scroller)
+        .build();
 
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -1506,12 +2155,24 @@ fn installing_page_build(nav: adw::NavigationView) -> InstallingWidgets {
     content.append(&progress);
     content.append(&details);
 
-    let clamp = adw::Clamp::builder().child(&content).maximum_size(600).build();
+    let clamp = adw::Clamp::builder()
+        .child(&content)
+        .maximum_size(600)
+        .build();
 
-    let page = adw::NavigationPage::builder().title("Installing").child(&clamp).build();
+    let page = adw::NavigationPage::builder()
+        .title("Installing")
+        .child(&clamp)
+        .build();
     page.set_tag(Some("installing"));
 
-    InstallingWidgets { nav, page, progress, status_label, log_label }
+    InstallingWidgets {
+        nav,
+        page,
+        progress,
+        status_label,
+        log_label,
+    }
 }
 
 /// Bridges `install::run`'s tokio-channel progress into the GTK main loop: the install
@@ -1567,7 +2228,9 @@ fn spawn_install(opts: install::InstallOptions, widgets: InstallingWidgets) {
                     widgets.nav.push(&done_page);
                 }
                 Event::Finished(Err(e)) => {
-                    widgets.status_label.set_label(&format!("Install failed: {e}"));
+                    widgets
+                        .status_label
+                        .set_label(&format!("Install failed: {e}"));
                     if !log.is_empty() {
                         log.push('\n');
                     }
@@ -1615,12 +2278,19 @@ fn done_page_build() -> adw::NavigationPage {
         let _ = std::process::Command::new("reboot").spawn();
     });
 
-    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).halign(gtk::Align::Center).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .halign(gtk::Align::Center)
+        .build();
     content.append(&note);
     content.append(&restart_button);
     status.set_child(Some(&content));
 
-    let page = adw::NavigationPage::builder().title("Done").child(&status).build();
+    let page = adw::NavigationPage::builder()
+        .title("Done")
+        .child(&status)
+        .build();
     page.set_tag(Some("done"));
     page
 }

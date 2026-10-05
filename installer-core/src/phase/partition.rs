@@ -25,10 +25,16 @@ impl Phase for PartitionPhase {
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
-        let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
         let parts = partition::create_partitions(ctx.runner.as_ref(), &ctx.layout).await?;
         ctx.parts = Some(parts);
-        let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
         Ok(())
     }
 
@@ -58,10 +64,19 @@ impl Phase for FormatPhase {
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
-        let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
-        let parts = ctx.parts.clone().expect("Partition phase must run before Format");
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
+        let parts = ctx
+            .parts
+            .clone()
+            .expect("Partition phase must run before Format");
         partition::format_partitions(ctx.runner.as_ref(), &ctx.layout, &parts).await?;
-        let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
         Ok(())
     }
 

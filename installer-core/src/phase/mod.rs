@@ -214,17 +214,26 @@ pub async fn run_all(ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
         let id = phase.id();
         match phase.is_satisfied(ctx).await {
             Ok(true) => {
-                let _ = tx.send(Event::Log { line: format!("{}: already done, skipping", phase.label()), level: Level::Info });
+                let _ = tx.send(Event::Log {
+                    line: format!("{}: already done, skipping", phase.label()),
+                    level: Level::Info,
+                });
                 continue;
             }
             Ok(false) => {}
             Err(e) => {
-                let _ = tx.send(Event::Failed { id, error: e.to_string() });
+                let _ = tx.send(Event::Failed {
+                    id,
+                    error: e.to_string(),
+                });
                 return Err(e);
             }
         }
         if let Err(e) = phase.run(ctx, tx).await {
-            let _ = tx.send(Event::Failed { id, error: e.to_string() });
+            let _ = tx.send(Event::Failed {
+                id,
+                error: e.to_string(),
+            });
             return Err(e);
         }
     }
@@ -249,7 +258,10 @@ mod tests {
     /// fstab) is actually exercised, which is the part most likely to break silently.
     #[tokio::test]
     async fn partition_through_fstab_runs_end_to_end_against_fake_runner() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-phase-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-phase-test-{}",
+            std::process::id()
+        ));
         // `mkdir`/`mount` inside the phases go through the fake runner and don't actually
         // touch the filesystem; `fstab::generate` writes `etc/fstab` for real, though, so
         // that one directory needs to actually exist for the test to reach it.
@@ -274,7 +286,11 @@ mod tests {
             Box::new(MountPhase),
             Box::new(FstabPhase),
         ] {
-            assert!(!phase.is_satisfied(&ctx).await.unwrap(), "{:?} should not be satisfied yet", phase.id());
+            assert!(
+                !phase.is_satisfied(&ctx).await.unwrap(),
+                "{:?} should not be satisfied yet",
+                phase.id()
+            );
             phase.run(&mut ctx, &tx).await.unwrap();
         }
 
@@ -283,8 +299,20 @@ mod tests {
         while let Some(e) = rx.recv().await {
             events.push(e);
         }
-        assert!(events.iter().any(|e| matches!(e, crate::event::Event::PhaseStarted { id: PhaseId::Partition, .. })));
-        assert!(events.iter().any(|e| matches!(e, crate::event::Event::PhaseFinished { id: PhaseId::Fstab, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            crate::event::Event::PhaseStarted {
+                id: PhaseId::Partition,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            crate::event::Event::PhaseFinished {
+                id: PhaseId::Fstab,
+                ..
+            }
+        )));
 
         assert!(ctx.parts.is_some());
         // fstab::generate should have written a real file to the temp target.
@@ -299,7 +327,10 @@ mod tests {
             keyboard_layout: "ua".into(),
             locales: vec!["uk_UA.UTF-8".into(), "en_US.UTF-8".into()],
             hostname: "solomiya-pc".into(),
-            account: Some(Account { username: "solomiya".into(), password: "hunter2".into() }),
+            account: Some(Account {
+                username: "solomiya".into(),
+                password: "hunter2".into(),
+            }),
             stage3: None,
         }
     }
@@ -307,7 +338,8 @@ mod tests {
     #[tokio::test]
     async fn run_all_stops_at_the_first_failure_and_reports_it() {
         use crate::event::Event;
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-run-all-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-run-all-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         let fake = FakeCommandRunner::new();
         fake.fail("parted", "disk vanished");
@@ -324,23 +356,47 @@ mod tests {
         }
 
         assert!(result.is_err(), "a failing phase must fail the run");
-        assert_eq!(events.iter().filter(|e| matches!(e, Event::Failed { .. })).count(), 1);
-        assert!(!events.iter().any(|e| matches!(e, Event::Complete)), "no Complete after a failure");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, Event::Failed { .. }))
+                .count(),
+            1
+        );
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Complete)),
+            "no Complete after a failure"
+        );
         // Nothing starts after the failure.
-        let failed_at = events.iter().position(|e| matches!(e, Event::Failed { .. })).unwrap();
-        assert!(!events[failed_at..].iter().any(|e| matches!(e, Event::PhaseStarted { .. })));
+        let failed_at = events
+            .iter()
+            .position(|e| matches!(e, Event::Failed { .. }))
+            .unwrap();
+        assert!(!events[failed_at..]
+            .iter()
+            .any(|e| matches!(e, Event::PhaseStarted { .. })));
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
     async fn deploy_is_only_satisfied_once_stage_overlay_and_kernel_are_all_there() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-deploy-sat-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-deploy-sat-{}",
+            std::process::id()
+        ));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(dir.join("etc/portage")).unwrap();
-        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        let ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
         let phase = DeployPhase;
 
-        assert!(!phase.is_satisfied(&ctx).await.unwrap(), "a bare stage3 is not a finished deploy");
+        assert!(
+            !phase.is_satisfied(&ctx).await.unwrap(),
+            "a bare stage3 is not a finished deploy"
+        );
         std::fs::create_dir_all(dir.join("var/db/repos").join(&ctx.store.overlay_name)).unwrap();
         assert!(!phase.is_satisfied(&ctx).await.unwrap(), "no kernel yet");
         std::fs::create_dir_all(dir.join("boot")).unwrap();
@@ -351,31 +407,61 @@ mod tests {
 
     #[tokio::test]
     async fn the_stage3s_own_fstab_does_not_count_as_a_written_one() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-fstab-sat-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-fstab-sat-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         // What a real stage3 ships: only comments.
-        std::fs::write(dir.join("etc/fstab"), "# /etc/fstab: static file system information.\n# <fs> <mountpoint> <type>\n").unwrap();
-        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        std::fs::write(
+            dir.join("etc/fstab"),
+            "# /etc/fstab: static file system information.\n# <fs> <mountpoint> <type>\n",
+        )
+        .unwrap();
+        let ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
         assert!(!FstabPhase.is_satisfied(&ctx).await.unwrap());
 
-        std::fs::write(dir.join("etc/fstab"), format!("{}\n\nUUID=x / ext4 defaults 0 1\n", crate::fstab::GENERATED_MARKER)).unwrap();
+        std::fs::write(
+            dir.join("etc/fstab"),
+            format!(
+                "{}\n\nUUID=x / ext4 defaults 0 1\n",
+                crate::fstab::GENERATED_MARKER
+            ),
+        )
+        .unwrap();
         assert!(FstabPhase.is_satisfied(&ctx).await.unwrap());
         std::fs::remove_dir_all(&dir).ok();
     }
 
     fn ctx_with(dir: &std::path::Path, runner: Arc<dyn CommandRunner>, settings: Settings) -> Ctx {
-        let layout = partition_mod::plan("/dev/sda", crate::partition::RootFs::Btrfs, 16 * 1024 * 1024 * 1024);
+        let layout = partition_mod::plan(
+            "/dev/sda",
+            crate::partition::RootFs::Btrfs,
+            16 * 1024 * 1024 * 1024,
+        );
         let store = store::StoreConfig {
             binhost_url: "https://example.invalid".into(),
             overlay_git_url: "https://example.invalid/overlay.git".into(),
             overlay_name: "test".into(),
         };
-        Ctx::new(runner, dir.to_path_buf(), layout, store, "test-kernel".into()).with_settings(settings)
+        Ctx::new(
+            runner,
+            dir.to_path_buf(),
+            layout,
+            store,
+            "test-kernel".into(),
+        )
+        .with_settings(settings)
     }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-phase-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-phase-{tag}-{}",
+            std::process::id()
+        ));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -392,14 +478,33 @@ mod tests {
         LocalePhase.run(&mut ctx, &tx).await.unwrap();
         assert!(LocalePhase.is_satisfied(&ctx).await.unwrap());
 
-        assert_eq!(std::fs::read_to_string(dir.join("etc/timezone")).unwrap(), "Europe/Kyiv\n");
-        assert_eq!(std::fs::read_to_string(dir.join("etc/conf.d/keymaps")).unwrap(), "keymap=\"ua\"\n");
-        assert_eq!(std::fs::read_to_string(dir.join("etc/conf.d/hostname")).unwrap(), "hostname=\"solomiya-pc\"\n");
-        assert_eq!(std::fs::read_to_string(dir.join("etc/env.d/02locale")).unwrap(), "LANG=\"uk_UA.UTF-8\"\n");
-        assert!(std::fs::read_to_string(dir.join("etc/locale.gen")).unwrap().contains("uk_UA.UTF-8 UTF-8"));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("etc/timezone")).unwrap(),
+            "Europe/Kyiv\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("etc/conf.d/keymaps")).unwrap(),
+            "keymap=\"ua\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("etc/conf.d/hostname")).unwrap(),
+            "hostname=\"solomiya-pc\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("etc/env.d/02locale")).unwrap(),
+            "LANG=\"uk_UA.UTF-8\"\n"
+        );
+        assert!(std::fs::read_to_string(dir.join("etc/locale.gen"))
+            .unwrap()
+            .contains("uk_UA.UTF-8 UTF-8"));
 
         let target = dir.to_str().unwrap();
-        let chroots: Vec<Vec<String>> = fake.calls().into_iter().filter(|(c, _)| c == "chroot").map(|(_, a)| a).collect();
+        let chroots: Vec<Vec<String>> = fake
+            .calls()
+            .into_iter()
+            .filter(|(c, _)| c == "chroot")
+            .map(|(_, a)| a)
+            .collect();
         assert_eq!(chroots, [[target, "locale-gen"], [target, "env-update"]]);
 
         drop(tx);
@@ -407,8 +512,20 @@ mod tests {
         while let Some(e) = rx.recv().await {
             events.push(e);
         }
-        assert!(events.iter().any(|e| matches!(e, crate::event::Event::PhaseStarted { id: PhaseId::Locale, .. })));
-        assert!(events.iter().any(|e| matches!(e, crate::event::Event::PhaseFinished { id: PhaseId::Locale, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            crate::event::Event::PhaseStarted {
+                id: PhaseId::Locale,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            crate::event::Event::PhaseFinished {
+                id: PhaseId::Locale,
+                ..
+            }
+        )));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -421,7 +538,11 @@ mod tests {
         std::fs::write(dir.join("etc/conf.d/keymaps"), "keymap=\"us\"\n").unwrap();
         std::fs::write(dir.join("etc/conf.d/hostname"), "hostname=\"localhost\"\n").unwrap();
 
-        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        let ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
         assert!(!LocalePhase.is_satisfied(&ctx).await.unwrap());
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -454,9 +575,17 @@ mod tests {
 
         fake.assert_call(0, "openssl", &["passwd", "-6", "--", "hunter2"]);
         assert_eq!(fake.calls()[1].0, "useradd");
-        assert_eq!(std::fs::read_to_string(dir.join("etc/doas.conf")).unwrap(), "permit :wheel\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("etc/doas.conf")).unwrap(),
+            "permit :wheel\n"
+        );
         assert!(
-            fake.calls().iter().any(|(c, a)| c == "chroot" && a.ends_with(&["emerge".into(), "--noreplace".into(), "app-admin/doas".into()])),
+            fake.calls().iter().any(|(c, a)| c == "chroot"
+                && a.ends_with(&[
+                    "emerge".into(),
+                    "--noreplace".into(),
+                    "app-admin/doas".into()
+                ])),
             "doas must be emerged in the target: {:?}",
             fake.calls()
         );
@@ -475,9 +604,17 @@ mod tests {
     async fn users_phase_is_not_satisfied_until_the_doas_binary_is_actually_there() {
         let dir = temp_dir("usersnobin");
         std::fs::create_dir_all(dir.join("etc")).unwrap();
-        std::fs::write(dir.join("etc/passwd"), "solomiya:x:1000:1000::/home/solomiya:/bin/bash\n").unwrap();
+        std::fs::write(
+            dir.join("etc/passwd"),
+            "solomiya:x:1000:1000::/home/solomiya:/bin/bash\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("etc/doas.conf"), "permit :wheel\n").unwrap();
-        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        let ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
 
         // A rule for a program that was never installed is exactly the bug being fixed.
         assert!(!UsersPhase.is_satisfied(&ctx).await.unwrap());
@@ -493,7 +630,11 @@ mod tests {
         let dir = temp_dir("usersidem");
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
-        std::fs::write(dir.join("etc/passwd"), "root:x:0:0::/root:/bin/bash\nsolomiya:x:1000:1000::/home/solomiya:/bin/bash\n").unwrap();
+        std::fs::write(
+            dir.join("etc/passwd"),
+            "root:x:0:0::/root:/bin/bash\nsolomiya:x:1000:1000::/home/solomiya:/bin/bash\n",
+        )
+        .unwrap();
         let fake = Arc::new(FakeCommandRunner::new());
         let mut ctx = ctx_with(&dir, fake.clone(), settings_for_tests());
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -501,10 +642,19 @@ mod tests {
         UsersPhase.run(&mut ctx, &tx).await.unwrap();
 
         // `useradd`/`openssl` would fail or waste work on an existing user...
-        assert!(fake.calls().iter().all(|(c, _)| c != "useradd" && c != "openssl"), "{:?}", fake.calls());
+        assert!(
+            fake.calls()
+                .iter()
+                .all(|(c, _)| c != "useradd" && c != "openssl"),
+            "{:?}",
+            fake.calls()
+        );
         // ...but the rule and the package are still (re)applied.
         assert!(dir.join("etc/doas.conf").is_file());
-        assert!(fake.calls().iter().any(|(c, a)| c == "chroot" && a.contains(&"app-admin/doas".to_string())));
+        assert!(fake
+            .calls()
+            .iter()
+            .any(|(c, a)| c == "chroot" && a.contains(&"app-admin/doas".to_string())));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -512,8 +662,16 @@ mod tests {
     async fn a_user_whose_name_merely_starts_like_an_existing_one_is_not_mistaken_for_it() {
         let dir = temp_dir("usersprefix");
         std::fs::create_dir_all(dir.join("etc")).unwrap();
-        std::fs::write(dir.join("etc/passwd"), "solomiya2:x:1000:1000::/home/solomiya2:/bin/bash\n").unwrap();
-        let ctx = ctx_with(&dir, Arc::new(FakeCommandRunner::new()), settings_for_tests());
+        std::fs::write(
+            dir.join("etc/passwd"),
+            "solomiya2:x:1000:1000::/home/solomiya2:/bin/bash\n",
+        )
+        .unwrap();
+        let ctx = ctx_with(
+            &dir,
+            Arc::new(FakeCommandRunner::new()),
+            settings_for_tests(),
+        );
         std::fs::write(dir.join("etc/doas.conf"), "x").unwrap();
 
         assert!(!UsersPhase.is_satisfied(&ctx).await.unwrap());
@@ -537,9 +695,19 @@ mod tests {
     #[test]
     fn all_phases_come_in_the_fixed_install_order_and_include_the_new_ones() {
         let ids: Vec<PhaseId> = all_phases().iter().map(|p| p.id()).collect();
-        let positions: Vec<usize> =
-            ids.iter().map(|id| PhaseId::ORDER.iter().position(|o| o == id).expect("id in ORDER")).collect();
-        assert!(positions.windows(2).all(|w| w[0] < w[1]), "phases out of install order: {ids:?}");
+        let positions: Vec<usize> = ids
+            .iter()
+            .map(|id| {
+                PhaseId::ORDER
+                    .iter()
+                    .position(|o| o == id)
+                    .expect("id in ORDER")
+            })
+            .collect();
+        assert!(
+            positions.windows(2).all(|w| w[0] < w[1]),
+            "phases out of install order: {ids:?}"
+        );
         assert!(ids.contains(&PhaseId::Locale) && ids.contains(&PhaseId::Users));
         assert_eq!(ids.len(), 11);
     }

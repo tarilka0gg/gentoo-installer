@@ -3,7 +3,9 @@ fn main() {
         Ok(p) => {
             println!("combo: {}", p.combo());
             println!("candidates:");
-            for c in p.candidates() { println!("  {c}"); }
+            for c in p.candidates() {
+                println!("  {c}");
+            }
         }
         Err(e) => println!("error: {e}"),
     }

@@ -33,15 +33,25 @@ impl Phase for DeployPhase {
     /// results have to be there.
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
         let stage = ctx.target.join("etc/portage").is_dir();
-        let overlay = ctx.target.join("var/db/repos").join(&ctx.store.overlay_name).is_dir();
+        let overlay = ctx
+            .target
+            .join("var/db/repos")
+            .join(&ctx.store.overlay_name)
+            .is_dir();
         let kernel = std::fs::read_dir(ctx.target.join("boot"))
-            .map(|d| d.filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().starts_with("vmlinuz-")))
+            .map(|d| {
+                d.filter_map(|e| e.ok())
+                    .any(|e| e.file_name().to_string_lossy().starts_with("vmlinuz-"))
+            })
             .unwrap_or(false);
         Ok(stage && overlay && kernel)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
-        let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
 
         let _ = tx.send(log("Resolving current stage3 release..."));
         let source = stage3::resolve(ctx.settings.stage3.as_ref()).await?;
@@ -78,10 +88,19 @@ impl Phase for DeployPhase {
                 level: Level::Warn,
             });
         }
-        kernel::deploy(ctx.runner.as_ref(), &ctx.store.binhost_url, &kernel_pkg.combo, &ctx.target).await?;
+        kernel::deploy(
+            ctx.runner.as_ref(),
+            &ctx.store.binhost_url,
+            &kernel_pkg.combo,
+            &ctx.target,
+        )
+        .await?;
         ctx.kernel_pkg = Some(kernel_pkg);
 
-        let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
         Ok(())
     }
 
@@ -95,5 +114,8 @@ impl Phase for DeployPhase {
 }
 
 fn log(line: impl Into<String>) -> Event {
-    Event::Log { line: line.into(), level: Level::Info }
+    Event::Log {
+        line: line.into(),
+        level: Level::Info,
+    }
 }

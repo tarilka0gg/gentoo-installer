@@ -20,7 +20,10 @@ impl Stage3Source {
     /// A tarball of the caller's choosing (a custom stage built from Gentoo's, hosted on the
     /// store or shipped on the ISO) instead of the official mirror's latest.
     pub fn custom(url: impl Into<String>, sha512: Option<String>) -> Self {
-        Self { url: url.into(), sha512: sha512.map(|h| h.to_ascii_lowercase()) }
+        Self {
+            url: url.into(),
+            sha512: sha512.map(|h| h.to_ascii_lowercase()),
+        }
     }
 }
 
@@ -34,7 +37,9 @@ pub fn bundled_from(dir: &Path) -> Option<Stage3Source> {
     let mut tarballs: Vec<_> = std::fs::read_dir(dir)
         .ok()?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "xz") && p.to_string_lossy().ends_with(".tar.xz"))
+        .filter(|p| {
+            p.extension().is_some_and(|x| x == "xz") && p.to_string_lossy().ends_with(".tar.xz")
+        })
         .collect();
     tarballs.sort();
     let tarball = tarballs.pop()?;
@@ -64,14 +69,15 @@ pub async fn resolve(custom: Option<&Stage3Source>) -> crate::Result<Stage3Sourc
 
 /// `file:///x/y.tar.xz` and `/x/y.tar.xz` are local files; anything else goes over HTTP.
 fn local_path(url: &str) -> Option<&str> {
-    url.strip_prefix("file://").or_else(|| url.starts_with('/').then_some(url))
+    url.strip_prefix("file://")
+        .or_else(|| url.starts_with('/').then_some(url))
 }
 
 fn check_digest(expected: &Option<String>, actual: String) -> crate::Result<()> {
     match expected {
-        Some(e) if !e.eq_ignore_ascii_case(&actual) => {
-            Err(crate::Error::Other(anyhow::anyhow!("stage3 sha512 mismatch: expected {e}, got {actual}")))
-        }
+        Some(e) if !e.eq_ignore_ascii_case(&actual) => Err(crate::Error::Other(anyhow::anyhow!(
+            "stage3 sha512 mismatch: expected {e}, got {actual}"
+        ))),
         _ => Ok(()),
     }
 }
@@ -99,7 +105,9 @@ pub async fn resolve_latest_from(mirror: &str) -> crate::Result<Stage3Source> {
 
     let url = format!("{mirror}/{relative_path}");
     let filename = relative_path.rsplit('/').next().unwrap_or(relative_path);
-    let sha512 = fetch_digests_body(&format!("{url}.DIGESTS")).await.and_then(|b| parse_sha512_digest(&b, filename));
+    let sha512 = fetch_digests_body(&format!("{url}.DIGESTS"))
+        .await
+        .and_then(|b| parse_sha512_digest(&b, filename));
 
     Ok(Stage3Source { url, sha512 })
 }
@@ -109,7 +117,9 @@ async fn fetch_digests_body(url: &str) -> Option<String> {
 }
 
 fn clearsigned_body(body: &str) -> &str {
-    body.split_once("-----BEGIN PGP SIGNATURE-----").map(|(before, _)| before).unwrap_or(body)
+    body.split_once("-----BEGIN PGP SIGNATURE-----")
+        .map(|(before, _)| before)
+        .unwrap_or(body)
 }
 
 /// Gentoo's autobuild indexes are OpenPGP clearsigned — live-tested against the real
@@ -208,9 +218,12 @@ pub async fn unpack(runner: &dyn CommandRunner, tarball: &Path, root: &Path) -> 
                 "--numeric-owner",
                 "--xattrs-include=*.*",
                 "-xpf",
-                tarball.to_str().ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 tarball path")))?,
+                tarball
+                    .to_str()
+                    .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 tarball path")))?,
                 "-C",
-                root.to_str().ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 root path")))?,
+                root.to_str()
+                    .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 root path")))?,
             ],
         )
         .await
@@ -261,7 +274,10 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
     #[test]
     fn parses_relative_path_from_real_clearsigned_index() {
         let path = parse_relative_path(INDEX_FIXTURE).unwrap();
-        assert_eq!(path, "20260811T083102Z/stage3-amd64-openrc-20260811T083102Z.tar.xz");
+        assert_eq!(
+            path,
+            "20260811T083102Z/stage3-amd64-openrc-20260811T083102Z.tar.xz"
+        );
     }
 
     #[test]
@@ -277,13 +293,21 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
 
     #[test]
     fn parses_sha512_for_the_matching_filename_not_the_first_stanza() {
-        let digest = parse_sha512_digest(DIGESTS_FIXTURE, "stage3-amd64-openrc-20260811T083102Z.tar.xz").unwrap();
+        let digest = parse_sha512_digest(
+            DIGESTS_FIXTURE,
+            "stage3-amd64-openrc-20260811T083102Z.tar.xz",
+        )
+        .unwrap();
         assert_eq!(digest, "9db785763adc0ef25f1672e7bc374c5ed54ca09314a4907b000dbce4fe329fd36d117cbc51783e1d6c9557cae5aeb80737a67116e3e979409ae41d3a259d95dd");
     }
 
     #[test]
     fn sha512_digest_does_not_match_a_different_files_stanza() {
-        let digest = parse_sha512_digest(DIGESTS_FIXTURE, "stage3-amd64-openrc-20260811T083102Z.tar.xz.CONTENTS.gz").unwrap();
+        let digest = parse_sha512_digest(
+            DIGESTS_FIXTURE,
+            "stage3-amd64-openrc-20260811T083102Z.tar.xz.CONTENTS.gz",
+        )
+        .unwrap();
         assert!(digest.starts_with("6507dc8a"));
     }
 
@@ -304,13 +328,27 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
         let dest = dir.join("out");
         let good = hex::encode(Sha512::digest(b"not really a tarball"));
 
-        for url in [src.display().to_string(), format!("file://{}", src.display())] {
-            download(&Stage3Source::custom(url, Some(good.to_uppercase())), &dest).await.unwrap();
+        for url in [
+            src.display().to_string(),
+            format!("file://{}", src.display()),
+        ] {
+            download(&Stage3Source::custom(url, Some(good.to_uppercase())), &dest)
+                .await
+                .unwrap();
             assert_eq!(std::fs::read(&dest).unwrap(), b"not really a tarball");
         }
-        let err = download(&Stage3Source::custom(src.display().to_string(), Some("00".into())), &dest).await.unwrap_err();
+        let err = download(
+            &Stage3Source::custom(src.display().to_string(), Some("00".into())),
+            &dest,
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("sha512 mismatch"), "{err}");
-        assert!(download(&Stage3Source::custom("/nonexistent/x.tar.xz", None), &dest).await.is_err());
+        assert!(
+            download(&Stage3Source::custom("/nonexistent/x.tar.xz", None), &dest)
+                .await
+                .is_err()
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -325,12 +363,19 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
         let dir = std::env::temp_dir().join(format!("gi-bundled-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(bundled_from(&dir).is_none(), "an empty directory carries no stage3");
+        assert!(
+            bundled_from(&dir).is_none(),
+            "an empty directory carries no stage3"
+        );
 
         let hash = "ab".repeat(64);
         std::fs::write(dir.join("stage3-20260101.tar.xz"), "").unwrap();
         std::fs::write(dir.join("stage3-20260930.tar.xz"), "").unwrap();
-        std::fs::write(dir.join("stage3-20260930.tar.xz.sha512"), format!("{hash}  stage3-20260930.tar.xz\n")).unwrap();
+        std::fs::write(
+            dir.join("stage3-20260930.tar.xz.sha512"),
+            format!("{hash}  stage3-20260930.tar.xz\n"),
+        )
+        .unwrap();
         std::fs::write(dir.join("notes.txt"), "").unwrap();
 
         let s = bundled_from(&dir).unwrap();
@@ -342,7 +387,11 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
         assert_eq!(s.sha512.as_deref(), Some(hash.as_str()));
 
         std::fs::write(dir.join("stage3-20260930.tar.xz.sha512"), "not a digest").unwrap();
-        assert_eq!(bundled_from(&dir).unwrap().sha512, None, "a malformed digest file is ignored, not trusted");
+        assert_eq!(
+            bundled_from(&dir).unwrap().sha512,
+            None,
+            "a malformed digest file is ignored, not trusted"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -23,7 +23,10 @@
 //! directory-safe `/etc/portage/package.*` writes, proc/sys/dev bind mounts) lives in
 //! `chroot_emerge` — shared with `wm`, the other step that still runs `emerge`.
 
-use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs, write_portage_entry};
+use crate::chroot_emerge::{
+    bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs,
+    write_portage_entry,
+};
 use crate::command::CommandRunner;
 use crate::hardware::Gpu;
 use std::path::Path;
@@ -59,7 +62,10 @@ async fn install_for(runner: &dyn CommandRunner, target: &Path, gpu: Gpu) -> cra
         ensure_portage_tree(runner, target, target_str).await?;
         configure_nvidia_portage_overrides(target).await?;
         runner
-            .run_status("chroot", &[target_str, "emerge", "x11-drivers/nvidia-drivers"])
+            .run_status(
+                "chroot",
+                &[target_str, "emerge", "x11-drivers/nvidia-drivers"],
+            )
             .await
     }
     .await;
@@ -131,14 +137,17 @@ mod tests {
     #[tokio::test]
     async fn non_nvidia_gpu_does_nothing() {
         let runner = FakeCommandRunner::new();
-        let ran = install_for(&runner, Path::new("/mnt/gentoo"), Gpu::Amd).await.unwrap();
+        let ran = install_for(&runner, Path::new("/mnt/gentoo"), Gpu::Amd)
+            .await
+            .unwrap();
         assert_eq!(ran, Ran::NotNeeded);
         assert!(runner.calls().is_empty());
     }
 
     #[tokio::test]
     async fn nvidia_without_prepared_source_tree_errors_clearly() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-gpu-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-gpu-test-{}", std::process::id()));
         tokio::fs::create_dir_all(&dir).await.unwrap();
         let runner = FakeCommandRunner::new();
 
@@ -150,14 +159,18 @@ mod tests {
 
     #[tokio::test]
     async fn nvidia_with_prepared_source_tree_emerges_and_unmounts() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-gpu-test2-{}", std::process::id()));
-        tokio::fs::create_dir_all(dir.join("usr/src/linux")).await.unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-gpu-test2-{}", std::process::id()));
+        tokio::fs::create_dir_all(dir.join("usr/src/linux"))
+            .await
+            .unwrap();
         let runner = FakeCommandRunner::new();
 
         install_for(&runner, &dir, Gpu::Nvidia).await.unwrap();
 
         let calls = runner.calls();
-        assert!(calls.iter().any(|(cmd, args)| cmd == "chroot" && args.contains(&"x11-drivers/nvidia-drivers".to_string())));
+        assert!(calls.iter().any(|(cmd, args)| cmd == "chroot"
+            && args.contains(&"x11-drivers/nvidia-drivers".to_string())));
         // Every bind mount got a matching unmount.
         let mounts = calls.iter().filter(|(cmd, _)| cmd == "mount").count();
         let umounts = calls.iter().filter(|(cmd, _)| cmd == "umount").count();

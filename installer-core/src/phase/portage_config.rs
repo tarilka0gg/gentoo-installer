@@ -31,13 +31,19 @@ impl Phase for PortageConfigPhase {
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
-        let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
 
         let detected = detect::gather(ctx.runner.as_ref()).await;
         write_make_conf(&ctx.target, &detected).await?;
         git_init_and_commit(ctx.runner.as_ref(), &ctx.target).await?;
 
-        let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
         Ok(())
     }
 
@@ -74,14 +80,19 @@ async fn write_make_conf(target: &std::path::Path, detected: &DetectedSystem) ->
 
 /// "What did the installer decide?" becomes `git log`; "undo it" becomes `git revert` —
 /// only true if this first commit actually exists. Message format per spec §8.4.
-async fn git_init_and_commit(runner: &dyn CommandRunner, target: &std::path::Path) -> crate::Result<()> {
+async fn git_init_and_commit(
+    runner: &dyn CommandRunner,
+    target: &std::path::Path,
+) -> crate::Result<()> {
     let portage_dir = target.join("etc/portage");
     let dir_str = portage_dir
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 /etc/portage path")))?;
 
     runner.run_status("git", &["-C", dir_str, "init"]).await?;
-    runner.run_status("git", &["-C", dir_str, "add", "-A"]).await?;
+    runner
+        .run_status("git", &["-C", dir_str, "add", "-A"])
+        .await?;
     runner
         .run_status(
             "git",

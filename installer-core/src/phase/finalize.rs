@@ -22,7 +22,10 @@ impl Phase for FinalizePhase {
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
-        let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
 
         ctx.runner.run_status("sync", &[]).await?;
 
@@ -31,12 +34,19 @@ impl Phase for FinalizePhase {
         }
         let target_str = ctx.target_str()?.to_string();
         for rel in ["boot", "var/log", "var", "home", ""] {
-            let path = if rel.is_empty() { target_str.clone() } else { format!("{target_str}/{rel}") };
+            let path = if rel.is_empty() {
+                target_str.clone()
+            } else {
+                format!("{target_str}/{rel}")
+            };
             ctx.runner.run_status("umount", &[&path]).await.ok();
         }
 
         let _ = tx.send(Event::Complete);
-        let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
         Ok(())
     }
 

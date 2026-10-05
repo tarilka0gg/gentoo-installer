@@ -20,7 +20,9 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
     const SKIP_DIRS: &[&str] = &["posix", "right"];
     const SKIP_FILES: &[&str] = &["posixrules", "Factory", "localtime"];
 
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
@@ -28,7 +30,11 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
             continue;
         }
         let path = entry.path();
-        let qualified = if prefix.is_empty() { name.to_string() } else { format!("{prefix}/{name}") };
+        let qualified = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
 
         if path.is_dir() {
             if SKIP_DIRS.contains(&name) {
@@ -44,11 +50,16 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
 /// Live-environment detection: `/etc/timezone` if present, else the `/etc/localtime`
 /// symlink target. `None` if neither resolves — caller defaults to UTC.
 pub fn detect_current() -> Option<String> {
-    std::fs::read_to_string("/etc/timezone").ok().map(|s| s.trim().to_string()).or_else(|| {
-        std::fs::read_link("/etc/localtime")
-            .ok()
-            .and_then(|p| p.strip_prefix("/usr/share/zoneinfo/").ok().map(|p| p.display().to_string()))
-    })
+    std::fs::read_to_string("/etc/timezone")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            std::fs::read_link("/etc/localtime").ok().and_then(|p| {
+                p.strip_prefix("/usr/share/zoneinfo/")
+                    .ok()
+                    .map(|p| p.display().to_string())
+            })
+        })
 }
 
 /// Writes `/etc/timezone` and symlinks `/etc/localtime` in the target — the two files
@@ -73,14 +84,19 @@ mod tests {
     #[test]
     fn lists_known_zones_from_this_machine() {
         let zones = list_zones();
-        assert!(!zones.is_empty(), "expected {ZONEINFO_DIR} to be readable on this dev machine");
+        assert!(
+            !zones.is_empty(),
+            "expected {ZONEINFO_DIR} to be readable on this dev machine"
+        );
         assert!(zones.iter().any(|z| z == "Europe/Kyiv"));
     }
 
     #[test]
     fn skips_alias_trees_and_metadata_files() {
         let zones = list_zones();
-        assert!(!zones.iter().any(|z| z.starts_with("posix/") || z.starts_with("right/")));
+        assert!(!zones
+            .iter()
+            .any(|z| z.starts_with("posix/") || z.starts_with("right/")));
         assert!(!zones.iter().any(|z| z == "zone.tab" || z == "iso3166.tab"));
     }
 }

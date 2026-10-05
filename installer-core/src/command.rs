@@ -60,12 +60,18 @@ impl FakeCommandRunner {
 
     /// Makes the next (and all subsequent) calls to `cmd` return `output` instead of "".
     pub fn respond(&self, cmd: &str, output: impl Into<String>) {
-        self.responses.lock().unwrap().insert(cmd.to_string(), output.into());
+        self.responses
+            .lock()
+            .unwrap()
+            .insert(cmd.to_string(), output.into());
     }
 
     /// Makes calls to `cmd` fail with the given error message instead of succeeding.
     pub fn fail(&self, cmd: &str, error: impl Into<String>) {
-        self.failures.lock().unwrap().insert(cmd.to_string(), error.into());
+        self.failures
+            .lock()
+            .unwrap()
+            .insert(cmd.to_string(), error.into());
     }
 
     pub fn calls(&self) -> Vec<(String, Vec<String>)> {
@@ -76,9 +82,12 @@ impl FakeCommandRunner {
     /// every phase test.
     pub fn assert_call(&self, index: usize, cmd: &str, args: &[&str]) {
         let calls = self.calls();
-        let (actual_cmd, actual_args) = calls
-            .get(index)
-            .unwrap_or_else(|| panic!("expected a call at index {index}, only {} recorded", calls.len()));
+        let (actual_cmd, actual_args) = calls.get(index).unwrap_or_else(|| {
+            panic!(
+                "expected a call at index {index}, only {} recorded",
+                calls.len()
+            )
+        });
         assert_eq!(actual_cmd, cmd, "command mismatch at call {index}");
         assert_eq!(actual_args, args, "argv mismatch at call {index}");
     }
@@ -87,10 +96,10 @@ impl FakeCommandRunner {
 #[async_trait::async_trait]
 impl CommandRunner for FakeCommandRunner {
     async fn run(&self, cmd: &str, args: &[&str]) -> crate::Result<String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((cmd.to_string(), args.iter().map(|s| s.to_string()).collect()));
+        self.calls.lock().unwrap().push((
+            cmd.to_string(),
+            args.iter().map(|s| s.to_string()).collect(),
+        ));
 
         if let Some(error) = self.failures.lock().unwrap().get(cmd) {
             return Err(crate::Error::Command {
@@ -99,7 +108,13 @@ impl CommandRunner for FakeCommandRunner {
             });
         }
 
-        Ok(self.responses.lock().unwrap().get(cmd).cloned().unwrap_or_default())
+        Ok(self
+            .responses
+            .lock()
+            .unwrap()
+            .get(cmd)
+            .cloned()
+            .unwrap_or_default())
     }
 }
 
@@ -110,8 +125,14 @@ mod tests {
     #[tokio::test]
     async fn fake_records_calls_in_order() {
         let runner = FakeCommandRunner::new();
-        runner.run("parted", &["--script", "/dev/sda", "mklabel", "gpt"]).await.unwrap();
-        runner.run("mkfs.vfat", &["-F32", "/dev/sda1"]).await.unwrap();
+        runner
+            .run("parted", &["--script", "/dev/sda", "mklabel", "gpt"])
+            .await
+            .unwrap();
+        runner
+            .run("mkfs.vfat", &["-F32", "/dev/sda1"])
+            .await
+            .unwrap();
 
         runner.assert_call(0, "parted", &["--script", "/dev/sda", "mklabel", "gpt"]);
         runner.assert_call(1, "mkfs.vfat", &["-F32", "/dev/sda1"]);
@@ -121,7 +142,10 @@ mod tests {
     async fn fake_returns_canned_response() {
         let runner = FakeCommandRunner::new();
         runner.respond("blkid", "ABCD-1234\n");
-        let out = runner.run("blkid", &["-s", "UUID", "-o", "value", "/dev/sda1"]).await.unwrap();
+        let out = runner
+            .run("blkid", &["-s", "UUID", "-o", "value", "/dev/sda1"])
+            .await
+            .unwrap();
         assert_eq!(out.trim(), "ABCD-1234");
     }
 

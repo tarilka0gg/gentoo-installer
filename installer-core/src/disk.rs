@@ -27,7 +27,9 @@ struct LsblkDevice {
 }
 
 pub async fn list(runner: &dyn CommandRunner) -> crate::Result<Vec<Disk>> {
-    let raw = runner.run("lsblk", &["-J", "-b", "-o", "NAME,SIZE,MODEL,TYPE"]).await?;
+    let raw = runner
+        .run("lsblk", &["-J", "-b", "-o", "NAME,SIZE,MODEL,TYPE"])
+        .await?;
     let parsed: LsblkOutput =
         serde_json::from_str(&raw).map_err(|e| crate::Error::Other(e.into()))?;
 
@@ -35,7 +37,9 @@ pub async fn list(runner: &dyn CommandRunner) -> crate::Result<Vec<Disk>> {
         .blockdevices
         .into_iter()
         // zram/loop show up as type "disk" too but aren't real install targets.
-        .filter(|d| d.device_type == "disk" && !d.name.starts_with("zram") && !d.name.starts_with("loop"))
+        .filter(|d| {
+            d.device_type == "disk" && !d.name.starts_with("zram") && !d.name.starts_with("loop")
+        })
         .map(|d| Disk {
             path: format!("/dev/{}", d.name),
             size_bytes: d.size.unwrap_or(0),

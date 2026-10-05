@@ -27,15 +27,25 @@ impl Phase for LocalePhase {
     /// whole phase finished.
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
         let s = &ctx.settings;
-        let Some(first_locale) = s.locales.first() else { return Ok(false) };
-        Ok(read(ctx, "etc/timezone").as_deref() == Some(&format!("{}\n", s.timezone))
-            && read(ctx, "etc/conf.d/keymaps").as_deref() == Some(&format!("keymap=\"{}\"\n", s.keyboard_layout))
-            && read(ctx, "etc/conf.d/hostname").as_deref() == Some(&format!("hostname=\"{}\"\n", s.hostname))
-            && read(ctx, "etc/env.d/02locale").as_deref() == Some(&format!("LANG=\"{first_locale}\"\n")))
+        let Some(first_locale) = s.locales.first() else {
+            return Ok(false);
+        };
+        Ok(
+            read(ctx, "etc/timezone").as_deref() == Some(&format!("{}\n", s.timezone))
+                && read(ctx, "etc/conf.d/keymaps").as_deref()
+                    == Some(&format!("keymap=\"{}\"\n", s.keyboard_layout))
+                && read(ctx, "etc/conf.d/hostname").as_deref()
+                    == Some(&format!("hostname=\"{}\"\n", s.hostname))
+                && read(ctx, "etc/env.d/02locale").as_deref()
+                    == Some(&format!("LANG=\"{first_locale}\"\n")),
+        )
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
-        let _ = tx.send(Event::PhaseStarted { id: self.id(), label: self.label().to_string() });
+        let _ = tx.send(Event::PhaseStarted {
+            id: self.id(),
+            label: self.label().to_string(),
+        });
         let s = ctx.settings.clone();
 
         // Plain file writes first, the chroot'd `locale-gen` last (see `is_satisfied`).
@@ -44,7 +54,10 @@ impl Phase for LocalePhase {
         locale::apply_hostname(&ctx.target, &s.hostname).await?;
         locale::apply(ctx.runner.as_ref(), &ctx.target, &s.locales).await?;
 
-        let _ = tx.send(Event::PhaseFinished { id: self.id(), duration: std::time::Duration::default() });
+        let _ = tx.send(Event::PhaseFinished {
+            id: self.id(),
+            duration: std::time::Duration::default(),
+        });
         Ok(())
     }
 

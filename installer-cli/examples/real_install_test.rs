@@ -13,7 +13,9 @@ use installer_core::{hardware, install, partition, store};
 
 #[tokio::main]
 async fn main() {
-    let disk = std::env::args().nth(1).expect("usage: real_install_test <loop-device>");
+    let disk = std::env::args()
+        .nth(1)
+        .expect("usage: real_install_test <loop-device>");
 
     let profile = hardware::Profile::detect().expect("hardware detection failed");
     println!("Detected profile: {}", profile.combo());
@@ -37,7 +39,10 @@ async fn main() {
         stage3: None,
         hostname: "gentoo".into(),
         locales: vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
-        account: Account { username: "tester".into(), password: "testpassword123".into() },
+        account: Account {
+            username: "tester".into(),
+            password: "testpassword123".into(),
+        },
         wm: WmChoice::Niri,
         wm_configs_git_url: "file:///home/tarilka0gg/Documents/projects/gentoo-wm-configs".into(),
         opt_level: OptLevel::O2,

@@ -8,7 +8,8 @@ use crate::wifi::{Action, Mode as WifiMode, WifiState};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use installer_core::{
-    config::StoreEnv, disk, hardware, install,
+    config::StoreEnv,
+    disk, hardware, install,
     make_conf::{OptLevel, PackageMode},
     network, partition, store,
     wm::WmChoice,
@@ -146,7 +147,9 @@ async fn drain_install_progress(state: &mut AppState) {
             match task.await {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => state.install_log.push(format!("ERROR: {e}")),
-                Err(e) => state.install_log.push(format!("ERROR: install task panicked: {e}")),
+                Err(e) => state
+                    .install_log
+                    .push(format!("ERROR: install task panicked: {e}")),
             }
             state.step = Step::Done;
         }
@@ -167,7 +170,9 @@ fn describe(p: &install::Progress) -> String {
                 format!("Installing kernel: {atom} (generalized, degraded {degraded_by} step(s))")
             }
         }
-        install::Progress::InstallingGpuDriver => "Building the Nvidia driver for your kernel...".into(),
+        install::Progress::InstallingGpuDriver => {
+            "Building the Nvidia driver for your kernel...".into()
+        }
         install::Progress::WritingFstab => "Writing fstab...".into(),
         install::Progress::SettingKeyboard => "Setting keyboard layout...".into(),
         install::Progress::SettingTimezone => "Setting time zone...".into(),
@@ -181,17 +186,23 @@ fn describe(p: &install::Progress) -> String {
 /// Runs the Wi-Fi action the key handler queued. Called right after a frame was drawn, so the
 /// screen already says "Scanning…"/"Connecting…" while `iwd` works.
 async fn perform_wifi(state: &mut AppState) {
-    let Some(action) = state.wifi_action.take() else { return };
+    let Some(action) = state.wifi_action.take() else {
+        return;
+    };
     if state.iwd.is_none() {
         match network::IwdClient::connect().await {
             Ok(c) => state.iwd = Some(c),
             Err(e) => {
-                state.wifi.scan_failed(&format!("iwd is not reachable ({e})"));
+                state
+                    .wifi
+                    .scan_failed(&format!("iwd is not reachable ({e})"));
                 return;
             }
         }
     }
-    let Some(iwd) = state.iwd.as_ref() else { return };
+    let Some(iwd) = state.iwd.as_ref() else {
+        return;
+    };
     match action {
         Action::Scan => {
             let result = async {
@@ -206,14 +217,16 @@ async fn perform_wifi(state: &mut AppState) {
                 Err(e) => state.wifi.scan_failed(&e.to_string()),
             }
         }
-        Action::Connect { path, passphrase } => match iwd.connect_to(&path, passphrase.as_deref()).await {
-            Ok(()) => {
-                state.ethernet_up = true; // "the network is up" — the screen then just says so
-                state.status = "Connected.".into();
-                advance(state).await;
+        Action::Connect { path, passphrase } => {
+            match iwd.connect_to(&path, passphrase.as_deref()).await {
+                Ok(()) => {
+                    state.ethernet_up = true; // "the network is up" — the screen then just says so
+                    state.status = "Connected.".into();
+                    advance(state).await;
+                }
+                Err(e) => state.wifi.connect_failed(&e.to_string()),
             }
-            Err(e) => state.wifi.connect_failed(&e.to_string()),
-        },
+        }
         Action::Continue | Action::Quit => {}
     }
 }
@@ -234,8 +247,13 @@ async fn advance(state: &mut AppState) {
         }
         Step::DiskSelect => {
             if state.disks.get(state.selected_disk).is_some() {
-                let from_env = std::env::var("GENTOO_INSTALLER_USERNAME").is_ok() && std::env::var("GENTOO_INSTALLER_PASSWORD").is_ok();
-                state.step = if from_env || simulate_mode() { Step::Confirm } else { Step::Account };
+                let from_env = std::env::var("GENTOO_INSTALLER_USERNAME").is_ok()
+                    && std::env::var("GENTOO_INSTALLER_PASSWORD").is_ok();
+                state.step = if from_env || simulate_mode() {
+                    Step::Confirm
+                } else {
+                    Step::Account
+                };
             }
         }
         // The form submits itself (see the key loop); Enter here is never reached for it.
@@ -291,7 +309,10 @@ fn start_install(state: &mut AppState) {
     // real destructive default" reasoning as GENTOO_STORE_BINHOST_URL. Simulate mode
     // doesn't need real credentials at all.
     let account = if simulate {
-        installer_core::account::Account { username: "gentoo".into(), password: String::new() }
+        installer_core::account::Account {
+            username: "gentoo".into(),
+            password: String::new(),
+        }
     } else if let Some(a) = state.account.clone() {
         a
     } else {
@@ -351,7 +372,11 @@ fn start_install(state: &mut AppState) {
         _ => None,
     };
     let packages: Vec<String> = match std::env::var("GENTOO_INSTALLER_PACKAGES") {
-        Ok(v) => v.split(',').map(|g| g.trim().to_string()).filter(|g| !g.is_empty()).collect(),
+        Ok(v) => v
+            .split(',')
+            .map(|g| g.trim().to_string())
+            .filter(|g| !g.is_empty())
+            .collect(),
         Err(_) => installer_core::packages::default_ids(),
     };
 
@@ -360,16 +385,30 @@ fn start_install(state: &mut AppState) {
     let stage3 = std::env::var("GENTOO_INSTALLER_STAGE3_URL")
         .ok()
         .filter(|u| !u.trim().is_empty())
-        .map(|u| installer_core::stage3::Stage3Source::custom(u.trim(), std::env::var("GENTOO_INSTALLER_STAGE3_SHA512").ok()));
+        .map(|u| {
+            installer_core::stage3::Stage3Source::custom(
+                u.trim(),
+                std::env::var("GENTOO_INSTALLER_STAGE3_SHA512").ok(),
+            )
+        });
 
     let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
     let opts = install::InstallOptions {
         layout,
         target: "/mnt/gentoo".into(),
         store: store::StoreConfig {
-            binhost_url: store_env.as_ref().map(|e| e.binhost_url.clone()).unwrap_or_default(),
-            overlay_git_url: store_env.as_ref().map(|e| e.overlay_git_url.clone()).unwrap_or_default(),
-            overlay_name: store_env.as_ref().map(|e| e.overlay_name.clone()).unwrap_or_default(),
+            binhost_url: store_env
+                .as_ref()
+                .map(|e| e.binhost_url.clone())
+                .unwrap_or_default(),
+            overlay_git_url: store_env
+                .as_ref()
+                .map(|e| e.overlay_git_url.clone())
+                .unwrap_or_default(),
+            overlay_name: store_env
+                .as_ref()
+                .map(|e| e.overlay_name.clone())
+                .unwrap_or_default(),
         },
         kernel_base_name: store_env
             .map(|e| e.kernel_base_name)
@@ -416,22 +455,35 @@ fn draw(frame: &mut ratatui::Frame, state: &AppState) {
 
 fn draw_network(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
     if state.ethernet_up {
-        let body = Paragraph::new("Ethernet link detected — network already up.\n\n[Enter] continue  [q] quit")
-            .block(Block::default().borders(Borders::ALL).title("Network"));
+        let body = Paragraph::new(
+            "Ethernet link detected — network already up.\n\n[Enter] continue  [q] quit",
+        )
+        .block(Block::default().borders(Borders::ALL).title("Network"));
         frame.render_widget(body, area);
         return;
     }
 
     let w = &state.wifi;
-    let chunks = RtLayout::vertical([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)]).split(area);
+    let chunks = RtLayout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(3),
+    ])
+    .split(area);
     let header = match &w.mode {
         WifiMode::Busy(what) => what.clone(),
         WifiMode::Passphrase { ssid, input, .. } => {
-            format!("Passphrase for \"{ssid}\": {}▏   [Enter] connect  [Esc] back", "*".repeat(input.chars().count()))
+            format!(
+                "Passphrase for \"{ssid}\": {}▏   [Enter] connect  [Esc] back",
+                "*".repeat(input.chars().count())
+            )
         }
         WifiMode::List => "No Ethernet link. Pick a Wi-Fi network.".to_string(),
     };
-    frame.render_widget(Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("Network")), chunks[0]);
+    frame.render_widget(
+        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("Network")),
+        chunks[0],
+    );
 
     let items: Vec<ListItem> = w
         .networks
@@ -446,14 +498,28 @@ fn draw_network(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
                 _ => "▂   ",
             };
             let lock = if n.secured { "🔒" } else { "  " };
-            let style = if i == w.selected { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() };
+            let style = if i == w.selected {
+                Style::default().fg(Color::Black).bg(Color::Cyan)
+            } else {
+                Style::default()
+            };
             ListItem::new(Line::from(format!(" {bars} {lock} {}", n.ssid))).style(style)
         })
         .collect();
-    frame.render_widget(List::new(items).block(Block::default().borders(Borders::ALL).title("Networks")), chunks[1]);
+    frame.render_widget(
+        List::new(items).block(Block::default().borders(Borders::ALL).title("Networks")),
+        chunks[1],
+    );
 
-    let hint = if w.message.is_empty() { "[↑↓] select  [Enter] connect  [r] rescan  [s] skip  [q] quit".to_string() } else { w.message.clone() };
-    frame.render_widget(Paragraph::new(hint).block(Block::default().borders(Borders::ALL)), chunks[2]);
+    let hint = if w.message.is_empty() {
+        "[↑↓] select  [Enter] connect  [r] rescan  [s] skip  [q] quit".to_string()
+    } else {
+        w.message.clone()
+    };
+    frame.render_widget(
+        Paragraph::new(hint).block(Block::default().borders(Borders::ALL)),
+        chunks[2],
+    );
 }
 
 fn draw_disk_select(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -468,7 +534,11 @@ fn draw_disk_select(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, sta
         None => "hardware detection unavailable".to_string(),
     };
     frame.render_widget(
-        Paragraph::new(profile_text).block(Block::default().borders(Borders::ALL).title("Detected hardware")),
+        Paragraph::new(profile_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Detected hardware"),
+        ),
         chunks[0],
     );
 
@@ -520,7 +590,10 @@ fn draw_account(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
         "*".repeat(f.confirm.chars().count()),
         f.message,
     );
-    frame.render_widget(Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Account")), area);
+    frame.render_widget(
+        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Account")),
+        area,
+    );
 }
 
 fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -567,19 +640,36 @@ mod tests {
     async fn a_failed_install_task_shows_its_error_even_though_done_never_arrives() {
         let mut state = AppState::new();
         state.step = Step::Installing;
-        state.install_task = Some(tokio::spawn(async { Err(installer_core::Error::Other(anyhow::anyhow!("git clone failed"))) }));
+        state.install_task = Some(tokio::spawn(async {
+            Err(installer_core::Error::Other(anyhow::anyhow!(
+                "git clone failed"
+            )))
+        }));
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         drain_install_progress(&mut state).await;
 
         assert_eq!(state.step, Step::Done);
-        assert!(install_failed(&state.install_log), "{:?}", state.install_log);
-        assert!(state.install_log.iter().any(|l| l.contains("git clone failed")));
+        assert!(
+            install_failed(&state.install_log),
+            "{:?}",
+            state.install_log
+        );
+        assert!(state
+            .install_log
+            .iter()
+            .any(|l| l.contains("git clone failed")));
     }
 
     #[test]
     fn only_a_log_without_errors_counts_as_a_finished_install() {
-        assert!(!install_failed(&["Installing Limine...".into(), "Install complete.".into()]));
-        assert!(install_failed(&["Partitioning disk...".into(), "ERROR: disk vanished".into()]));
+        assert!(!install_failed(&[
+            "Installing Limine...".into(),
+            "Install complete.".into()
+        ]));
+        assert!(install_failed(&[
+            "Partitioning disk...".into(),
+            "ERROR: disk vanished".into()
+        ]));
     }
 }

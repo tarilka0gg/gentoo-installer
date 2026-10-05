@@ -13,7 +13,11 @@ const MAX_PASSPHRASE: usize = 63;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     List,
-    Passphrase { path: String, ssid: String, input: String },
+    Passphrase {
+        path: String,
+        ssid: String,
+        input: String,
+    },
     /// A scan or a connection is running; keys are ignored until it reports back.
     Busy(String),
 }
@@ -21,7 +25,10 @@ pub enum Mode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Scan,
-    Connect { path: String, passphrase: Option<String> },
+    Connect {
+        path: String,
+        passphrase: Option<String>,
+    },
     /// Leave the screen without (or after) connecting.
     Continue,
     Quit,
@@ -36,14 +43,23 @@ pub struct WifiState {
 
 impl WifiState {
     pub fn new() -> Self {
-        Self { networks: Vec::new(), selected: 0, mode: Mode::List, message: String::new() }
+        Self {
+            networks: Vec::new(),
+            selected: 0,
+            mode: Mode::List,
+            message: String::new(),
+        }
     }
 
     /// Strongest first; iwd already orders them, this keeps the list stable if it does not.
     pub fn set_networks(&mut self, mut networks: Vec<Network>) {
         networks.sort_by(|a, b| b.signal_strength.cmp(&a.signal_strength));
         self.selected = 0;
-        self.message = if networks.is_empty() { "No networks found. [r] rescan".into() } else { String::new() };
+        self.message = if networks.is_empty() {
+            "No networks found. [r] rescan".into()
+        } else {
+            String::new()
+        };
         self.networks = networks;
         self.mode = Mode::List;
     }
@@ -81,12 +97,16 @@ impl WifiState {
                     None
                 }
                 KeyCode::Enter if input.chars().count() >= MIN_PASSPHRASE => {
-                    let action = Action::Connect { path: path.clone(), passphrase: Some(input.clone()) };
+                    let action = Action::Connect {
+                        path: path.clone(),
+                        passphrase: Some(input.clone()),
+                    };
                     self.mode = Mode::Busy("Connecting…".into());
                     Some(action)
                 }
                 KeyCode::Enter => {
-                    self.message = format!("The passphrase needs at least {MIN_PASSPHRASE} characters.");
+                    self.message =
+                        format!("The passphrase needs at least {MIN_PASSPHRASE} characters.");
                     None
                 }
                 _ => None,
@@ -109,12 +129,19 @@ impl WifiState {
                 KeyCode::Enter => {
                     let net = self.networks.get(self.selected)?.clone();
                     if net.secured {
-                        self.mode = Mode::Passphrase { path: net.path, ssid: net.ssid, input: String::new() };
+                        self.mode = Mode::Passphrase {
+                            path: net.path,
+                            ssid: net.ssid,
+                            input: String::new(),
+                        };
                         self.message.clear();
                         None
                     } else {
                         self.begin("Connecting…");
-                        Some(Action::Connect { path: net.path, passphrase: None })
+                        Some(Action::Connect {
+                            path: net.path,
+                            passphrase: None,
+                        })
                     }
                 }
                 _ => None,
@@ -128,12 +155,21 @@ mod tests {
     use super::*;
 
     fn net(ssid: &str, signal: i16, secured: bool) -> Network {
-        Network { path: format!("/net/{ssid}"), ssid: ssid.into(), signal_strength: signal, secured }
+        Network {
+            path: format!("/net/{ssid}"),
+            ssid: ssid.into(),
+            signal_strength: signal,
+            secured,
+        }
     }
 
     fn state() -> WifiState {
         let mut s = WifiState::new();
-        s.set_networks(vec![net("weak", -8000, true), net("strong", -3000, true), net("open", -5000, false)]);
+        s.set_networks(vec![
+            net("weak", -8000, true),
+            net("strong", -3000, true),
+            net("open", -5000, false),
+        ]);
         s
     }
 
@@ -146,14 +182,26 @@ mod tests {
     #[test]
     fn networks_are_listed_strongest_first() {
         let s = state();
-        assert_eq!(s.networks.iter().map(|n| n.ssid.as_str()).collect::<Vec<_>>(), ["strong", "open", "weak"]);
+        assert_eq!(
+            s.networks
+                .iter()
+                .map(|n| n.ssid.as_str())
+                .collect::<Vec<_>>(),
+            ["strong", "open", "weak"]
+        );
     }
 
     #[test]
     fn an_open_network_connects_straight_away() {
         let mut s = state();
         s.handle_key(KeyCode::Down);
-        assert_eq!(s.handle_key(KeyCode::Enter), Some(Action::Connect { path: "/net/open".into(), passphrase: None }));
+        assert_eq!(
+            s.handle_key(KeyCode::Enter),
+            Some(Action::Connect {
+                path: "/net/open".into(),
+                passphrase: None
+            })
+        );
         assert!(matches!(s.mode, Mode::Busy(_)));
     }
 
@@ -164,11 +212,16 @@ mod tests {
         assert!(matches!(s.mode, Mode::Passphrase { .. }));
         type_text(&mut s, "quiet-pass");
         // `q` must not quit while typing.
-        let Mode::Passphrase { input, .. } = &s.mode else { panic!() };
+        let Mode::Passphrase { input, .. } = &s.mode else {
+            panic!()
+        };
         assert_eq!(input, "quiet-pass");
         assert_eq!(
             s.handle_key(KeyCode::Enter),
-            Some(Action::Connect { path: "/net/strong".into(), passphrase: Some("quiet-pass".into()) })
+            Some(Action::Connect {
+                path: "/net/strong".into(),
+                passphrase: Some("quiet-pass".into())
+            })
         );
     }
 
@@ -188,7 +241,9 @@ mod tests {
         s.handle_key(KeyCode::Enter);
         type_text(&mut s, "abc");
         s.handle_key(KeyCode::Backspace);
-        let Mode::Passphrase { input, .. } = &s.mode else { panic!() };
+        let Mode::Passphrase { input, .. } = &s.mode else {
+            panic!()
+        };
         assert_eq!(input, "ab");
         s.handle_key(KeyCode::Esc);
         assert_eq!(s.mode, Mode::List);
@@ -199,7 +254,9 @@ mod tests {
         let mut s = state();
         s.handle_key(KeyCode::Enter);
         type_text(&mut s, &"x".repeat(80));
-        let Mode::Passphrase { input, .. } = &s.mode else { panic!() };
+        let Mode::Passphrase { input, .. } = &s.mode else {
+            panic!()
+        };
         assert_eq!(input.len(), 63);
     }
 
@@ -207,7 +264,11 @@ mod tests {
     fn keys_are_ignored_while_busy() {
         let mut s = state();
         assert_eq!(s.handle_key(KeyCode::Char('r')), Some(Action::Scan));
-        assert_eq!(s.handle_key(KeyCode::Char('q')), None, "no quitting mid-scan");
+        assert_eq!(
+            s.handle_key(KeyCode::Char('q')),
+            None,
+            "no quitting mid-scan"
+        );
         assert_eq!(s.handle_key(KeyCode::Enter), None);
     }
 

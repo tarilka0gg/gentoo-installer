@@ -32,7 +32,13 @@ pub struct AccountForm {
 
 impl AccountForm {
     pub fn new() -> Self {
-        Self { username: String::new(), password: String::new(), confirm: String::new(), field: Field::Username, message: String::new() }
+        Self {
+            username: String::new(),
+            password: String::new(),
+            confirm: String::new(),
+            field: Field::Username,
+            message: String::new(),
+        }
     }
 
     fn current(&mut self) -> (&mut String, usize) {
@@ -91,7 +97,10 @@ impl AccountForm {
             self.confirm.clear();
             self.field = Field::Confirm;
         } else {
-            return Outcome::Submit(Account { username: self.username.clone(), password: self.password.clone() });
+            return Outcome::Submit(Account {
+                username: self.username.clone(),
+                password: self.password.clone(),
+            });
         }
         Outcome::None
     }
@@ -120,7 +129,13 @@ mod tests {
     #[test]
     fn a_good_form_submits_exactly_what_was_typed() {
         let mut f = filled("solomiya", "q-hunter two", "q-hunter two");
-        assert_eq!(f.handle_key(KeyCode::Enter), Outcome::Submit(Account { username: "solomiya".into(), password: "q-hunter two".into() }));
+        assert_eq!(
+            f.handle_key(KeyCode::Enter),
+            Outcome::Submit(Account {
+                username: "solomiya".into(),
+                password: "q-hunter two".into()
+            })
+        );
     }
 
     #[test]
@@ -144,7 +159,10 @@ mod tests {
         let mut f = filled("solomiya", "one", "two");
         assert_eq!(f.handle_key(KeyCode::Enter), Outcome::None);
         assert!(f.message.contains("differ"), "{}", f.message);
-        assert!(f.confirm.is_empty(), "the confirmation is cleared so it is typed again");
+        assert!(
+            f.confirm.is_empty(),
+            "the confirmation is cleared so it is typed again"
+        );
 
         let mut f = filled("solomiya", "", "");
         assert_eq!(f.handle_key(KeyCode::Enter), Outcome::None);

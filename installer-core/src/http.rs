@@ -13,7 +13,11 @@ pub async fn download_to_file(url: &str, dest: &Path) -> crate::Result<()> {
         .map_err(|e| crate::Error::Other(e.into()))?;
 
     let mut file = tokio::fs::File::create(dest).await?;
-    while let Some(chunk) = response.chunk().await.map_err(|e| crate::Error::Other(e.into()))? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| crate::Error::Other(e.into()))?
+    {
         file.write_all(&chunk).await?;
     }
     file.flush().await?;

@@ -30,7 +30,12 @@ pub struct PhaseRecord {
 
 impl Default for PhaseRecord {
     fn default() -> Self {
-        Self { status: PhaseStatus::Pending, started_at: None, finished_at: None, error: None }
+        Self {
+            status: PhaseStatus::Pending,
+            started_at: None,
+            finished_at: None,
+            error: None,
+        }
     }
 }
 
@@ -47,7 +52,10 @@ impl Journal {
     pub fn new(plan: serde_json::Value, phase_ids: &[PhaseId]) -> Self {
         Self {
             plan,
-            phases: phase_ids.iter().map(|id| (*id, PhaseRecord::default())).collect(),
+            phases: phase_ids
+                .iter()
+                .map(|id| (*id, PhaseRecord::default()))
+                .collect(),
         }
     }
 
@@ -57,7 +65,9 @@ impl Journal {
             return Ok(None);
         }
         let raw = tokio::fs::read_to_string(path).await?;
-        Ok(Some(serde_json::from_str(&raw).map_err(|e| crate::Error::Other(e.into()))?))
+        Ok(Some(
+            serde_json::from_str(&raw).map_err(|e| crate::Error::Other(e.into()))?,
+        ))
     }
 
     pub async fn save(&self, path: impl AsRef<Path>) -> crate::Result<()> {
@@ -113,17 +123,26 @@ mod tests {
 
     #[tokio::test]
     async fn save_then_load_roundtrips() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-journal-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-journal-test-{}",
+            std::process::id()
+        ));
         let path = dir.join("journal.json");
 
-        let mut journal = Journal::new(serde_json::json!({"disk": "/dev/sda"}), &[PhaseId::Preflight, PhaseId::Partition]);
+        let mut journal = Journal::new(
+            serde_json::json!({"disk": "/dev/sda"}),
+            &[PhaseId::Preflight, PhaseId::Partition],
+        );
         journal.mark_done(PhaseId::Preflight);
         journal.mark_running(PhaseId::Partition);
         journal.save(&path).await.unwrap();
 
         let loaded = Journal::load(&path).await.unwrap().unwrap();
         assert_eq!(loaded.phases[&PhaseId::Preflight].status, PhaseStatus::Done);
-        assert_eq!(loaded.phases[&PhaseId::Partition].status, PhaseStatus::Running);
+        assert_eq!(
+            loaded.phases[&PhaseId::Partition].status,
+            PhaseStatus::Running
+        );
         assert_eq!(loaded.plan["disk"], "/dev/sda");
 
         tokio::fs::remove_dir_all(&dir).await.ok();
@@ -131,19 +150,27 @@ mod tests {
 
     #[tokio::test]
     async fn missing_journal_loads_as_none() {
-        let result = Journal::load("/nonexistent/gentoo-installer-journal.json").await.unwrap();
+        let result = Journal::load("/nonexistent/gentoo-installer-journal.json")
+            .await
+            .unwrap();
         assert!(result.is_none());
     }
 
     #[test]
     fn resumable_requires_partial_progress() {
-        let mut journal = Journal::new(serde_json::json!({}), &[PhaseId::Preflight, PhaseId::Partition]);
+        let mut journal = Journal::new(
+            serde_json::json!({}),
+            &[PhaseId::Preflight, PhaseId::Partition],
+        );
         assert!(!journal.is_resumable(), "nothing done yet");
 
         journal.mark_done(PhaseId::Preflight);
         assert!(journal.is_resumable());
 
         journal.mark_done(PhaseId::Partition);
-        assert!(!journal.is_resumable(), "fully complete, not a resume candidate");
+        assert!(
+            !journal.is_resumable(),
+            "fully complete, not a resume candidate"
+        );
     }
 }

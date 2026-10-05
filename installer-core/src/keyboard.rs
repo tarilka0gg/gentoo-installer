@@ -34,7 +34,10 @@ pub fn list_layouts() -> Vec<Layout> {
             continue;
         }
         if let Some((code, description)) = trimmed.split_once(char::is_whitespace) {
-            layouts.push(Layout { code: code.to_string(), description: description.trim().to_string() });
+            layouts.push(Layout {
+                code: code.to_string(),
+                description: description.trim().to_string(),
+            });
         }
     }
     layouts
@@ -44,7 +47,10 @@ pub fn list_layouts() -> Vec<Layout> {
 /// (`keymap="us"`); `/etc/vconsole.conf` (`KEYMAP=`) is systemd's file and is only a fallback for
 /// a live environment that has it. Anything else is `"us"`.
 pub fn detect_current() -> String {
-    detect_from(Path::new("/etc/conf.d/keymaps"), Path::new("/etc/vconsole.conf"))
+    detect_from(
+        Path::new("/etc/conf.d/keymaps"),
+        Path::new("/etc/vconsole.conf"),
+    )
 }
 
 fn detect_from(openrc: &Path, vconsole: &Path) -> String {
@@ -53,7 +59,10 @@ fn detect_from(openrc: &Path, vconsole: &Path) -> String {
             s.lines()
                 .map(str::trim)
                 .filter(|l| !l.starts_with('#'))
-                .find_map(|l| l.strip_prefix(key).map(|v| v.trim().trim_matches('"').to_string()))
+                .find_map(|l| {
+                    l.strip_prefix(key)
+                        .map(|v| v.trim().trim_matches('"').to_string())
+                })
         })
     };
     value(openrc, "keymap=")
@@ -79,7 +88,10 @@ mod tests {
     #[test]
     fn parses_known_layouts_from_this_machine() {
         let layouts = list_layouts();
-        assert!(!layouts.is_empty(), "expected {XKB_BASE_LIST} to be readable on this dev machine");
+        assert!(
+            !layouts.is_empty(),
+            "expected {XKB_BASE_LIST} to be readable on this dev machine"
+        );
         assert!(layouts.iter().any(|l| l.code == "us"));
     }
 
@@ -98,7 +110,11 @@ mod tests {
         std::fs::write(&v, "KEYMAP=de\n").unwrap();
         assert_eq!(detect_from(&o, &v), "ua");
         std::fs::remove_file(&o).unwrap();
-        assert_eq!(detect_from(&o, &v), "de", "systemd's file is only a fallback");
+        assert_eq!(
+            detect_from(&o, &v),
+            "de",
+            "systemd's file is only a fallback"
+        );
         std::fs::remove_file(&v).unwrap();
         assert_eq!(detect_from(&o, &v), "us");
         std::fs::write(&o, "keymap=\"\"\n").unwrap();

@@ -10,7 +10,10 @@ use crate::account::Account;
 use crate::command::{CommandRunner, RealCommandRunner};
 use crate::hardware::Gpu;
 use crate::wm::WmChoice;
-use crate::{account, bootloader, detect, fstab, gpu_driver, hardware, keyboard, kernel, locale, make_conf, packages, partition, stage3, store, timezone, wm};
+use crate::{
+    account, bootloader, detect, fstab, gpu_driver, hardware, kernel, keyboard, locale, make_conf,
+    packages, partition, stage3, store, timezone, wm,
+};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -75,7 +78,10 @@ pub enum Progress {
     ConfiguringStore,
     /// Carries the resolved atom once hardware/kernel matching picks one, so the UI
     /// can show *which* profile got selected (and whether it had to degrade).
-    InstallingKernel { atom: String, degraded_by: usize },
+    InstallingKernel {
+        atom: String,
+        degraded_by: usize,
+    },
     /// Only sent when the detected GPU actually needs one (currently: Nvidia). See
     /// `gpu_driver`'s doc comment for why this is the one step that still uses `emerge`.
     InstallingGpuDriver,
@@ -123,7 +129,15 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     let _ = tx.send(Progress::WritingMakeConf);
     let detected = detect::gather(runner).await;
     let jobs = make_conf::nproc(runner).await;
-    make_conf::generate(&opts.target, profile.cpu, &detected, jobs, opts.opt_level, opts.package_mode).await?;
+    make_conf::generate(
+        &opts.target,
+        profile.cpu,
+        &detected,
+        jobs,
+        opts.opt_level,
+        opts.package_mode,
+    )
+    .await?;
 
     let _ = tx.send(Progress::ConfiguringStore);
     store::configure(runner, &opts.target, &opts.store).await?;
@@ -136,7 +150,13 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     });
     // No emerge: the kernel is a direct file copy, not a package install (matches
     // installer-core::phase::deploy's DeployPhase — see its doc comment for why).
-    kernel::deploy(runner, &opts.store.binhost_url, &kernel_pkg.combo, &opts.target).await?;
+    kernel::deploy(
+        runner,
+        &opts.store.binhost_url,
+        &kernel_pkg.combo,
+        &opts.target,
+    )
+    .await?;
 
     if profile.gpu == Gpu::Nvidia {
         let _ = tx.send(Progress::InstallingGpuDriver);
@@ -165,7 +185,14 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     account::install_doas(runner, &opts.target).await?;
 
     let _ = tx.send(Progress::InstallingDesktop);
-    wm::install(runner, &opts.target, opts.wm, &opts.wm_configs_git_url, &opts.account.username).await?;
+    wm::install(
+        runner,
+        &opts.target,
+        opts.wm,
+        &opts.wm_configs_git_url,
+        &opts.account.username,
+    )
+    .await?;
     packages::install(runner, &opts.target, &opts.packages).await?;
 
     let _ = tx.send(Progress::InstallingBootloader);
@@ -202,7 +229,10 @@ async fn run_simulated(opts: InstallOptions, tx: UnboundedSender<Progress>) -> c
     }
 
     let detected_profile = hardware::Profile::detect().ok();
-    let combo = detected_profile.as_ref().map(|p| p.combo()).unwrap_or_else(|| "unknown".to_string());
+    let combo = detected_profile
+        .as_ref()
+        .map(|p| p.combo())
+        .unwrap_or_else(|| "unknown".to_string());
     let _ = tx.send(Progress::InstallingKernel {
         atom: format!("sys-kernel/{}-bin-{combo}", opts.kernel_base_name),
         degraded_by: 0,

@@ -89,7 +89,15 @@ pub enum Gpu {
 
 impl Gpu {
     /// Every value an installer can offer, detected-first ordering is the caller's job.
-    pub const ALL: [Gpu; 7] = [Gpu::Nvidia, Gpu::Nouveau, Gpu::Amd, Gpu::Intel, Gpu::Xe, Gpu::RadeonLegacy, Gpu::None];
+    pub const ALL: [Gpu; 7] = [
+        Gpu::Nvidia,
+        Gpu::Nouveau,
+        Gpu::Amd,
+        Gpu::Intel,
+        Gpu::Xe,
+        Gpu::RadeonLegacy,
+        Gpu::None,
+    ];
 
     pub fn display_name(self) -> &'static str {
         match self {
@@ -170,7 +178,12 @@ impl Profile {
     /// Three-axis combo string matching the store's naming scheme, e.g.
     /// "intel-raptorlake-nvidia-laptop".
     pub fn combo(&self) -> String {
-        format!("{}-{}-{}", self.cpu.as_str(), self.gpu.as_str(), self.platform.as_str())
+        format!(
+            "{}-{}-{}",
+            self.cpu.as_str(),
+            self.gpu.as_str(),
+            self.platform.as_str()
+        )
     }
 
     /// Degrades from most to least specific: platform first (handheld -> laptop, since
@@ -428,7 +441,13 @@ fn vendor_from_pci_line(line: &str) -> Option<Gpu> {
 /// Desktop, since `server` was dropped from the platform axis entirely (out of scope for
 /// this distro) and a desktop-profile kernel is the closer match anyway.
 fn detect_platform(raw: &RawInfo) -> Platform {
-    const HANDHELD_PRODUCTS: &[&str] = &["ROG Ally", "Legion Go", "Steam Deck", "ONEXPLAYER", "GPD Win"];
+    const HANDHELD_PRODUCTS: &[&str] = &[
+        "ROG Ally",
+        "Legion Go",
+        "Steam Deck",
+        "ONEXPLAYER",
+        "GPD Win",
+    ];
     if HANDHELD_PRODUCTS
         .iter()
         .any(|p| raw.product_name.to_lowercase().contains(&p.to_lowercase()))

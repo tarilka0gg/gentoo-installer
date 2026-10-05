@@ -6,8 +6,14 @@ use std::path::Path;
 /// Writes a minimal `limine.conf` for the installed system: single entry booting
 /// `kernel_file` (a file name in the ESP root, which is `/boot` on the target). `root_subvol`
 /// is `Some("@")` for btrfs only — `rootflags=subvol=` on an ext4 root fails the mount.
-pub fn generate_config(kernel_file: &str, root_partuuid: &str, root_subvol: Option<&str>) -> String {
-    let rootflags = root_subvol.map(|s| format!(" rootflags=subvol={s}")).unwrap_or_default();
+pub fn generate_config(
+    kernel_file: &str,
+    root_partuuid: &str,
+    root_subvol: Option<&str>,
+) -> String {
+    let rootflags = root_subvol
+        .map(|s| format!(" rootflags=subvol={s}"))
+        .unwrap_or_default();
     format!(
         "timeout: 3\n\n\
          /Gentoo\n\
@@ -32,8 +38,14 @@ pub fn find_kernel(target: &Path) -> crate::Result<String> {
     found.sort();
     match found.as_slice() {
         [one] => Ok(one.clone()),
-        [] => Err(crate::Error::Other(anyhow::anyhow!("no vmlinuz-* in {}/boot; cannot write limine.conf", target.display()))),
-        many => Err(crate::Error::Other(anyhow::anyhow!("several kernels in {}/boot ({many:?}); refusing to guess", target.display()))),
+        [] => Err(crate::Error::Other(anyhow::anyhow!(
+            "no vmlinuz-* in {}/boot; cannot write limine.conf",
+            target.display()
+        ))),
+        many => Err(crate::Error::Other(anyhow::anyhow!(
+            "several kernels in {}/boot ({many:?}); refusing to guess",
+            target.display()
+        ))),
     }
 }
 
@@ -46,13 +58,22 @@ pub async fn configure(
     parts: &crate::partition::Partitions,
 ) -> crate::Result<()> {
     let kernel = find_kernel(target)?;
-    let out = runner.run("blkid", &["-s", "PARTUUID", "-o", "value", &parts.root]).await?;
+    let out = runner
+        .run("blkid", &["-s", "PARTUUID", "-o", "value", &parts.root])
+        .await?;
     let partuuid = out.trim();
     if partuuid.is_empty() {
-        return Err(crate::Error::Other(anyhow::anyhow!("blkid returned no PARTUUID for {}", parts.root)));
+        return Err(crate::Error::Other(anyhow::anyhow!(
+            "blkid returned no PARTUUID for {}",
+            parts.root
+        )));
     }
     let subvol = matches!(layout.root_fs, crate::partition::RootFs::Btrfs).then_some("@");
-    write_config(&target.join("boot"), &generate_config(&kernel, partuuid, subvol)).await
+    write_config(
+        &target.join("boot"),
+        &generate_config(&kernel, partuuid, subvol),
+    )
+    .await
 }
 
 fn firmware_is_uefi() -> bool {
@@ -70,7 +91,11 @@ pub async fn install(runner: &dyn CommandRunner, target: &Path, disk: &str) -> c
 
     // Boot protocol modules + config live under boot/limine regardless of firmware mode.
     for file in ["limine-bios.sys"] {
-        copy_if_present(Path::new("/usr/share/limine").join(file), limine_dir.join(file)).await?;
+        copy_if_present(
+            Path::new("/usr/share/limine").join(file),
+            limine_dir.join(file),
+        )
+        .await?;
     }
 
     if firmware_is_uefi() {
@@ -90,10 +115,7 @@ pub async fn install(runner: &dyn CommandRunner, target: &Path, disk: &str) -> c
     Ok(())
 }
 
-async fn copy_if_present(
-    src: impl AsRef<Path>,
-    dst: impl AsRef<Path>,
-) -> crate::Result<()> {
+async fn copy_if_present(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> crate::Result<()> {
     let src = src.as_ref();
     if !src.exists() {
         return Err(crate::Error::Other(anyhow::anyhow!(
@@ -125,7 +147,9 @@ mod tests {
     #[test]
     fn bios_install_takes_only_the_disk() {
         // `--target-root` is not a limine option: it made every BIOS install fail.
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         let runner = crate::command::FakeCommandRunner::new();
         let dir = std::env::temp_dir().join(format!("gi-bios-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

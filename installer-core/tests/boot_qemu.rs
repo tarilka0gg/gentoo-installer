@@ -8,8 +8,16 @@
 use std::process::Command;
 
 fn sh(script: &str) -> String {
-    let out = Command::new("bash").arg("-ec").arg(script).output().unwrap();
-    assert!(out.status.success(), "{script}\n{}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new("bash")
+        .arg("-ec")
+        .arg(script)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{script}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
@@ -21,7 +29,8 @@ fn installed_layout_boots_through_limine_to_openrc() {
     let dir = std::env::temp_dir().join(format!("gi-boot-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let uuid = "22222222-2222-2222-2222-222222222222";
-    let conf = installer_core::bootloader::generate_config("vmlinuz-test", uuid, None) + " console=ttyS0\n";
+    let conf = installer_core::bootloader::generate_config("vmlinuz-test", uuid, None)
+        + " console=ttyS0\n";
     // generate_config ends the cmdline with "rw\n"; splice console= onto that line.
     let conf = conf.replace("rw\n console=ttyS0\n", "rw console=ttyS0\n");
     std::fs::write(dir.join("limine.conf"), conf).unwrap();
@@ -46,5 +55,8 @@ mke2fs -q -t ext4 -d {stage3} -E offset=$((RS*512)) $I $(( (RE-RS+1)/2 ))k"#
     ));
     let log = std::fs::read_to_string(dir.join("serial.log")).unwrap_or_default();
     std::fs::remove_dir_all(&dir).ok();
-    assert!(log.contains("OpenRC") && log.contains("Entering runlevel"), "did not reach OpenRC:\n{log}");
+    assert!(
+        log.contains("OpenRC") && log.contains("Entering runlevel"),
+        "did not reach OpenRC:\n{log}"
+    );
 }

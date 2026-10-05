@@ -29,11 +29,19 @@ pub struct KernelPackage {
     pub degraded_by: usize,
 }
 
-pub fn resolve(base_name: &str, profile: &Profile, available_atoms: &[String]) -> crate::Result<KernelPackage> {
+pub fn resolve(
+    base_name: &str,
+    profile: &Profile,
+    available_atoms: &[String],
+) -> crate::Result<KernelPackage> {
     for (i, combo) in profile.candidates().into_iter().enumerate() {
         let atom = format!("sys-kernel/{base_name}-bin-{combo}");
         if available_atoms.iter().any(|a| a == &atom) {
-            return Ok(KernelPackage { atom, combo, degraded_by: i });
+            return Ok(KernelPackage {
+                atom,
+                combo,
+                degraded_by: i,
+            });
         }
     }
     Err(crate::Error::NoKernelProfile(profile.combo()))
@@ -45,16 +53,31 @@ pub fn resolve(base_name: &str, profile: &Profile, available_atoms: &[String]) -
 /// — a convention, not yet a settled publishing layout (the store currently only has raw
 /// local build output, see `~/kernel-releases/`), so this is the first thing to update
 /// once that's decided for real.
-pub async fn deploy(runner: &dyn CommandRunner, binhost_url: &str, combo: &str, target: &Path) -> crate::Result<()> {
+pub async fn deploy(
+    runner: &dyn CommandRunner,
+    binhost_url: &str,
+    combo: &str,
+    target: &Path,
+) -> crate::Result<()> {
     let boot_dir = target.join("boot");
     tokio::fs::create_dir_all(&boot_dir).await?;
     let vmlinuz_dest = boot_dir.join(format!("vmlinuz-{combo}"));
-    http::download_to_file(&format!("{}/kernels/{combo}.vmlinuz", binhost_url.trim_end_matches('/')), &vmlinuz_dest)
-        .await?;
-
-    let modules_tarball = std::env::temp_dir().join(format!("gentoo-installer-{combo}-modules.tar.xz"));
     http::download_to_file(
-        &format!("{}/kernels/{combo}-modules.tar.xz", binhost_url.trim_end_matches('/')),
+        &format!(
+            "{}/kernels/{combo}.vmlinuz",
+            binhost_url.trim_end_matches('/')
+        ),
+        &vmlinuz_dest,
+    )
+    .await?;
+
+    let modules_tarball =
+        std::env::temp_dir().join(format!("gentoo-installer-{combo}-modules.tar.xz"));
+    http::download_to_file(
+        &format!(
+            "{}/kernels/{combo}-modules.tar.xz",
+            binhost_url.trim_end_matches('/')
+        ),
         &modules_tarball,
     )
     .await?;
@@ -67,7 +90,9 @@ pub async fn deploy(runner: &dyn CommandRunner, binhost_url: &str, combo: &str, 
     let modules_dir_str = modules_dir
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 modules dir path")))?;
-    runner.run_status("tar", &["-xpf", modules_tarball_str, "-C", modules_dir_str]).await?;
+    runner
+        .run_status("tar", &["-xpf", modules_tarball_str, "-C", modules_dir_str])
+        .await?;
     tokio::fs::remove_file(&modules_tarball).await.ok();
 
     // Optional: a prepared kernel source tree (headers + Module.symvers, i.e. the
@@ -75,9 +100,15 @@ pub async fn deploy(runner: &dyn CommandRunner, binhost_url: &str, combo: &str, 
     // every combo, only ones that need an out-of-tree module compiled against them at
     // install time (see `gpu_driver::install`). A missing file here just means this
     // combo doesn't need one; not an install-blocking error.
-    let devel_url = format!("{}/kernels/{combo}-devel.tar.xz", binhost_url.trim_end_matches('/'));
+    let devel_url = format!(
+        "{}/kernels/{combo}-devel.tar.xz",
+        binhost_url.trim_end_matches('/')
+    );
     let devel_tarball = std::env::temp_dir().join(format!("gentoo-installer-{combo}-devel.tar.xz"));
-    if http::download_to_file(&devel_url, &devel_tarball).await.is_ok() {
+    if http::download_to_file(&devel_url, &devel_tarball)
+        .await
+        .is_ok()
+    {
         let src_dir = target.join(format!("usr/src/linux-{combo}"));
         tokio::fs::create_dir_all(&src_dir).await?;
         let src_dir_str = src_dir
@@ -86,7 +117,9 @@ pub async fn deploy(runner: &dyn CommandRunner, binhost_url: &str, combo: &str, 
         let devel_tarball_str = devel_tarball
             .to_str()
             .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 devel tarball path")))?;
-        runner.run_status("tar", &["-xpf", devel_tarball_str, "-C", src_dir_str]).await?;
+        runner
+            .run_status("tar", &["-xpf", devel_tarball_str, "-C", src_dir_str])
+            .await?;
         tokio::fs::remove_file(&devel_tarball).await.ok();
 
         let linux_symlink = target.join("usr/src/linux");

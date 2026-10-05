@@ -35,11 +35,17 @@ pub(crate) async fn ensure_network_resolves(target: &Path) -> crate::Result<()> 
 /// (an incremental rsync/git tree walk) because bootstrapping from nothing is exactly the
 /// case the webrsync snapshot exists for — much less network and CPU than a full rsync of
 /// the entire tree's history-aware sync protocol for a first-ever sync.
-pub(crate) async fn ensure_portage_tree(runner: &dyn CommandRunner, target: &Path, target_str: &str) -> crate::Result<()> {
+pub(crate) async fn ensure_portage_tree(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    target_str: &str,
+) -> crate::Result<()> {
     if target.join("var/db/repos/gentoo/profiles").exists() {
         return Ok(());
     }
-    runner.run_status("chroot", &[target_str, "emerge-webrsync"]).await?;
+    runner
+        .run_status("chroot", &[target_str, "emerge-webrsync"])
+        .await?;
     Ok(())
 }
 
@@ -49,8 +55,16 @@ pub(crate) async fn ensure_portage_tree(runner: &dyn CommandRunner, target: &Pat
 /// overlays/profiles/the installer can each drop their own file in without clobbering
 /// anyone else's. Writing straight to the path as if it were always a plain file fails
 /// with "Is a directory" the moment stage3 actually does this, which it does.
-pub(crate) async fn write_portage_entry(path: &Path, filename: &str, content: &str) -> crate::Result<()> {
-    let target_file = if tokio::fs::metadata(path).await.map(|m| m.is_dir()).unwrap_or(false) {
+pub(crate) async fn write_portage_entry(
+    path: &Path,
+    filename: &str,
+    content: &str,
+) -> crate::Result<()> {
+    let target_file = if tokio::fs::metadata(path)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false)
+    {
         path.join(filename)
     } else {
         path.to_path_buf()
@@ -59,14 +73,19 @@ pub(crate) async fn write_portage_entry(path: &Path, filename: &str, content: &s
     Ok(())
 }
 
-pub(crate) async fn bind_mount_chroot_dirs(runner: &dyn CommandRunner, target: &Path) -> crate::Result<()> {
+pub(crate) async fn bind_mount_chroot_dirs(
+    runner: &dyn CommandRunner,
+    target: &Path,
+) -> crate::Result<()> {
     for dir in ["proc", "sys", "dev"] {
         let target_dir = target.join(dir);
         tokio::fs::create_dir_all(&target_dir).await?;
         let target_dir_str = target_dir
             .to_str()
             .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 path")))?;
-        runner.run_status("mount", &["--rbind", &format!("/{dir}"), target_dir_str]).await?;
+        runner
+            .run_status("mount", &["--rbind", &format!("/{dir}"), target_dir_str])
+            .await?;
     }
     Ok(())
 }
@@ -77,7 +96,10 @@ pub(crate) async fn bind_mount_chroot_dirs(runner: &dyn CommandRunner, target: &
 pub(crate) async fn unmount_chroot_dirs(runner: &dyn CommandRunner, target: &Path) {
     for dir in ["dev", "sys", "proc"] {
         if let Some(target_dir_str) = target.join(dir).to_str() {
-            runner.run_status("umount", &["-R", target_dir_str]).await.ok();
+            runner
+                .run_status("umount", &["-R", target_dir_str])
+                .await
+                .ok();
         }
     }
 }
@@ -89,7 +111,10 @@ mod tests {
 
     #[tokio::test]
     async fn bind_mount_and_unmount_counts_match() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-chroot-emerge-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-chroot-emerge-test-{}",
+            std::process::id()
+        ));
         tokio::fs::create_dir_all(&dir).await.unwrap();
         let runner = FakeCommandRunner::new();
 
@@ -107,13 +132,20 @@ mod tests {
 
     #[tokio::test]
     async fn write_portage_entry_targets_file_inside_existing_directory() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-chroot-emerge-test2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-chroot-emerge-test2-{}",
+            std::process::id()
+        ));
         let portage_path = dir.join("package.license");
         tokio::fs::create_dir_all(&portage_path).await.unwrap();
 
-        write_portage_entry(&portage_path, "myfile", "some content\n").await.unwrap();
+        write_portage_entry(&portage_path, "myfile", "some content\n")
+            .await
+            .unwrap();
 
-        let written = tokio::fs::read_to_string(portage_path.join("myfile")).await.unwrap();
+        let written = tokio::fs::read_to_string(portage_path.join("myfile"))
+            .await
+            .unwrap();
         assert_eq!(written, "some content\n");
 
         tokio::fs::remove_dir_all(&dir).await.ok();
@@ -121,11 +153,16 @@ mod tests {
 
     #[tokio::test]
     async fn write_portage_entry_targets_path_directly_when_not_a_directory() {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-chroot-emerge-test3-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-chroot-emerge-test3-{}",
+            std::process::id()
+        ));
         tokio::fs::create_dir_all(&dir).await.unwrap();
         let portage_path = dir.join("package.use");
 
-        write_portage_entry(&portage_path, "myfile", "some content\n").await.unwrap();
+        write_portage_entry(&portage_path, "myfile", "some content\n")
+            .await
+            .unwrap();
 
         let written = tokio::fs::read_to_string(&portage_path).await.unwrap();
         assert_eq!(written, "some content\n");

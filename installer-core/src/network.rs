@@ -49,7 +49,9 @@ impl Agent {
             .lock()
             .unwrap()
             .take()
-            .ok_or_else(|| zbus::fdo::Error::Failed("no passphrase was provided before connecting".into()))
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed("no passphrase was provided before connecting".into())
+            })
     }
 
     async fn cancel(&self, _reason: &str) {}
@@ -67,18 +69,30 @@ impl IwdClient {
             .map_err(|e| crate::Error::Network(e.to_string()))?;
 
         let pending_passphrase = Arc::new(Mutex::new(None));
-        let agent = Agent { pending_passphrase: pending_passphrase.clone() };
+        let agent = Agent {
+            pending_passphrase: pending_passphrase.clone(),
+        };
         conn.object_server()
             .at(AGENT_PATH, agent)
             .await
             .map_err(|e| crate::Error::Network(e.to_string()))?;
 
-        let agent_path = ObjectPath::try_from(AGENT_PATH).map_err(|e| crate::Error::Network(e.to_string()))?;
-        conn.call_method(Some(IWD_DEST), "/net/connman/iwd", Some(AGENT_MANAGER_IFACE), "RegisterAgent", &(agent_path,))
-            .await
-            .map_err(|e| crate::Error::Network(e.to_string()))?;
+        let agent_path =
+            ObjectPath::try_from(AGENT_PATH).map_err(|e| crate::Error::Network(e.to_string()))?;
+        conn.call_method(
+            Some(IWD_DEST),
+            "/net/connman/iwd",
+            Some(AGENT_MANAGER_IFACE),
+            "RegisterAgent",
+            &(agent_path,),
+        )
+        .await
+        .map_err(|e| crate::Error::Network(e.to_string()))?;
 
-        Ok(Self { conn, pending_passphrase })
+        Ok(Self {
+            conn,
+            pending_passphrase,
+        })
     }
 
     /// The first `net.connman.iwd.Station` object exposed by iwd — in practice the sole
@@ -95,7 +109,13 @@ impl IwdClient {
     async fn managed_objects(&self) -> crate::Result<ManagedObjects> {
         let reply = self
             .conn
-            .call_method(Some(IWD_DEST), "/", Some(OBJECT_MANAGER_IFACE), "GetManagedObjects", &())
+            .call_method(
+                Some(IWD_DEST),
+                "/",
+                Some(OBJECT_MANAGER_IFACE),
+                "GetManagedObjects",
+                &(),
+            )
             .await
             .map_err(|e| crate::Error::Network(e.to_string()))?;
         reply
@@ -182,10 +202,20 @@ impl IwdClient {
     /// Open networks connect with no further input. For secured networks, `passphrase`
     /// is stashed for our registered `Agent` to hand back the moment iwd asks for it as
     /// part of this same `Connect` call.
-    pub async fn connect_to(&self, network_path: &str, passphrase: Option<&str>) -> crate::Result<()> {
+    pub async fn connect_to(
+        &self,
+        network_path: &str,
+        passphrase: Option<&str>,
+    ) -> crate::Result<()> {
         *self.pending_passphrase.lock().unwrap() = passphrase.map(str::to_string);
         self.conn
-            .call_method(Some(IWD_DEST), network_path, Some(NETWORK_IFACE), "Connect", &())
+            .call_method(
+                Some(IWD_DEST),
+                network_path,
+                Some(NETWORK_IFACE),
+                "Connect",
+                &(),
+            )
             .await
             .map_err(|e| crate::Error::Network(e.to_string()))?;
         Ok(())

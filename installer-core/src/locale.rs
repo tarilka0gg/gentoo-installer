@@ -23,13 +23,20 @@ pub const DEFAULT_LOCALE: &str = "en_US.UTF-8";
 /// the part of the name after the dot, so a name with no dot cannot be turned into a
 /// valid entry and is rejected instead of guessed at.
 fn locale_gen_line(locale: &str) -> crate::Result<String> {
-    let valid_chars = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '@'));
+    let valid_chars = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '@'))
+    };
     let (_, charset) = locale
         .split_once('.')
         .ok_or_else(|| bad_locale(locale, "missing the .charset part, e.g. uk_UA.UTF-8"))?;
     let name_ok = locale.split('.').next().is_some_and(valid_chars);
     if !name_ok || !valid_chars(charset) {
-        return Err(bad_locale(locale, "only letters, digits, '_', '-' and '@' are allowed"));
+        return Err(bad_locale(
+            locale,
+            "only letters, digits, '_', '-' and '@' are allowed",
+        ));
     }
     Ok(format!("{locale} {charset}"))
 }
@@ -42,7 +49,11 @@ fn bad_locale(locale: &str, why: &str) -> crate::Error {
 ///
 /// `02locale` is written **last**, after `locale-gen` succeeded, so its presence doubles
 /// as the "this really finished" marker `LocalePhase::is_satisfied` checks on resume.
-pub async fn apply(runner: &dyn CommandRunner, target: &Path, locales: &[String]) -> crate::Result<()> {
+pub async fn apply(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    locales: &[String],
+) -> crate::Result<()> {
     let first = locales
         .first()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("no locale selected")))?;
@@ -77,10 +88,23 @@ pub async fn apply(runner: &dyn CommandRunner, target: &Path, locales: &[String]
     result
 }
 
-async fn generate_in_chroot(runner: &dyn CommandRunner, target: &Path, target_str: &str, lang: &str) -> crate::Result<()> {
-    runner.run_status("chroot", &[target_str, "locale-gen"]).await?;
-    tokio::fs::write(target.join("etc/env.d/02locale"), format!("LANG=\"{lang}\"\n")).await?;
-    runner.run_status("chroot", &[target_str, "env-update"]).await?;
+async fn generate_in_chroot(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    target_str: &str,
+    lang: &str,
+) -> crate::Result<()> {
+    runner
+        .run_status("chroot", &[target_str, "locale-gen"])
+        .await?;
+    tokio::fs::write(
+        target.join("etc/env.d/02locale"),
+        format!("LANG=\"{lang}\"\n"),
+    )
+    .await?;
+    runner
+        .run_status("chroot", &[target_str, "env-update"])
+        .await?;
     Ok(())
 }
 
@@ -91,7 +115,9 @@ pub fn validate_hostname(name: &str) -> crate::Result<()> {
     let ok = (1..=63).contains(&name.len())
         && !name.starts_with('-')
         && !name.ends_with('-')
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
     if ok {
         Ok(())
     } else {
@@ -106,7 +132,11 @@ pub fn validate_hostname(name: &str) -> crate::Result<()> {
 pub async fn apply_hostname(target: &Path, name: &str) -> crate::Result<()> {
     validate_hostname(name)?;
     tokio::fs::create_dir_all(target.join("etc/conf.d")).await?;
-    tokio::fs::write(target.join("etc/conf.d/hostname"), format!("hostname=\"{name}\"\n")).await?;
+    tokio::fs::write(
+        target.join("etc/conf.d/hostname"),
+        format!("hostname=\"{name}\"\n"),
+    )
+    .await?;
     tokio::fs::write(
         target.join("etc/hosts"),
         format!("127.0.0.1\tlocalhost {name}\n::1\t\tlocalhost {name}\n"),
@@ -121,7 +151,10 @@ mod tests {
     use crate::command::FakeCommandRunner;
 
     fn temp_target(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-locale-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-locale-{tag}-{}",
+            std::process::id()
+        ));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -136,21 +169,50 @@ mod tests {
         let dir = temp_target("order");
         let runner = FakeCommandRunner::new();
 
-        apply(&runner, &dir, &strings(&["uk_UA.UTF-8", "en_US.UTF-8"])).await.unwrap();
+        apply(&runner, &dir, &strings(&["uk_UA.UTF-8", "en_US.UTF-8"]))
+            .await
+            .unwrap();
 
         let locale_gen = std::fs::read_to_string(dir.join("etc/locale.gen")).unwrap();
         assert!(locale_gen.contains("uk_UA.UTF-8 UTF-8\n"));
         assert!(locale_gen.contains("en_US.UTF-8 UTF-8\n"));
 
         // The first locale is the system language, not the last or a sorted one.
-        assert_eq!(std::fs::read_to_string(dir.join("etc/env.d/02locale")).unwrap(), "LANG=\"uk_UA.UTF-8\"\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("etc/env.d/02locale")).unwrap(),
+            "LANG=\"uk_UA.UTF-8\"\n"
+        );
 
         let target = dir.to_str().unwrap();
         let cmds: Vec<(String, Vec<String>)> = runner.calls();
-        let names: Vec<&str> = cmds.iter().map(|(c, a)| if c == "chroot" { a[1].as_str() } else { c.as_str() }).collect();
+        let names: Vec<&str> = cmds
+            .iter()
+            .map(|(c, a)| {
+                if c == "chroot" {
+                    a[1].as_str()
+                } else {
+                    c.as_str()
+                }
+            })
+            .collect();
         // /proc, /sys, /dev in; the two chroot steps; the same three out, in reverse.
-        assert_eq!(names, ["mount", "mount", "mount", "locale-gen", "env-update", "umount", "umount", "umount"]);
-        assert!(cmds.iter().filter(|(c, _)| c == "chroot").all(|(_, a)| a[0] == target));
+        assert_eq!(
+            names,
+            [
+                "mount",
+                "mount",
+                "mount",
+                "locale-gen",
+                "env-update",
+                "umount",
+                "umount",
+                "umount"
+            ]
+        );
+        assert!(cmds
+            .iter()
+            .filter(|(c, _)| c == "chroot")
+            .all(|(_, a)| a[0] == target));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -158,7 +220,13 @@ mod tests {
     #[tokio::test]
     async fn duplicate_locales_produce_one_line() {
         let dir = temp_target("dedup");
-        apply(&FakeCommandRunner::new(), &dir, &strings(&["en_US.UTF-8", "en_US.UTF-8"])).await.unwrap();
+        apply(
+            &FakeCommandRunner::new(),
+            &dir,
+            &strings(&["en_US.UTF-8", "en_US.UTF-8"]),
+        )
+        .await
+        .unwrap();
         let locale_gen = std::fs::read_to_string(dir.join("etc/locale.gen")).unwrap();
         assert_eq!(locale_gen.matches("en_US.UTF-8 UTF-8").count(), 1);
         std::fs::remove_dir_all(&dir).ok();
@@ -167,14 +235,25 @@ mod tests {
     #[tokio::test]
     async fn non_utf8_charsets_are_kept_as_given() {
         let dir = temp_target("charset");
-        apply(&FakeCommandRunner::new(), &dir, &strings(&["uk_UA.KOI8-U"])).await.unwrap();
-        assert!(std::fs::read_to_string(dir.join("etc/locale.gen")).unwrap().contains("uk_UA.KOI8-U KOI8-U\n"));
+        apply(&FakeCommandRunner::new(), &dir, &strings(&["uk_UA.KOI8-U"]))
+            .await
+            .unwrap();
+        assert!(std::fs::read_to_string(dir.join("etc/locale.gen"))
+            .unwrap()
+            .contains("uk_UA.KOI8-U KOI8-U\n"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
     async fn a_bad_entry_aborts_before_touching_the_target_or_running_anything() {
-        for bad in ["uk_UA", "uk UA.UTF-8", "uk_UA.UTF-8\nrm -rf /", "", ".UTF-8", "uk_UA."] {
+        for bad in [
+            "uk_UA",
+            "uk UA.UTF-8",
+            "uk_UA.UTF-8\nrm -rf /",
+            "",
+            ".UTF-8",
+            "uk_UA.",
+        ] {
             let dir = temp_target("bad");
             let runner = FakeCommandRunner::new();
 
@@ -182,7 +261,10 @@ mod tests {
 
             assert!(result.is_err(), "{bad:?} should be rejected");
             assert!(runner.calls().is_empty(), "{bad:?}: no command may run");
-            assert!(!dir.join("etc/locale.gen").exists(), "{bad:?}: target must stay untouched");
+            assert!(
+                !dir.join("etc/locale.gen").exists(),
+                "{bad:?}: target must stay untouched"
+            );
             std::fs::remove_dir_all(&dir).ok();
         }
     }
@@ -200,11 +282,17 @@ mod tests {
         let runner = FakeCommandRunner::new();
         runner.fail("chroot", "locale-gen: boom");
 
-        assert!(apply(&runner, &dir, &strings(&["en_US.UTF-8"])).await.is_err());
+        assert!(apply(&runner, &dir, &strings(&["en_US.UTF-8"]))
+            .await
+            .is_err());
 
         let cmds: Vec<String> = runner.calls().into_iter().map(|(c, _)| c).collect();
         assert_eq!(cmds.iter().filter(|c| *c == "mount").count(), 3);
-        assert_eq!(cmds.iter().filter(|c| *c == "umount").count(), 3, "a failed build must not leave /proc etc. mounted in the target");
+        assert_eq!(
+            cmds.iter().filter(|c| *c == "umount").count(),
+            3,
+            "a failed build must not leave /proc etc. mounted in the target"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -214,7 +302,9 @@ mod tests {
         let runner = FakeCommandRunner::new();
         runner.fail("chroot", "locale-gen: not found");
 
-        assert!(apply(&runner, &dir, &strings(&["en_US.UTF-8"])).await.is_err());
+        assert!(apply(&runner, &dir, &strings(&["en_US.UTF-8"]))
+            .await
+            .is_err());
 
         // 02locale is the "finished" marker LocalePhase::is_satisfied looks for.
         assert!(!dir.join("etc/env.d/02locale").exists());
@@ -226,7 +316,17 @@ mod tests {
         for ok in ["gentoo", "my-laptop", "a", "host1", &"a".repeat(63)] {
             assert!(validate_hostname(ok).is_ok(), "{ok:?} should be valid");
         }
-        for bad in ["", "-x", "x-", "My-PC", "has space", "under_score", "dot.ted", "ук", &"a".repeat(64)] {
+        for bad in [
+            "",
+            "-x",
+            "x-",
+            "My-PC",
+            "has space",
+            "under_score",
+            "dot.ted",
+            "ук",
+            &"a".repeat(64),
+        ] {
             assert!(validate_hostname(bad).is_err(), "{bad:?} should be invalid");
         }
     }
@@ -236,7 +336,10 @@ mod tests {
         let dir = temp_target("host");
         apply_hostname(&dir, "solomiya-pc").await.unwrap();
 
-        assert_eq!(std::fs::read_to_string(dir.join("etc/conf.d/hostname")).unwrap(), "hostname=\"solomiya-pc\"\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("etc/conf.d/hostname")).unwrap(),
+            "hostname=\"solomiya-pc\"\n"
+        );
         let hosts = std::fs::read_to_string(dir.join("etc/hosts")).unwrap();
         assert!(hosts.contains("127.0.0.1\tlocalhost solomiya-pc"));
         assert!(hosts.contains("::1\t\tlocalhost solomiya-pc"));

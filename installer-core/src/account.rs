@@ -2,7 +2,9 @@
 //! shadow-utils) rather than a chroot — plain root-relative operation, no bind mounts
 //! needed. Root itself stays locked; this user gets `wheel`.
 
-use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs};
+use crate::chroot_emerge::{
+    bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs,
+};
 use crate::command::CommandRunner;
 use std::path::Path;
 
@@ -15,7 +17,10 @@ pub struct Account {
 // Not derived: a derived `Debug` would print the password into any log or panic message.
 impl std::fmt::Debug for Account {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Account").field("username", &self.username).field("password", &"<hidden>").finish()
+        f.debug_struct("Account")
+            .field("username", &self.username)
+            .field("password", &"<hidden>")
+            .finish()
     }
 }
 
@@ -24,8 +29,11 @@ impl std::fmt::Debug for Account {
 /// argv, so this also keeps a name like `-o` from being read as an option.
 pub fn validate_username(name: &str) -> crate::Result<()> {
     let mut chars = name.chars();
-    let first_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase() || c == '_');
-    let rest_ok = chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+    let first_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c == '_');
+    let rest_ok =
+        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
     if first_ok && rest_ok && name.len() <= 32 {
         Ok(())
     } else {
@@ -56,13 +64,19 @@ pub fn login_shell(target: &Path) -> &'static str {
 /// like `-help` makes it print usage text to stdout with a zero exit — which used to be
 /// taken for the hash and handed to `useradd -p`. The hash is checked for the `$6$`
 /// prefix for the same reason: never pass whatever `openssl` happened to print on.
-pub async fn create(runner: &dyn CommandRunner, target: &Path, account: &Account) -> crate::Result<()> {
+pub async fn create(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    account: &Account,
+) -> crate::Result<()> {
     validate_username(&account.username)?;
     let target_str = target
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
 
-    let hash = runner.run("openssl", &["passwd", "-6", "--", &account.password]).await?;
+    let hash = runner
+        .run("openssl", &["passwd", "-6", "--", &account.password])
+        .await?;
     let hash = hash.trim();
     if !hash.starts_with("$6$") || hash.contains(char::is_whitespace) {
         return Err(crate::Error::Other(anyhow::anyhow!(
@@ -132,12 +146,19 @@ pub async fn install_doas(runner: &dyn CommandRunner, target: &Path) -> crate::R
 
     let mounted = bind_mount_chroot_dirs(runner, target).await;
     let result = match mounted {
-        Ok(()) => async {
-            ensure_network_resolves(target).await?;
-            ensure_portage_tree(runner, target, target_str).await?;
-            runner.run_status("chroot", &[target_str, "emerge", "--noreplace", "app-admin/doas"]).await
+        Ok(()) => {
+            async {
+                ensure_network_resolves(target).await?;
+                ensure_portage_tree(runner, target, target_str).await?;
+                runner
+                    .run_status(
+                        "chroot",
+                        &[target_str, "emerge", "--noreplace", "app-admin/doas"],
+                    )
+                    .await
+            }
+            .await
         }
-        .await,
         Err(e) => Err(e),
     };
     unmount_chroot_dirs(runner, target).await;
@@ -153,14 +174,18 @@ mod tests {
     async fn doas_conf_lets_wheel_in_and_is_not_writable_by_anyone() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-doas-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-doas-test-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
 
         configure_privilege(&dir).await.unwrap();
 
         let conf = dir.join("etc/doas.conf");
         assert_eq!(std::fs::read_to_string(&conf).unwrap(), "permit :wheel\n");
-        assert_eq!(std::fs::metadata(&conf).unwrap().permissions().mode() & 0o777, 0o400);
+        assert_eq!(
+            std::fs::metadata(&conf).unwrap().permissions().mode() & 0o777,
+            0o400
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -169,8 +194,13 @@ mod tests {
         let runner = FakeCommandRunner::new();
         runner.respond("openssl", "$6$rounds=5000$abc$hashedvalue\n");
 
-        let account = Account { username: "solomiya".into(), password: "hunter2".into() };
-        create(&runner, Path::new("/mnt/gentoo"), &account).await.unwrap();
+        let account = Account {
+            username: "solomiya".into(),
+            password: "hunter2".into(),
+        };
+        create(&runner, Path::new("/mnt/gentoo"), &account)
+            .await
+            .unwrap();
 
         runner.assert_call(0, "openssl", &["passwd", "-6", "--", "hunter2"]);
         runner.assert_call(
@@ -195,9 +225,14 @@ mod tests {
     async fn a_password_starting_with_a_dash_is_not_parsed_as_an_option() {
         let runner = FakeCommandRunner::new();
         runner.respond("openssl", "$6$salt$hash\n");
-        let account = Account { username: "solomiya".into(), password: "-help".into() };
+        let account = Account {
+            username: "solomiya".into(),
+            password: "-help".into(),
+        };
 
-        create(&runner, Path::new("/mnt/gentoo"), &account).await.unwrap();
+        create(&runner, Path::new("/mnt/gentoo"), &account)
+            .await
+            .unwrap();
 
         runner.assert_call(0, "openssl", &["passwd", "-6", "--", "-help"]);
     }
@@ -207,20 +242,47 @@ mod tests {
         for garbage in ["Usage: passwd [options] [password]\n", "", "$1$md5$hash\n"] {
             let runner = FakeCommandRunner::new();
             runner.respond("openssl", garbage);
-            let account = Account { username: "solomiya".into(), password: "x".into() };
+            let account = Account {
+                username: "solomiya".into(),
+                password: "x".into(),
+            };
 
-            assert!(create(&runner, Path::new("/mnt/gentoo"), &account).await.is_err(), "{garbage:?}");
-            assert!(runner.calls().iter().all(|(cmd, _)| cmd != "useradd"), "useradd must not run for {garbage:?}");
+            assert!(
+                create(&runner, Path::new("/mnt/gentoo"), &account)
+                    .await
+                    .is_err(),
+                "{garbage:?}"
+            );
+            assert!(
+                runner.calls().iter().all(|(cmd, _)| cmd != "useradd"),
+                "useradd must not run for {garbage:?}"
+            );
         }
     }
 
     #[tokio::test]
     async fn a_bad_username_runs_nothing() {
-        for bad in ["", "-o", "Solomiya", "has space", "x;y", "1abc", &"a".repeat(33)] {
+        for bad in [
+            "",
+            "-o",
+            "Solomiya",
+            "has space",
+            "x;y",
+            "1abc",
+            &"a".repeat(33),
+        ] {
             let runner = FakeCommandRunner::new();
-            let account = Account { username: bad.to_string(), password: "pw".into() };
+            let account = Account {
+                username: bad.to_string(),
+                password: "pw".into(),
+            };
 
-            assert!(create(&runner, Path::new("/mnt/gentoo"), &account).await.is_err(), "{bad:?}");
+            assert!(
+                create(&runner, Path::new("/mnt/gentoo"), &account)
+                    .await
+                    .is_err(),
+                "{bad:?}"
+            );
             assert!(runner.calls().is_empty(), "{bad:?}: no command may run");
         }
     }
@@ -244,7 +306,10 @@ mod tests {
     }
 
     fn temp_target(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-doas-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-doas-{tag}-{}",
+            std::process::id()
+        ));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         std::fs::write(dir.join("etc/resolv.conf"), "nameserver 127.0.0.1\n").ok();
@@ -252,7 +317,17 @@ mod tests {
     }
 
     fn names(runner: &FakeCommandRunner) -> Vec<String> {
-        runner.calls().iter().map(|(c, a)| if c == "chroot" { format!("chroot:{}", a[1..].join(" ")) } else { c.clone() }).collect()
+        runner
+            .calls()
+            .iter()
+            .map(|(c, a)| {
+                if c == "chroot" {
+                    format!("chroot:{}", a[1..].join(" "))
+                } else {
+                    c.clone()
+                }
+            })
+            .collect()
     }
 
     #[tokio::test]
@@ -264,7 +339,16 @@ mod tests {
 
         assert_eq!(
             names(&runner),
-            ["mount", "mount", "mount", "chroot:emerge-webrsync", "chroot:emerge --noreplace app-admin/doas", "umount", "umount", "umount"]
+            [
+                "mount",
+                "mount",
+                "mount",
+                "chroot:emerge-webrsync",
+                "chroot:emerge --noreplace app-admin/doas",
+                "umount",
+                "umount",
+                "umount"
+            ]
         );
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -277,7 +361,11 @@ mod tests {
 
         install_doas(&runner, &dir).await.unwrap();
 
-        assert!(!names(&runner).iter().any(|n| n == "chroot:emerge-webrsync"), "{:?}", names(&runner));
+        assert!(
+            !names(&runner).iter().any(|n| n == "chroot:emerge-webrsync"),
+            "{:?}",
+            names(&runner)
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -297,8 +385,14 @@ mod tests {
 
     #[test]
     fn debug_output_never_contains_the_password() {
-        let a = Account { username: "solomiya".into(), password: "hunter2-secret".into() };
+        let a = Account {
+            username: "solomiya".into(),
+            password: "hunter2-secret".into(),
+        };
         let shown = format!("{a:?}");
-        assert!(shown.contains("solomiya") && !shown.contains("hunter2"), "{shown}");
+        assert!(
+            shown.contains("solomiya") && !shown.contains("hunter2"),
+            "{shown}"
+        );
     }
 }

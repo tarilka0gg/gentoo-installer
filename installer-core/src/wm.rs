@@ -21,7 +21,10 @@
 //!   what this exact machine's own working Noctalia install already needed (see
 //!   `noctalia-v5-niri` memory). Its `dev-cpp/sdbus-c++` dependency needs `~amd64`.
 
-use crate::chroot_emerge::{bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs, write_portage_entry};
+use crate::chroot_emerge::{
+    bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs,
+    write_portage_entry,
+};
 use crate::command::CommandRunner;
 use std::path::Path;
 
@@ -40,7 +43,14 @@ pub enum WmChoice {
 impl WmChoice {
     /// All choices, in the order the Advanced-setup picker lists them — niri first,
     /// matching its role as the silent default.
-    pub const ALL: [WmChoice; 6] = [WmChoice::Niri, WmChoice::Hyprland, WmChoice::Sway, WmChoice::Labwc, WmChoice::MangoWc, WmChoice::Dwl];
+    pub const ALL: [WmChoice; 6] = [
+        WmChoice::Niri,
+        WmChoice::Hyprland,
+        WmChoice::Sway,
+        WmChoice::Labwc,
+        WmChoice::MangoWc,
+        WmChoice::Dwl,
+    ];
 
     pub fn display_name(self) -> &'static str {
         match self {
@@ -151,7 +161,10 @@ pub async fn install(
         )));
     }
 
-    let staging = std::env::temp_dir().join(format!("gentoo-installer-wm-configs-{}", std::process::id()));
+    let staging = std::env::temp_dir().join(format!(
+        "gentoo-installer-wm-configs-{}",
+        std::process::id()
+    ));
     if staging.exists() {
         tokio::fs::remove_dir_all(&staging).await?;
     }
@@ -160,7 +173,12 @@ pub async fn install(
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 staging path")))?;
     // Cloned before the emerge: dwl's config is compiled in, so `config.h` has to be in
     // Portage's savedconfig directory by the time the build starts.
-    runner.run_status("git", &["clone", "--depth", "1", configs_git_url, staging_str]).await?;
+    runner
+        .run_status(
+            "git",
+            &["clone", "--depth", "1", configs_git_url, staging_str],
+        )
+        .await?;
 
     let result = async {
         if choice == WmChoice::Dwl {
@@ -178,14 +196,27 @@ pub async fn install(
 
 /// Puts the preset's `config.h` where `savedconfig.eclass` restores it from
 /// (`/etc/portage/savedconfig/<category>/<name>`), so dwl builds with the preset's keybinds.
-async fn install_savedconfig(preset_root: &Path, target: &Path, spec: &WmSpec) -> crate::Result<()> {
+async fn install_savedconfig(
+    preset_root: &Path,
+    target: &Path,
+    spec: &WmSpec,
+) -> crate::Result<()> {
     let name = spec.atom.rsplit('/').next().unwrap_or(spec.atom);
     let dest_dir = target.join("etc/portage/savedconfig/gui-wm");
     tokio::fs::create_dir_all(&dest_dir).await?;
-    tokio::fs::copy(preset_root.join(spec.preset_dir).join("config.h"), dest_dir.join(name)).await?;
+    tokio::fs::copy(
+        preset_root.join(spec.preset_dir).join("config.h"),
+        dest_dir.join(name),
+    )
+    .await?;
     // Without the flag the eclass ignores the file (`-savedconfig` is the default).
     let portage_dir = target.join("etc/portage");
-    write_portage_entry(&portage_dir.join("package.use"), "gentoo-installer-dwl", &format!("{} savedconfig\n", spec.atom)).await?;
+    write_portage_entry(
+        &portage_dir.join("package.use"),
+        "gentoo-installer-dwl",
+        &format!("{} savedconfig\n", spec.atom),
+    )
+    .await?;
     Ok(())
 }
 
@@ -244,13 +275,26 @@ end
 /// (`dbus`), a seat manager (`seatd` — the compositor opens the GPU and input devices through it,
 /// not as root) and the user in the groups that may talk to it and to the devices. Without this
 /// the installed system boots fine and then the compositor cannot start.
-async fn enable_session_services(runner: &dyn CommandRunner, target: &Path, username: &str) -> crate::Result<()> {
+async fn enable_session_services(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    username: &str,
+) -> crate::Result<()> {
     crate::services::enable_all(runner, target, &["dbus", "seatd"]).await?;
     let target_str = target
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
     runner
-        .run_status("chroot", &[target_str, "usermod", "-aG", "seat,video,input,audio,render", username])
+        .run_status(
+            "chroot",
+            &[
+                target_str,
+                "usermod",
+                "-aG",
+                "seat,video,input,audio,render",
+                username,
+            ],
+        )
         .await
 }
 
@@ -258,7 +302,11 @@ async fn enable_session_services(runner: &dyn CommandRunner, target: &Path, user
 /// `spec.atom` + Noctalia — split out from `install` so tests can assert exact emerge
 /// argv per `WmChoice` without needing `git` to actually clone anything (see
 /// `apply_preset_from_dir` for the other half).
-async fn emerge_wm_packages(runner: &dyn CommandRunner, target: &Path, spec: &WmSpec) -> crate::Result<()> {
+async fn emerge_wm_packages(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    spec: &WmSpec,
+) -> crate::Result<()> {
     let target_str = target
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
@@ -274,7 +322,16 @@ async fn emerge_wm_packages(runner: &dyn CommandRunner, target: &Path, spec: &Wm
         }
         configure_wm_portage_overrides(target, spec).await?;
         runner
-            .run_status("chroot", &[target_str, "emerge", spec.atom, "gui-apps/noctalia", "sys-auth/seatd"])
+            .run_status(
+                "chroot",
+                &[
+                    target_str,
+                    "emerge",
+                    spec.atom,
+                    "gui-apps/noctalia",
+                    "sys-auth/seatd",
+                ],
+            )
             .await
     }
     .await;
@@ -288,7 +345,12 @@ async fn emerge_wm_packages(runner: &dyn CommandRunner, target: &Path, spec: &Wm
 /// clone`, no chroot needed for the clone itself) — generalized here since this module
 /// needs it for up to two overlays (GURU always, plus a WM-specific one), not just the
 /// distro's own.
-async fn ensure_overlay(runner: &dyn CommandRunner, target: &Path, name: &str, url: &str) -> crate::Result<()> {
+async fn ensure_overlay(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    name: &str,
+    url: &str,
+) -> crate::Result<()> {
     let repo_dir = target.join(format!("var/db/repos/{name}"));
     if repo_dir.exists() {
         return Ok(());
@@ -308,7 +370,9 @@ async fn ensure_overlay(runner: &dyn CommandRunner, target: &Path, name: &str, u
     let repo_dir_str = repo_dir
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 overlay path")))?;
-    runner.run_status("git", &["clone", "--depth", "1", url, repo_dir_str]).await?;
+    runner
+        .run_status("git", &["clone", "--depth", "1", url, repo_dir_str])
+        .await?;
     Ok(())
 }
 
@@ -325,7 +389,12 @@ async fn configure_wm_portage_overrides(target: &Path, spec: &WmSpec) -> crate::
     // `**` accepts them; `dev-cpp/sdbus-c++` is its one real-tree dependency that needs
     // a plain ~amd64 bump.
     keywords.push_str("gui-apps/noctalia **\ndev-cpp/sdbus-c++ ~amd64\n");
-    write_portage_entry(&portage_dir.join("package.accept_keywords"), "gentoo-installer-wm", &keywords).await?;
+    write_portage_entry(
+        &portage_dir.join("package.accept_keywords"),
+        "gentoo-installer-wm",
+        &keywords,
+    )
+    .await?;
 
     // Live-tested: niri/hyprland/mangowm/labwc/noctalia each have a "-9999" live-git
     // ebuild carrying the exact same KEYWORDS as their numbered releases (confirmed by
@@ -364,25 +433,43 @@ async fn configure_wm_portage_overrides(target: &Path, spec: &WmSpec) -> crate::
 /// the target's own uid/gid for `username` — the host and target don't necessarily agree
 /// on uid numbers, so a plain host-side `chown` isn't safe here (same reasoning
 /// `account::create` documents for why it uses `useradd -R` instead of chroot).
-async fn apply_preset_from_dir(runner: &dyn CommandRunner, target: &Path, preset_root: &Path, spec: &WmSpec, username: &str) -> crate::Result<()> {
+async fn apply_preset_from_dir(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    preset_root: &Path,
+    spec: &WmSpec,
+    username: &str,
+) -> crate::Result<()> {
     let home = target.join("home").join(username);
     let config_dir = home.join(".config");
     tokio::fs::create_dir_all(&config_dir).await?;
 
-    copy_dir(&preset_root.join(spec.preset_dir), &config_dir.join(spec.config_dest_dir)).await?;
+    copy_dir(
+        &preset_root.join(spec.preset_dir),
+        &config_dir.join(spec.config_dest_dir),
+    )
+    .await?;
     copy_dir(&preset_root.join("noctalia"), &config_dir.join("noctalia")).await?;
 
     let tmpl = tokio::fs::read_to_string(preset_root.join("bash_profile.tmpl")).await?;
     let launch = format!("dbus-run-session -- {}", spec.launch_cmd);
     let rendered = tmpl.replace("{{LAUNCH_CMD}}", &launch);
-    tokio::fs::write(home.join(".bash_profile"), with_runtime_dir_fallback(&rendered)).await?;
+    tokio::fs::write(
+        home.join(".bash_profile"),
+        with_runtime_dir_fallback(&rendered),
+    )
+    .await?;
 
     // The user's login shell is fish when the stage has it (a custom stage does), and fish does not read
     // `.bash_profile` — the first real install booted to a fish prompt on tty1 and never started niri.
     if target.join("usr/bin/fish").is_file() {
         let fish_dir = config_dir.join("fish/conf.d");
         tokio::fs::create_dir_all(&fish_dir).await?;
-        tokio::fs::write(fish_dir.join("10-session.fish"), fish_session_snippet(&launch)).await?;
+        tokio::fs::write(
+            fish_dir.join("10-session.fish"),
+            fish_session_snippet(&launch),
+        )
+        .await?;
     }
 
     let target_str = target
@@ -390,13 +477,25 @@ async fn apply_preset_from_dir(runner: &dyn CommandRunner, target: &Path, preset
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
     let home_in_target = format!("/home/{username}");
     runner
-        .run_status("chroot", &[target_str, "chown", "-R", &format!("{username}:{username}"), &home_in_target])
+        .run_status(
+            "chroot",
+            &[
+                target_str,
+                "chown",
+                "-R",
+                &format!("{username}:{username}"),
+                &home_in_target,
+            ],
+        )
         .await?;
 
     Ok(())
 }
 
-fn copy_dir<'a>(src: &'a Path, dest: &'a Path) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + Send + 'a>> {
+fn copy_dir<'a>(
+    src: &'a Path,
+    dest: &'a Path,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + Send + 'a>> {
     Box::pin(async move {
         tokio::fs::create_dir_all(dest).await?;
         let mut entries = tokio::fs::read_dir(src).await?;
@@ -423,7 +522,11 @@ mod tests {
         std::fs::create_dir_all(root.join(wm_dir)).unwrap();
         std::fs::write(root.join(wm_dir).join("config"), "wm config\n").unwrap();
         std::fs::create_dir_all(root.join("noctalia")).unwrap();
-        std::fs::write(root.join("noctalia").join("config.toml"), "noctalia config\n").unwrap();
+        std::fs::write(
+            root.join("noctalia").join("config.toml"),
+            "noctalia config\n",
+        )
+        .unwrap();
         std::fs::write(root.join("bash_profile.tmpl"), "exec {{LAUNCH_CMD}}\n").unwrap();
     }
 
@@ -437,11 +540,16 @@ mod tests {
             (WmChoice::MangoWc, "gui-wm/mangowm"),
             (WmChoice::Dwl, "gui-wm/dwl"),
         ] {
-            let target_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-test-{choice:?}-{}", std::process::id()));
+            let target_dir = std::env::temp_dir().join(format!(
+                "gentoo-installer-wm-test-{choice:?}-{}",
+                std::process::id()
+            ));
             tokio::fs::create_dir_all(&target_dir).await.unwrap();
             let runner = FakeCommandRunner::new();
 
-            emerge_wm_packages(&runner, &target_dir, &spec(choice)).await.unwrap();
+            emerge_wm_packages(&runner, &target_dir, &spec(choice))
+                .await
+                .unwrap();
 
             let calls = runner.calls();
             assert!(calls.iter().any(|(cmd, args)| cmd == "chroot"
@@ -455,23 +563,49 @@ mod tests {
 
     #[tokio::test]
     async fn copies_preset_config_into_the_new_users_home_and_chowns_it() {
-        let target_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-test-copy-{}", std::process::id()));
-        tokio::fs::create_dir_all(target_dir.join("home/tester")).await.unwrap();
-        let repo_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-repo-copy-{}", std::process::id()));
+        let target_dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-wm-test-copy-{}",
+            std::process::id()
+        ));
+        tokio::fs::create_dir_all(target_dir.join("home/tester"))
+            .await
+            .unwrap();
+        let repo_dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-wm-repo-copy-{}",
+            std::process::id()
+        ));
         make_preset_repo(&repo_dir, "niri");
         let runner = FakeCommandRunner::new();
 
-        apply_preset_from_dir(&runner, &target_dir, &repo_dir, &spec(WmChoice::Niri), "tester").await.unwrap();
+        apply_preset_from_dir(
+            &runner,
+            &target_dir,
+            &repo_dir,
+            &spec(WmChoice::Niri),
+            "tester",
+        )
+        .await
+        .unwrap();
 
-        let wm_config = tokio::fs::read_to_string(target_dir.join("home/tester/.config/niri/config")).await.unwrap();
+        let wm_config =
+            tokio::fs::read_to_string(target_dir.join("home/tester/.config/niri/config"))
+                .await
+                .unwrap();
         assert_eq!(wm_config, "wm config\n");
-        let noctalia_config = tokio::fs::read_to_string(target_dir.join("home/tester/.config/noctalia/config.toml")).await.unwrap();
+        let noctalia_config =
+            tokio::fs::read_to_string(target_dir.join("home/tester/.config/noctalia/config.toml"))
+                .await
+                .unwrap();
         assert_eq!(noctalia_config, "noctalia config\n");
-        let bash_profile = tokio::fs::read_to_string(target_dir.join("home/tester/.bash_profile")).await.unwrap();
+        let bash_profile = tokio::fs::read_to_string(target_dir.join("home/tester/.bash_profile"))
+            .await
+            .unwrap();
         assert_eq!(bash_profile, "exec dbus-run-session -- niri --session\n");
 
         let calls = runner.calls();
-        assert!(calls.iter().any(|(cmd, args)| cmd == "chroot" && args.contains(&"chown".to_string()) && args.contains(&"tester:tester".to_string())));
+        assert!(calls.iter().any(|(cmd, args)| cmd == "chroot"
+            && args.contains(&"chown".to_string())
+            && args.contains(&"tester:tester".to_string())));
 
         tokio::fs::remove_dir_all(&target_dir).await.ok();
         tokio::fs::remove_dir_all(&repo_dir).await.ok();
@@ -479,16 +613,24 @@ mod tests {
 
     #[tokio::test]
     async fn sway_needs_no_accept_keywords_override_but_noctalia_still_does() {
-        let target_dir = std::env::temp_dir().join(format!("gentoo-installer-wm-test-sway-{}", std::process::id()));
+        let target_dir = std::env::temp_dir().join(format!(
+            "gentoo-installer-wm-test-sway-{}",
+            std::process::id()
+        ));
         tokio::fs::create_dir_all(&target_dir).await.unwrap();
         let runner = FakeCommandRunner::new();
 
-        emerge_wm_packages(&runner, &target_dir, &spec(WmChoice::Sway)).await.unwrap();
+        emerge_wm_packages(&runner, &target_dir, &spec(WmChoice::Sway))
+            .await
+            .unwrap();
 
         // This synthetic target has no pre-existing package.accept_keywords directory
         // (real stage3 ships one — see chroot_emerge's own directory-vs-file tests), so
         // write_portage_entry falls to its "write straight to the path" branch here.
-        let written = tokio::fs::read_to_string(target_dir.join("etc/portage/package.accept_keywords")).await.unwrap();
+        let written =
+            tokio::fs::read_to_string(target_dir.join("etc/portage/package.accept_keywords"))
+                .await
+                .unwrap();
         assert!(!written.contains("gui-wm/sway"));
         assert!(written.contains("gui-apps/noctalia **"));
         assert!(written.contains("dev-cpp/sdbus-c++ ~amd64"));
@@ -498,19 +640,33 @@ mod tests {
 
     #[tokio::test]
     async fn dwl_gets_its_config_h_as_savedconfig_and_launches_noctalia_with_dash_s() {
-        let root = std::env::temp_dir().join(format!("gentoo-installer-dwl-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("gentoo-installer-dwl-{}", std::process::id()));
         std::fs::remove_dir_all(&root).ok();
         let preset = root.join("preset");
         let target = root.join("target");
         make_preset_repo(&preset, "dwl");
         std::fs::write(preset.join("dwl/config.h"), "/* dwl */\n").unwrap();
 
-        install_savedconfig(&preset, &target, &spec(WmChoice::Dwl)).await.unwrap();
-        assert_eq!(std::fs::read_to_string(target.join("etc/portage/savedconfig/gui-wm/dwl")).unwrap(), "/* dwl */\n");
+        install_savedconfig(&preset, &target, &spec(WmChoice::Dwl))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(target.join("etc/portage/savedconfig/gui-wm/dwl")).unwrap(),
+            "/* dwl */\n"
+        );
         let uses = std::fs::read_to_string(target.join("etc/portage/package.use")).unwrap();
         assert!(uses.contains("gui-wm/dwl savedconfig"), "{uses}");
 
-        apply_preset_from_dir(&FakeCommandRunner::new(), &target, &preset, &spec(WmChoice::Dwl), "solomiya").await.unwrap();
+        apply_preset_from_dir(
+            &FakeCommandRunner::new(),
+            &target,
+            &preset,
+            &spec(WmChoice::Dwl),
+            "solomiya",
+        )
+        .await
+        .unwrap();
         let profile = std::fs::read_to_string(target.join("home/solomiya/.bash_profile")).unwrap();
         assert_eq!(profile, "exec dbus-run-session -- dwl -s noctalia\n");
         std::fs::remove_dir_all(&root).ok();
@@ -519,30 +675,71 @@ mod tests {
     #[tokio::test]
     async fn a_session_gets_dbus_and_seatd_enabled_and_its_user_the_device_groups() {
         let runner = FakeCommandRunner::new();
-        enable_session_services(&runner, Path::new("/mnt/gentoo"), "solomiya").await.unwrap();
-        runner.assert_call(0, "chroot", &["/mnt/gentoo", "rc-update", "add", "dbus", "default"]);
-        runner.assert_call(1, "chroot", &["/mnt/gentoo", "rc-update", "add", "seatd", "default"]);
-        runner.assert_call(2, "chroot", &["/mnt/gentoo", "usermod", "-aG", "seat,video,input,audio,render", "solomiya"]);
+        enable_session_services(&runner, Path::new("/mnt/gentoo"), "solomiya")
+            .await
+            .unwrap();
+        runner.assert_call(
+            0,
+            "chroot",
+            &["/mnt/gentoo", "rc-update", "add", "dbus", "default"],
+        );
+        runner.assert_call(
+            1,
+            "chroot",
+            &["/mnt/gentoo", "rc-update", "add", "seatd", "default"],
+        );
+        runner.assert_call(
+            2,
+            "chroot",
+            &[
+                "/mnt/gentoo",
+                "usermod",
+                "-aG",
+                "seat,video,input,audio,render",
+                "solomiya",
+            ],
+        );
     }
 
     #[tokio::test]
     async fn an_empty_wm_configs_url_fails_before_anything_is_compiled() {
         let runner = FakeCommandRunner::new();
-        let err = install(&runner, Path::new("/mnt/gentoo"), WmChoice::Niri, "  ", "solomiya").await.unwrap_err();
+        let err = install(
+            &runner,
+            Path::new("/mnt/gentoo"),
+            WmChoice::Niri,
+            "  ",
+            "solomiya",
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("wm-configs"), "{err}");
-        assert!(runner.calls().is_empty(), "nothing may run: {:?}", runner.calls());
+        assert!(
+            runner.calls().is_empty(),
+            "nothing may run: {:?}",
+            runner.calls()
+        );
     }
 
     #[tokio::test]
     async fn the_boot_script_that_makes_the_runtime_dir_is_executable_and_targets_regular_users() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("gentoo-installer-rundir-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gentoo-installer-rundir-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         write_runtime_dir_script(&dir).await.unwrap();
         let p = dir.join("etc/local.d/10-xdg-runtime.start");
-        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
         let text = std::fs::read_to_string(&p).unwrap();
-        assert!(text.starts_with("#!/bin/sh") && text.contains("/run/user/$uid") && text.contains(">= 1000"), "{text}");
+        assert!(
+            text.starts_with("#!/bin/sh")
+                && text.contains("/run/user/$uid")
+                && text.contains(">= 1000"),
+            "{text}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -554,27 +751,56 @@ mod tests {
         let fallback_at = out.find(".cache/xdg-runtime").unwrap();
         let exec_at = out.find("exec dbus-run-session").unwrap();
         assert!(export_at < fallback_at && fallback_at < exec_at, "{out}");
-        assert_eq!(with_runtime_dir_fallback("no export here\n"), "no export here\n");
+        assert_eq!(
+            with_runtime_dir_fallback("no export here\n"),
+            "no export here\n"
+        );
     }
 
     #[tokio::test]
     async fn a_stage_with_fish_gets_the_session_started_from_fish_too() {
-        let root = std::env::temp_dir().join(format!("gentoo-installer-fishsess-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("gentoo-installer-fishsess-{}", std::process::id()));
         std::fs::remove_dir_all(&root).ok();
         let (preset, target) = (root.join("preset"), root.join("target"));
         make_preset_repo(&preset, "niri");
 
         // Without fish: no fish snippet.
-        apply_preset_from_dir(&FakeCommandRunner::new(), &target, &preset, &spec(WmChoice::Niri), "solomiya").await.unwrap();
+        apply_preset_from_dir(
+            &FakeCommandRunner::new(),
+            &target,
+            &preset,
+            &spec(WmChoice::Niri),
+            "solomiya",
+        )
+        .await
+        .unwrap();
         assert!(!target.join("home/solomiya/.config/fish").exists());
 
         // With fish (a custom stage): the snippet exists and starts the same command.
         std::fs::create_dir_all(target.join("usr/bin")).unwrap();
         std::fs::write(target.join("usr/bin/fish"), "").unwrap();
-        apply_preset_from_dir(&FakeCommandRunner::new(), &target, &preset, &spec(WmChoice::Niri), "solomiya").await.unwrap();
-        let snippet = std::fs::read_to_string(target.join("home/solomiya/.config/fish/conf.d/10-session.fish")).unwrap();
-        assert!(snippet.contains("exec dbus-run-session -- niri --session"), "{snippet}");
-        assert!(snippet.contains("/dev/tty1") && snippet.contains("xdg-runtime"), "{snippet}");
+        apply_preset_from_dir(
+            &FakeCommandRunner::new(),
+            &target,
+            &preset,
+            &spec(WmChoice::Niri),
+            "solomiya",
+        )
+        .await
+        .unwrap();
+        let snippet = std::fs::read_to_string(
+            target.join("home/solomiya/.config/fish/conf.d/10-session.fish"),
+        )
+        .unwrap();
+        assert!(
+            snippet.contains("exec dbus-run-session -- niri --session"),
+            "{snippet}"
+        );
+        assert!(
+            snippet.contains("/dev/tty1") && snippet.contains("xdg-runtime"),
+            "{snippet}"
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 }
