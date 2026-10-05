@@ -145,6 +145,11 @@ pub async fn install(
     username: &str,
 ) -> crate::Result<()> {
     let spec = spec(choice);
+    if configs_git_url.trim().is_empty() {
+        return Err(crate::Error::Other(anyhow::anyhow!(
+            "no wm-configs repository configured (GENTOO_WM_CONFIGS_URL); refusing to start a compile that would end in `git clone \"\"`"
+        )));
+    }
 
     let staging = std::env::temp_dir().join(format!("gentoo-installer-wm-configs-{}", std::process::id()));
     if staging.exists() {
@@ -457,5 +462,13 @@ mod tests {
         runner.assert_call(0, "chroot", &["/mnt/gentoo", "rc-update", "add", "dbus", "default"]);
         runner.assert_call(1, "chroot", &["/mnt/gentoo", "rc-update", "add", "seatd", "default"]);
         runner.assert_call(2, "chroot", &["/mnt/gentoo", "usermod", "-aG", "seat,video,input,audio,render", "solomiya"]);
+    }
+
+    #[tokio::test]
+    async fn an_empty_wm_configs_url_fails_before_anything_is_compiled() {
+        let runner = FakeCommandRunner::new();
+        let err = install(&runner, Path::new("/mnt/gentoo"), WmChoice::Niri, "  ", "solomiya").await.unwrap_err();
+        assert!(err.to_string().contains("wm-configs"), "{err}");
+        assert!(runner.calls().is_empty(), "nothing may run: {:?}", runner.calls());
     }
 }

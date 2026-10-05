@@ -138,7 +138,10 @@ async fn drain_install_progress(state: &mut AppState) {
         }
     }
 
-    if state.install_finished {
+    // A failed install never sends `Progress::Done`, so waiting for it alone left the screen frozen on the
+    // last step with no error (found in a real VM run). The task ending is the signal; its result says how.
+    let ended = state.install_task.as_ref().is_some_and(|t| t.is_finished());
+    if state.install_finished || ended {
         if let Some(task) = state.install_task.take() {
             match task.await {
                 Ok(Ok(())) => {}
@@ -315,7 +318,14 @@ fn start_install(state: &mut AppState) {
         Ok("dwl") => WmChoice::Dwl,
         _ => WmChoice::default(),
     };
-    let wm_configs_git_url = std::env::var("GENTOO_INSTALLER_WM_CONFIGS_URL").unwrap_or_default();
+    // One name for this everywhere: the store configuration's `GENTOO_WM_CONFIGS_URL` (the TUI used to read a
+    // different variable, `GENTOO_INSTALLER_WM_CONFIGS_URL`, so a correctly configured store still gave an
+    // empty URL here and the desktop step died on `git clone ""`).
+    let wm_configs_git_url = store_env
+        .as_ref()
+        .map(|e| e.wm_configs_git_url.clone())
+        .or_else(|| std::env::var("GENTOO_INSTALLER_WM_CONFIGS_URL").ok())
+        .unwrap_or_default();
     let opt_level = match std::env::var("GENTOO_INSTALLER_OPT_LEVEL").as_deref() {
         Ok("O3") | Ok("o3") => OptLevel::O3,
         _ => OptLevel::default(),
@@ -552,6 +562,20 @@ fn draw_installing(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, stat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_failed_install_task_shows_its_error_even_though_done_never_arrives() {
+        let mut state = AppState::new();
+        state.step = Step::Installing;
+        state.install_task = Some(tokio::spawn(async { Err(installer_core::Error::Other(anyhow::anyhow!("git clone failed"))) }));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        drain_install_progress(&mut state).await;
+
+        assert_eq!(state.step, Step::Done);
+        assert!(install_failed(&state.install_log), "{:?}", state.install_log);
+        assert!(state.install_log.iter().any(|l| l.contains("git clone failed")));
+    }
 
     #[test]
     fn only_a_log_without_errors_counts_as_a_finished_install() {
