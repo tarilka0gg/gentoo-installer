@@ -17,8 +17,19 @@ chroot "$ROOT" passwd -d root >/dev/null
 sed -i -E '/^c1:/d; /^s0:/d' "$ROOT/etc/inittab"
 cat >> "$ROOT/etc/inittab" <<'INITTAB'
 c1:12345:respawn:/sbin/agetty --autologin root --noclear 38400 tty1 linux
-s0:12345:respawn:/sbin/agetty --autologin root -L 115200 ttyS0 vt100
+s0:12345:respawn:/usr/local/sbin/serial-getty
 INITTAB
+# A serial login only where the kernel was told to use one (`console=ttyS0`); otherwise an agetty
+# on a port that may not exist respawns in a loop and spams the console. Idle instead.
+install -d "$ROOT/usr/local/sbin"
+cat > "$ROOT/usr/local/sbin/serial-getty" <<'SERIALGETTY'
+#!/bin/sh
+if grep -q 'console=ttyS0' /proc/cmdline; then
+    exec /sbin/agetty --autologin root -L 115200 ttyS0 vt100
+fi
+exec sleep 2147483647
+SERIALGETTY
+chmod 755 "$ROOT/usr/local/sbin/serial-getty"
 grep -q '^ttyS0$' "$ROOT/etc/securetty" 2>/dev/null || echo ttyS0 >> "$ROOT/etc/securetty"
 
 # Start the installer on the first console that logs in; leaving it drops to a shell.

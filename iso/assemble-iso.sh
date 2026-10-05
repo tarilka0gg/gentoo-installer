@@ -31,20 +31,51 @@ chmod 644 "$ISO/boot/"*
 cp /usr/share/limine/limine-bios-cd.bin /usr/share/limine/limine-bios.sys "$ISO/boot/limine/"
 cp /usr/share/limine/BOOTX64.EFI "$ISO/EFI/BOOT/"
 
+# Real hardware first. Three lessons from the first laptop test:
+#  * `console=ttyS0` last made the serial port /dev/console; a laptop with a phantom UART then showed
+#    the kernel's last warning and nothing else (dracut and init were talking to the void).
+#    So the default has the screen only; serial is its own entry (and EXTRA_CMDLINE for tests).
+#  * `quiet` hid every message after the first warnings, which turned "slow" into "hung".
+#  * Limine's own `serial: yes` is only for the serial entry's benefit and is off by default.
+BASE="root=live:CDLABEL=$LABEL rd.live.image rd.live.dir=LiveOS rd.live.squashimg=squashfs.img rd.shell"
 cat > "$ISO/limine.conf" <<CONF
-timeout: 3
-serial: yes
+timeout: 5
+default_entry: 1
 
-/Gentoo installer (live)
+/Simple Linux (live)
     protocol: linux
     kernel_path: boot():/boot/vmlinuz
     module_path: boot():/boot/initramfs.img
-    cmdline: root=live:CDLABEL=$LABEL rd.live.image rd.live.overlay.overlayfs=1 rd.live.dir=LiveOS rd.live.squashimg=squashfs.img console=tty0 console=ttyS0,115200 quiet ${EXTRA_CMDLINE:-}
+    cmdline: $BASE console=tty0 loglevel=5 ${EXTRA_CMDLINE:-}
+
+/Simple Linux - safe graphics (nomodeset, text installer)
+    protocol: linux
+    kernel_path: boot():/boot/vmlinuz
+    module_path: boot():/boot/initramfs.img
+    cmdline: $BASE console=tty0 loglevel=5 nomodeset ${EXTRA_CMDLINE:-}
+
+/Simple Linux - USB workaround (legacy enumeration, no autosuspend)
+    protocol: linux
+    kernel_path: boot():/boot/vmlinuz
+    module_path: boot():/boot/initramfs.img
+    cmdline: $BASE console=tty0 loglevel=5 usbcore.old_scheme_first=1 usbcore.autosuspend=-1 ${EXTRA_CMDLINE:-}
+
+/Simple Linux - verbose (every kernel and initramfs message, drops to a shell on failure)
+    protocol: linux
+    kernel_path: boot():/boot/vmlinuz
+    module_path: boot():/boot/initramfs.img
+    cmdline: $BASE console=tty0 loglevel=7 rd.debug ${EXTRA_CMDLINE:-}
+
+/Simple Linux - serial console (ttyS0, 115200)
+    protocol: linux
+    kernel_path: boot():/boot/vmlinuz
+    module_path: boot():/boot/initramfs.img
+    cmdline: $BASE console=tty0 console=ttyS0,115200 loglevel=5 ${EXTRA_CMDLINE:-}
 CONF
 cp "$ISO/limine.conf" "$ISO/boot/limine/limine.conf"
 
 # UEFI: El Torito boots a small FAT image holding Limine; it finds boot() there, so the
-# kernel and initramfs are copied in too (~30 MB — cheaper than a second config dialect).
+# kernel and initramfs are copied in too (~30 MB - cheaper than a second config dialect).
 EFI=$W/efiboot.img
 # Sized to what goes in (+8 MB slack); FAT32 with 512-byte clusters needs >= ~33 MB to be valid.
 need=$(( $(stat -c %s "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" "$ISO/EFI/BOOT/BOOTX64.EFI" | paste -sd+ | bc) / 1048576 + 8 ))

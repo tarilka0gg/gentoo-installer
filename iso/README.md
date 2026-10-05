@@ -134,7 +134,34 @@ NICs, SoC/phone blobs, old per-chip Wi-Fi versions; the two newest `iwlwifi` fir
 which brings it to ~314 MB compressed. The microcode is not put into the initramfs (it is stored
 uncompressed and the ISO carries the initramfs twice); the files stay in `/lib/firmware`.
 
-Sizes with the firmware, the rescue kit and the bundled stage: minimal **1.2 GB**, GUI **1.7 GB**.
+Sizes with the firmware, the rescue kit, early microcode and the bundled stage: minimal **1.3 GB**, GUI **1.8 GB**.
+
+## Booting on real hardware: the first laptop report, and the boot menu
+
+The first real-hardware try stopped after Limine with `TSC_DEADLINE disabled ... please update microcode`
+and `usb 2-9: device descriptor read/64, error -71`. Both are kernel *warnings*; the real problem was what
+the images did around them, none of which a VM shows:
+
+- `console=tty0 console=ttyS0,115200` makes the **last** one `/dev/console`. On a machine whose `ttyS0` is
+  a phantom UART, dracut and init then talk to nothing and the screen freezes on the kernel's last
+  warning. The default entry now has the screen only (`console=tty0`).
+- `quiet` hid everything after those warnings, which turned "slow" into "looks hung". Gone (`loglevel=5`).
+- `dracut --no-early-microcode` (my size saving) is exactly why the kernel complained about microcode.
+  Early microcode is back: a 38 MB `GenuineIntel.bin` and 0.3 MB `AuthenticAMD.bin` in front of the
+  initramfs (the ISO carries the initramfs twice, ~+80 MB). QEMU cannot show it taking effect
+  (a hypervisor guest never loads microcode); `lsinitrd` shows the early CPIO in place.
+- The serial getty used to respawn on a port that may not exist; `serial-getty` now idles unless
+  the command line has `console=ttyS0`.
+
+The Limine menu (5 s) has five entries, so a bad guess costs one reboot rather than one rebuild:
+**live** (default), **safe graphics** (`nomodeset`, ends in the text installer), **USB workaround**
+(`usbcore.old_scheme_first=1 usbcore.autosuspend=-1`, the usual cure for `device descriptor read/64,
+error -71` when the boot stick itself is the device that fails), **verbose** (`loglevel=7 rd.debug`) and
+**serial console**. All five were checked to boot in a VM except that nothing but the default and the serial
+entry was actually used; the effect of the others on real hardware is unknown. dracut's `rd.shell` is on,
+so a missing live medium drops to a shell instead of hanging.
+
+`test/run-gl-vm.sh` and `test/guest-shot.py` are the GL-VM test described below, kept in the repo.
 
 ## Shell and tools
 
