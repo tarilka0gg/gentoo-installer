@@ -23,6 +23,8 @@ pub struct DetectedSystem {
     /// `VIDEO_CARDS` value(s) derived from the same GPU vendor detection
     /// `hardware::Profile` uses for kernel matching, mapped to Portage's naming.
     pub video_cards: Option<String>,
+    /// Every graphics adapter on the PCI bus (see [`crate::gpu`]), for the compositor's render device.
+    pub gpus: Vec<crate::gpu::GpuDevice>,
     pub firmware: Firmware,
     pub disks: Vec<disk::Disk>,
     /// Name of another OS found on the disk (e.g. "Windows 11"), via `os-prober` if
@@ -58,7 +60,17 @@ pub async fn gather(runner: &dyn CommandRunner) -> DetectedSystem {
             .to_string()
     });
 
-    let video_cards = profile.as_ref().map(|p| video_cards_value(p.gpu));
+    let gpus = match runner.run("lspci", &["-nn", "-D"]).await {
+        Ok(text) => crate::gpu::parse_lspci(&text),
+        Err(_) => Vec::new(),
+    };
+    let nouveau = matches!(profile.as_ref().map(|p| p.gpu), Some(hardware::Gpu::Nouveau));
+    // Every adapter gets its driver; fall back to the single-GPU guess if `lspci` showed nothing.
+    let video_cards = if gpus.is_empty() {
+        profile.as_ref().map(|p| video_cards_value(p.gpu))
+    } else {
+        Some(crate::gpu::video_cards(&gpus, None, nouveau).join(" "))
+    };
 
     let firmware = if std::path::Path::new("/sys/firmware/efi").is_dir() {
         Firmware::Uefi
@@ -98,6 +110,7 @@ pub async fn gather(runner: &dyn CommandRunner) -> DetectedSystem {
     DetectedSystem {
         cpu_flags,
         video_cards,
+        gpus,
         firmware,
         disks,
         existing_os,
@@ -116,10 +129,9 @@ pub fn video_cards_value(gpu: hardware::Gpu) -> String {
     match gpu {
         hardware::Gpu::Nvidia => "nvidia".to_string(),
         hardware::Gpu::Nouveau => "nouveau".to_string(),
-        hardware::Gpu::Amd => "amdgpu".to_string(),
-        hardware::Gpu::RadeonLegacy => "radeon".to_string(),
-        hardware::Gpu::Intel => "i915".to_string(),
-        hardware::Gpu::Xe => "xe".to_string(),
+        hardware::Gpu::Amd => "amdgpu radeonsi".to_string(),
+        hardware::Gpu::RadeonLegacy => "radeon r300 r600".to_string(),
+        hardware::Gpu::Intel | hardware::Gpu::Xe => "intel".to_string(),
         hardware::Gpu::None => String::new(),
     }
 }
@@ -130,9 +142,10 @@ mod tests {
 
     #[test]
     fn video_cards_uses_portage_driver_names() {
-        assert_eq!(video_cards_value(hardware::Gpu::Amd), "amdgpu");
-        assert_eq!(video_cards_value(hardware::Gpu::Intel), "i915");
-        assert_eq!(video_cards_value(hardware::Gpu::RadeonLegacy), "radeon");
+        assert_eq!(video_cards_value(hardware::Gpu::Amd), "amdgpu radeonsi");
+        assert_eq!(video_cards_value(hardware::Gpu::Intel), "intel");
+        assert_eq!(video_cards_value(hardware::Gpu::Xe), "intel");
+        assert_eq!(video_cards_value(hardware::Gpu::RadeonLegacy), "radeon r300 r600");
     }
 
     #[tokio::test]

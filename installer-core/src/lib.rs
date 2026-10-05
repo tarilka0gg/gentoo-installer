@@ -7,6 +7,7 @@ pub mod detect;
 pub mod disk;
 pub mod event;
 pub mod fstab;
+pub mod gpu;
 pub mod gpu_driver;
 pub mod hardware;
 mod http;

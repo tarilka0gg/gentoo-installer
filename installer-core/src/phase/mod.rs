@@ -148,6 +148,8 @@ pub struct Settings {
     pub packages: Vec<String>,
     /// Replaces the detected GPU (kernel build, driver, `VIDEO_CARDS`); `None` keeps detection.
     pub gpu_override: Option<crate::hardware::Gpu>,
+    /// Which GPU the compositor renders on when the machine has several.
+    pub render: crate::gpu::RenderPreference,
     pub opt_level: crate::make_conf::OptLevel,
     pub package_mode: crate::make_conf::PackageMode,
 }
@@ -165,6 +167,7 @@ impl Default for Settings {
             wm_configs_git_url: String::new(),
             packages: Vec::new(),
             gpu_override: None,
+            render: Default::default(),
             opt_level: crate::make_conf::OptLevel::default(),
             package_mode: crate::make_conf::PackageMode::default(),
         }

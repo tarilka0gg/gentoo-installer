@@ -40,12 +40,20 @@ impl Phase for DesktopPhase {
                 "the desktop is set up for a user; none was given"
             ))
         })?;
+        let gpus = match ctx.runner.run("lspci", &["-nn", "-D"]).await {
+            Ok(text) => crate::gpu::parse_lspci(&text),
+            Err(_) => Vec::new(),
+        };
+        let nouveau = ctx.settings.gpu_override == Some(crate::hardware::Gpu::Nouveau)
+            || ctx.profile.as_ref().is_some_and(|p| p.gpu == crate::hardware::Gpu::Nouveau);
+        let render = crate::gpu::RenderPlan::new(&gpus, ctx.settings.render, nouveau);
         wm::install(
             ctx.runner.as_ref(),
             &ctx.target,
             ctx.settings.wm,
             &ctx.settings.wm_configs_git_url,
             &account.username,
+            &render,
         )
         .await?;
         let _ = tx.send(Event::PhaseFinished {

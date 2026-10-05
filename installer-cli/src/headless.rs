@@ -92,6 +92,7 @@ pub async fn run() -> Result<()> {
         Ok("none") => Some(installer_core::hardware::Gpu::None),
         _ => None,
     };
+    settings.render = render_from_env();
     if matches!(
         std::env::var("GENTOO_INSTALLER_OPT_LEVEL").as_deref(),
         Ok("O3") | Ok("o3")
@@ -158,4 +159,13 @@ pub async fn run() -> Result<()> {
     drop(tx);
     printer.await.ok();
     result.map_err(|e| anyhow::anyhow!(e))
+}
+
+/// `GENTOO_INSTALLER_RENDER=integrated` renders on the integrated GPU; anything else (or unset) takes the
+/// most capable adapter, discrete first.
+pub fn render_from_env() -> installer_core::gpu::RenderPreference {
+    match std::env::var("GENTOO_INSTALLER_RENDER").as_deref() {
+        Ok("integrated") => installer_core::gpu::RenderPreference::Integrated,
+        _ => installer_core::gpu::RenderPreference::Auto,
+    }
 }

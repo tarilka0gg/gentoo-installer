@@ -442,6 +442,7 @@ fn start_install(state: &mut AppState, mode: RunMode) {
         hostname,
         locales,
         gpu_override,
+        render: crate::headless::render_from_env(),
         packages,
         stage3,
         account,

@@ -214,6 +214,7 @@ mod tests {
         DetectedSystem {
             cpu_flags: cpu_flags.map(String::from),
             video_cards: video_cards.map(String::from),
+            gpus: Vec::new(),
             firmware: crate::detect::Firmware::Uefi,
             disks: vec![],
             existing_os: None,

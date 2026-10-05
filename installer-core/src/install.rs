@@ -38,6 +38,7 @@ pub struct InstallOptions {
     /// Overrides the detected GPU — picks the kernel build and whether the proprietary
     /// NVIDIA driver gets compiled. `None` keeps whatever detection found.
     pub gpu_override: Option<Gpu>,
+    pub render: crate::gpu::RenderPreference,
     /// Ids from `packages::GROUPS` to emerge after the desktop.
     pub packages: Vec<String>,
     /// A custom stage3 tarball (your own, with your shell and tools) instead of Gentoo's
@@ -81,6 +82,7 @@ impl InstallOptions {
             wm_configs_git_url: self.wm_configs_git_url,
             packages: self.packages,
             gpu_override: self.gpu_override,
+            render: self.render,
             opt_level: self.opt_level,
             package_mode: self.package_mode,
         };
@@ -196,6 +198,7 @@ mod tests {
             hostname: "h".into(),
             locales: vec!["uk_UA.UTF-8".into()],
             gpu_override: Some(Gpu::Amd),
+            render: Default::default(),
             packages: vec!["wifi".into()],
             stage3: None,
             account: Account {

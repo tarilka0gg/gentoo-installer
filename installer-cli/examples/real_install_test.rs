@@ -35,6 +35,7 @@ async fn main() {
         keyboard_layout: installer_core::keyboard::detect_current(),
         timezone: installer_core::timezone::detect_current().unwrap_or_else(|| "UTC".into()),
         gpu_override: None,
+        render: Default::default(),
         packages: Vec::new(),
         stage3: None,
         hostname: "gentoo".into(),

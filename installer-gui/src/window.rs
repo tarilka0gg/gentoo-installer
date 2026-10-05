@@ -1977,6 +1977,7 @@ fn confirm_page_build(nav: adw::NavigationView, state: Rc<WizardState>) -> adw::
                 locales: vec![installer_core::locale::DEFAULT_LOCALE.to_string()],
                 account,
                 gpu_override: state.gpu.get(),
+                render: Default::default(),
                 packages: state.packages.borrow().clone(),
                 stage3: std::env::var("GENTOO_INSTALLER_STAGE3_URL")
                     .ok()
