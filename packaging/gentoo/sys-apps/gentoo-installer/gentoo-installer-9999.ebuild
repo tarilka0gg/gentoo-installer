@@ -7,7 +7,7 @@ CRATES=""
 # Live ebuild: cargo_live_src_unpack fetches the crates at unpack time (needs network, allowed for 9999).
 # For a versioned ebuild, generate CRATES from Cargo.lock with pycargoebuild.
 
-inherit cargo git-r3 xdg
+inherit cargo desktop git-r3 xdg
 
 DESCRIPTION="Gentoo installer: btrfs layout, per-hardware kernel, Limine; GTK4 and text frontends"
 HOMEPAGE="https://github.com/tarilka0gg/gentoo-installer"
