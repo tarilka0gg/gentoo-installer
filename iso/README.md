@@ -157,8 +157,8 @@ The Limine menu (5 s) has five entries, so a bad guess costs one reboot rather t
 **live** (default), **safe graphics** (`nomodeset`, ends in the text installer), **USB workaround**
 (`usbcore.old_scheme_first=1 usbcore.autosuspend=-1`, the usual cure for `device descriptor read/64,
 error -71` when the boot stick itself is the device that fails), **verbose** (`loglevel=7 rd.debug`) and
-**serial console**. All five were checked to boot in a VM except that nothing but the default and the serial
-entry was actually used; the effect of the others on real hardware is unknown. dracut's `rd.shell` is on,
+**serial console**. In a VM only the default and the serial entry were actually booted (the menu itself and the
+other entries' command lines were checked by eye); what the others do on real hardware is unknown. dracut's `rd.shell` is on,
 so a missing live medium drops to a shell instead of hanging.
 
 `test/run-gl-vm.sh` and `test/guest-shot.py` are the GL-VM test described below, kept in the repo.
