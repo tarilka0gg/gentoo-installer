@@ -172,6 +172,13 @@ pub async fn run(opts: InstallOptions, tx: UnboundedSender<Progress>) -> crate::
     bootloader::configure(runner, &opts.target, &opts.layout, &parts).await?;
     bootloader::install(runner, &opts.target, &opts.layout.disk).await?;
 
+    // Leave the disk consistent: the frontends offer a reboot right after this. (`umount -R` also
+    // takes the chroot bind mounts and the btrfs subvolumes; failures are ignored on purpose —
+    // a busy mount must not turn a finished install into an error, the shutdown unmounts anyway.)
+    let target_str = opts.target.to_string_lossy().to_string();
+    let _ = runner.run_status("sync", &[]).await;
+    let _ = runner.run_status("umount", &["-R", &target_str]).await;
+
     let _ = tx.send(Progress::Done);
     Ok(())
 }

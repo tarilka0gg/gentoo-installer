@@ -162,6 +162,7 @@ pub async fn install(
             install_savedconfig(&staging, target, &spec).await?;
         }
         emerge_wm_packages(runner, target, &spec).await?;
+        enable_session_services(runner, target, username).await?;
         apply_preset_from_dir(runner, target, &staging, &spec, username).await
     }
     .await;
@@ -180,6 +181,20 @@ async fn install_savedconfig(preset_root: &Path, target: &Path, spec: &WmSpec) -
     let portage_dir = target.join("etc/portage");
     write_portage_entry(&portage_dir.join("package.use"), "gentoo-installer-dwl", &format!("{} savedconfig\n", spec.atom)).await?;
     Ok(())
+}
+
+/// What a compositor session needs from the OS and the stage3 does not give: the system bus
+/// (`dbus`), a seat manager (`seatd` — the compositor opens the GPU and input devices through it,
+/// not as root) and the user in the groups that may talk to it and to the devices. Without this
+/// the installed system boots fine and then the compositor cannot start.
+async fn enable_session_services(runner: &dyn CommandRunner, target: &Path, username: &str) -> crate::Result<()> {
+    crate::services::enable_all(runner, target, &["dbus", "seatd"]).await?;
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
+    runner
+        .run_status("chroot", &[target_str, "usermod", "-aG", "seat,video,input,audio,render", username])
+        .await
 }
 
 /// Bind-mounts, bootstraps network/tree/overlays, writes portage overrides, and emerges
@@ -202,7 +217,7 @@ async fn emerge_wm_packages(runner: &dyn CommandRunner, target: &Path, spec: &Wm
         }
         configure_wm_portage_overrides(target, spec).await?;
         runner
-            .run_status("chroot", &[target_str, "emerge", spec.atom, "gui-apps/noctalia"])
+            .run_status("chroot", &[target_str, "emerge", spec.atom, "gui-apps/noctalia", "sys-auth/seatd"])
             .await
     }
     .await;
@@ -278,7 +293,7 @@ async fn configure_wm_portage_overrides(target: &Path, spec: &WmSpec) -> crate::
     write_portage_entry(
         &portage_dir.join("package.use"),
         "gentoo-installer-wm",
-        ">=media-libs/freetype-2.14.3 harfbuzz\n>=app-crypt/gcr-3.41.2-r2 gtk\n>=x11-libs/cairo-1.18.4-r1 X\n",
+        ">=media-libs/freetype-2.14.3 harfbuzz\n>=app-crypt/gcr-3.41.2-r2 gtk\n>=x11-libs/cairo-1.18.4-r1 X\nsys-auth/seatd server builtin\n",
     )
     .await?;
     Ok(())
@@ -433,5 +448,14 @@ mod tests {
         let profile = std::fs::read_to_string(target.join("home/solomiya/.bash_profile")).unwrap();
         assert_eq!(profile, "exec dbus-run-session -- dwl -s noctalia\n");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[tokio::test]
+    async fn a_session_gets_dbus_and_seatd_enabled_and_its_user_the_device_groups() {
+        let runner = FakeCommandRunner::new();
+        enable_session_services(&runner, Path::new("/mnt/gentoo"), "solomiya").await.unwrap();
+        runner.assert_call(0, "chroot", &["/mnt/gentoo", "rc-update", "add", "dbus", "default"]);
+        runner.assert_call(1, "chroot", &["/mnt/gentoo", "rc-update", "add", "seatd", "default"]);
+        runner.assert_call(2, "chroot", &["/mnt/gentoo", "usermod", "-aG", "seat,video,input,audio,render", "solomiya"]);
     }
 }

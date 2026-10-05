@@ -23,11 +23,28 @@ pub struct Group {
     /// `package.use` lines (`atom flag ...`) the atoms need on a stock stage3 profile —
     /// found by `emerge -p` on a real stage3, e.g. ghostty's `REQUIRED_USE` wants X or wayland.
     pub use_flags: &'static [&'static str],
+    /// OpenRC services to switch on (default runlevel) once the atoms are installed, in order.
+    pub services: &'static [&'static str],
+    /// `package.license` lines (`atom license ...`) for atoms under a licence Portage does not accept
+    /// by default (e.g. the redistributable firmware blobs).
+    pub licenses: &'static [&'static str],
     /// Needs the GURU overlay (the desktop step always clones it).
     pub guru: bool,
 }
 
 pub const GROUPS: &[Group] = &[
+    Group {
+        id: "wifi",
+        name: "Wi-Fi and firmware",
+        description: "iwd (Wi-Fi from the command line and Noctalia) and linux-firmware (Wi-Fi/GPU/Bluetooth blobs)",
+        default: true,
+        atoms: &["net-wireless/iwd", "sys-kernel/linux-firmware"],
+        testing: &[],
+        use_flags: &[],
+        services: &["dbus", "iwd"],
+        licenses: &["sys-kernel/linux-firmware linux-fw-redistributable no-source-code"],
+        guru: false,
+    },
     Group {
         id: "terminal",
         name: "Terminal",
@@ -36,6 +53,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["x11-terms/ghostty"],
         testing: &[],
         use_flags: &["x11-terms/ghostty wayland"],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -46,6 +65,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["www-client/firefox-bin"],
         testing: &[],
         use_flags: &[],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -56,6 +77,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["dev-vcs/git", "sys-process/btop", "app-shells/fish", "app-editors/micro"],
         testing: &["app-editors/micro"],
         use_flags: &[],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -66,6 +89,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["app-editors/neovim", "dev-lang/rust-bin", "app-containers/podman"],
         testing: &[],
         use_flags: &[],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -76,6 +101,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["media-video/mpv", "media-video/vlc"],
         testing: &[],
         use_flags: &[],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -86,6 +113,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["media-gfx/gimp"],
         testing: &[],
         use_flags: &[],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -96,6 +125,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["net-im/telegram-desktop-bin"],
         testing: &["net-im/telegram-desktop-bin"],
         use_flags: &[],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -106,6 +137,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["app-office/libreoffice-bin"],
         testing: &[],
         use_flags: &[],
+        services: &[],
+        licenses: &[],
         guru: false,
     },
     Group {
@@ -116,6 +149,8 @@ pub const GROUPS: &[Group] = &[
         atoms: &["games-util/gamemode", "games-util/mangohud"],
         testing: &["games-util/gamemode", "games-util/mangohud"],
         use_flags: &["games-util/gamemode elogind"],
+        services: &[],
+        licenses: &[],
         guru: true,
     },
 ];
@@ -181,9 +216,21 @@ pub async fn install(runner: &dyn CommandRunner, target: &Path, ids: &[String]) 
         // atom. `--autounmask-write --autounmask-continue` lets Portage write and apply
         // them; `CONFIG_PROTECT_MASK` makes it write `/etc/portage` directly instead of
         // `._cfg` files nobody would dispatch. Verified with `emerge -f` on a real stage3.
+        let license_lines: String = groups.iter().flat_map(|g| g.licenses.iter()).map(|l| format!("{l}\n")).collect();
+        if !license_lines.is_empty() {
+            write_portage_entry(&portage_dir.join("package.license"), "gentoo-installer-packages", &license_lines).await?;
+        }
         let mut argv = vec![target_str, "env", "CONFIG_PROTECT_MASK=/etc/portage", "emerge", "--noreplace", "--autounmask-write", "--autounmask-continue"];
         argv.extend(atoms.iter().copied());
-        runner.run_status("chroot", &argv).await
+        runner.run_status("chroot", &argv).await?;
+        // Services only after the packages that ship their init scripts are really there.
+        let mut services: Vec<&str> = Vec::new();
+        for s in groups.iter().flat_map(|g| g.services.iter().copied()) {
+            if !services.contains(&s) {
+                services.push(s);
+            }
+        }
+        crate::services::enable_all(runner, target, &services).await
     }
     .await;
     unmount_chroot_dirs(runner, target).await;
@@ -293,6 +340,28 @@ mod use_tests {
 
         let text = std::fs::read_to_string(dir.join("etc/portage/package.use")).unwrap();
         assert!(text.contains("x11-terms/ghostty wayland"), "{text}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn the_wifi_group_accepts_the_firmware_licence_and_enables_dbus_then_iwd() {
+        let dir = std::env::temp_dir().join(format!("gentoo-installer-pkgs-wifi-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("var/db/repos/gentoo/profiles")).unwrap();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/resolv.conf"), "x\n").ok();
+        let runner = crate::command::FakeCommandRunner::new();
+
+        install(&runner, &dir, &["wifi".into()]).await.unwrap();
+
+        let lic = std::fs::read_to_string(dir.join("etc/portage/package.license")).unwrap();
+        assert!(lic.contains("sys-kernel/linux-firmware linux-fw-redistributable"), "{lic}");
+        let calls = runner.calls();
+        let rc: Vec<&str> = calls.iter().filter(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("rc-update")).map(|(_, a)| a[3].as_str()).collect();
+        assert_eq!(rc, ["dbus", "iwd"]);
+        let emerge_at = calls.iter().position(|(_, a)| a.iter().any(|x| x == "emerge")).unwrap();
+        let first_rc = calls.iter().position(|(_, a)| a.iter().any(|x| x == "rc-update")).unwrap();
+        assert!(emerge_at < first_rc, "services are enabled only after the packages are installed");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

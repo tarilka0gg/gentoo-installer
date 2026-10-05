@@ -264,3 +264,23 @@ async fn a_custom_stage_is_fetched_verified_unpacked_and_gives_the_user_fish() {
     let line = passwd.lines().find(|l| l.starts_with("solomiya:")).expect("user created");
     assert!(line.ends_with(":/usr/bin/fish"), "{line}");
 }
+
+/// `services::enable` against a real stage3: the init script exists (`sshd` ships with
+/// openssh), the runlevel symlink appears, a repeat is harmless, a missing service fails
+/// instead of pretending.
+#[tokio::test]
+#[ignore]
+async fn rc_update_really_enables_a_service_in_the_target_and_refuses_a_missing_one() {
+    use installer_core::services;
+    let scratch = Scratch::new("services");
+    let runner = RealCommandRunner;
+
+    services::enable_all(&runner, scratch.path(), &["sshd"]).await.unwrap();
+    let link = scratch.path().join("etc/runlevels/default/sshd");
+    assert!(link.symlink_metadata().is_ok(), "no runlevel symlink at {}", link.display());
+
+    services::enable_all(&runner, scratch.path(), &["sshd"]).await.expect("a second run must be harmless");
+
+    let err = services::enable_all(&runner, scratch.path(), &["no-such-service"]).await.unwrap_err();
+    eprintln!("missing service error: {err}");
+}

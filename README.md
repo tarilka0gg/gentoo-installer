@@ -222,6 +222,23 @@ a test dies half-way, and each copy is deleted by a guard that **refuses to dele
 anything is still mounted under it** (`remove_dir_all` does not stop at mount points and
 would otherwise recurse into the host's real `/dev`).
 
+## OpenRC only
+
+This distribution has no systemd, and the code must not assume one. An audit of every external call and file path
+found three places that did (all fixed): the GUI's *Restart* ran `systemctl reboot` (now `reboot`); the keyboard
+layout was read from systemd's `/etc/vconsole.conf` (now OpenRC's `/etc/conf.d/keymaps`, the systemd file only as a
+fallback); and — the real gap — nothing ever enabled a service on the installed system. `installer-core/src/services.rs`
+is now the one place that does, with `chroot <target> rc-update add <svc> default` (names validated, safe to repeat,
+tested against a real stage3). It is used for: `dbus` + `seatd` and the user's `seat,video,input,audio,render` groups after a
+compositor install (without a seat manager niri cannot open the GPU), and `dbus` + `iwd` for the new default package group
+*Wi-Fi and firmware* (`iwd`, `linux-firmware`, with the firmware licence accepted in `package.license`), so an installed
+laptop can reach the network without Ethernet. Everything else that touches init is plain files that OpenRC reads:
+`/etc/conf.d/hostname`, `/etc/conf.d/keymaps`, `/etc/env.d/02locale`, `/etc/timezone`.
+
+After a finished install the legacy path now runs `sync` and `umount -R` on the target, and the frontends offer a reboot: the TUI
+stays on its Done screen (Enter reboots, but only if no step failed; `q` leaves) and the GUI button runs `reboot`.
+Not run end to end yet: the desktop and Wi-Fi steps on a real target (they need a long compile and the network).
+
 ## Wi-Fi in the TUI
 
 With no Ethernet link the TUI scans through `iwd` (the same `IwdClient` the GUI uses), lists the networks

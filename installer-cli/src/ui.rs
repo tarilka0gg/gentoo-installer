@@ -37,6 +37,8 @@ pub struct AppState {
     pub iwd: Option<network::IwdClient>,
     /// The next `Action` for the loop to perform after the frame showing "Scanning…" is drawn.
     pub wifi_action: Option<Action>,
+    /// Set when the user chose to reboot after a finished install; `run` then returns.
+    pub exit: bool,
 }
 
 impl AppState {
@@ -55,6 +57,7 @@ impl AppState {
             wifi: WifiState::new(),
             iwd: None,
             wifi_action: None,
+            exit: false,
         }
     }
 }
@@ -100,7 +103,7 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
             }
         }
 
-        if state.step == Step::Done {
+        if state.exit {
             return Ok(());
         }
     }
@@ -215,8 +218,23 @@ async fn advance(state: &mut AppState) {
             }
         }
         Step::Confirm => start_install(state),
-        Step::Installing | Step::Done => {}
+        Step::Installing => {}
+        // After a finished install: Enter reboots (OpenRC's `reboot`; the disk was unmounted by
+        // the installer). Not offered if the log has an error — rebooting into a half-installed
+        // system is not what anyone wants from a stray Enter.
+        Step::Done => {
+            if install_failed(&state.install_log) {
+                state.status = "The install failed - see the log above. [q] quit".into();
+            } else {
+                let _ = std::process::Command::new("reboot").spawn();
+                state.exit = true;
+            }
+        }
     }
+}
+
+fn install_failed(log: &[String]) -> bool {
+    log.iter().any(|l| l.starts_with("ERROR"))
 }
 
 /// Set to click through the wizard without touching a real disk — see
@@ -476,9 +494,24 @@ fn draw_confirm(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
 
 fn draw_installing(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
     let log = state.install_log.join("\n");
-    let title = if state.step == Step::Done { "Done [q] quit" } else { "Installing" };
+    let title = match (state.step == Step::Done, install_failed(&state.install_log)) {
+        (true, true) => "Failed [q] quit",
+        (true, false) => "Done - [Enter] reboot  [q] quit",
+        _ => "Installing",
+    };
     frame.render_widget(
         Paragraph::new(log).block(Block::default().borders(Borders::ALL).title(title)),
         area,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_log_without_errors_counts_as_a_finished_install() {
+        assert!(!install_failed(&["Installing Limine...".into(), "Install complete.".into()]));
+        assert!(install_failed(&["Partitioning disk...".into(), "ERROR: disk vanished".into()]));
+    }
 }

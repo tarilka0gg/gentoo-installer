@@ -1580,7 +1580,8 @@ fn spawn_install(opts: install::InstallOptions, widgets: InstallingWidgets) {
     });
 }
 
-/// Screen script §12. `Restart` is a real `systemctl reboot` outside simulate mode —
+/// Screen script §12. `Restart` is a real `reboot` (OpenRC/sysvinit; this system has no systemd)
+/// outside simulate mode —
 /// guarded so clicking it during UI iteration never reboots the development machine.
 fn done_page_build() -> adw::NavigationPage {
     let status = adw::StatusPage::builder()
@@ -1611,7 +1612,7 @@ fn done_page_build() -> adw::NavigationPage {
             btn.set_sensitive(false);
             return;
         }
-        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+        let _ = std::process::Command::new("reboot").spawn();
     });
 
     let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).halign(gtk::Align::Center).build();

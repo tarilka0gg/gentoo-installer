@@ -16,6 +16,7 @@ pub mod kernel;
 pub mod keyboard;
 pub mod locale;
 pub mod packages;
+pub mod services;
 pub mod make_conf;
 pub mod network;
 pub mod partition;

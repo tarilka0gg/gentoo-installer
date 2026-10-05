@@ -40,15 +40,25 @@ pub fn list_layouts() -> Vec<Layout> {
     layouts
 }
 
-/// Best-effort current layout: the live console keymap if it maps cleanly to an XKB
-/// layout code (true for the common case — `us`, `ua`, `de`, ...), else `"us"`.
+/// Best-effort current layout of the live console. OpenRC keeps it in `/etc/conf.d/keymaps`
+/// (`keymap="us"`); `/etc/vconsole.conf` (`KEYMAP=`) is systemd's file and is only a fallback for
+/// a live environment that has it. Anything else is `"us"`.
 pub fn detect_current() -> String {
-    std::fs::read_to_string("/etc/vconsole.conf")
-        .ok()
-        .and_then(|s| {
+    detect_from(Path::new("/etc/conf.d/keymaps"), Path::new("/etc/vconsole.conf"))
+}
+
+fn detect_from(openrc: &Path, vconsole: &Path) -> String {
+    let value = |path: &Path, key: &str| {
+        std::fs::read_to_string(path).ok().and_then(|s| {
             s.lines()
-                .find_map(|l| l.strip_prefix("KEYMAP=").map(|v| v.trim_matches('"').to_string()))
+                .map(str::trim)
+                .filter(|l| !l.starts_with('#'))
+                .find_map(|l| l.strip_prefix(key).map(|v| v.trim().trim_matches('"').to_string()))
         })
+    };
+    value(openrc, "keymap=")
+        .or_else(|| value(vconsole, "KEYMAP="))
+        .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "us".to_string())
 }
 
@@ -77,5 +87,22 @@ mod tests {
     fn detect_current_never_panics_and_has_a_fallback() {
         let current = detect_current();
         assert!(!current.is_empty());
+    }
+
+    #[test]
+    fn the_openrc_keymap_file_wins_and_comments_are_ignored() {
+        let dir = std::env::temp_dir().join(format!("gi-kbd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (o, v) = (dir.join("keymaps"), dir.join("vconsole.conf"));
+        std::fs::write(&o, "# keymap=\"xx\"\nkeymap=\"ua\"\nwindowkeys=\"YES\"\n").unwrap();
+        std::fs::write(&v, "KEYMAP=de\n").unwrap();
+        assert_eq!(detect_from(&o, &v), "ua");
+        std::fs::remove_file(&o).unwrap();
+        assert_eq!(detect_from(&o, &v), "de", "systemd's file is only a fallback");
+        std::fs::remove_file(&v).unwrap();
+        assert_eq!(detect_from(&o, &v), "us");
+        std::fs::write(&o, "keymap=\"\"\n").unwrap();
+        assert_eq!(detect_from(&o, &v), "us", "an empty value is no value");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
