@@ -72,6 +72,12 @@ default_entry: 1
     module_path: boot():/boot/initramfs.img
     cmdline: $BASE console=tty0 console=ttyS0,115200 loglevel=5 ${EXTRA_CMDLINE:-}
 CONF
+# Optional Secure Boot: SECUREBOOT_KEYS=<dir from secureboot/make-keys.sh> signs Limine and pins the config,
+# kernel and initramfs by hash (see secureboot/sign.sh); db.cer goes on the medium for enrolling.
+if [ -n "${SECUREBOOT_KEYS:-}" ]; then
+    ROOT=$ISO "$(dirname "$(readlink -f "$0")")/secureboot/sign.sh" "$SECUREBOOT_KEYS" "$ISO/limine.conf" "$ISO/EFI/BOOT/BOOTX64.EFI"
+    mkdir -p "$ISO/secureboot"; cp "$SECUREBOOT_KEYS/db.cer" "$ISO/secureboot/simple-linux-db.cer"
+fi
 cp "$ISO/limine.conf" "$ISO/boot/limine/limine.conf"
 
 # UEFI: El Torito boots a small FAT image holding Limine; it finds boot() there, so the

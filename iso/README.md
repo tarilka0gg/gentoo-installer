@@ -204,4 +204,4 @@ Both are invisible with serial-only testing and were only noticed from screensho
 - The TUI's network screen says Wi-Fi (iwd) is "not wired into this screen yet": on a machine without Ethernet the installer cannot get online from the TUI.
 - Nothing runs a real install from the ISO: the store has no kernels to install (see the
   main README), so the TUI has been started but not driven end to end.
-- No checksums, no signing, no Secure Boot.
+- Secure Boot: images can be signed (see `secureboot/README.md`); the installed system is not set up for it yet. Releases carry `SHA256SUMS` and an ssh signature.
