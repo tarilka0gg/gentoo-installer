@@ -11,6 +11,7 @@ WMCONF=${4:-}
 PROFILE=${5:-}     # optional output of make-profile.py: the user's own niri/Noctalia setup
 
 install -Dm755 "$CLI" "$ROOT/usr/local/bin/installer-cli"
+"$(dirname "$(readlink -f "$0")")/strip-isa-note.sh" "$ROOT/usr/local/bin/installer-cli"
 
 # Empty root password + autologin on both consoles. The serial line is what QEMU tests use.
 chroot "$ROOT" passwd -d root >/dev/null
@@ -38,6 +39,7 @@ grep -q '^ttyS0$' "$ROOT/etc/securetty" 2>/dev/null || echo ttyS0 >> "$ROOT/etc/
 # ends, the text installer takes over. The serial console always gets the TUI.
 if [ -n "$GUI" ]; then
     install -Dm755 "$GUI" "$ROOT/usr/local/bin/installer-gui"
+"$(dirname "$(readlink -f "$0")")/strip-isa-note.sh" "$ROOT/usr/local/bin/installer-gui"
     [ -n "$WMCONF" ] || { echo "GUI mode needs the gentoo-wm-configs directory" >&2; exit 1; }
     install -d "$ROOT/root/.config/niri" "$ROOT/root/.config/noctalia"
     cp "$WMCONF/niri/config.kdl" "$ROOT/root/.config/niri/config.kdl"

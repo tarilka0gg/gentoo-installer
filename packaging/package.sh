@@ -15,6 +15,8 @@ ARCH=$(uname -m)
 D=dist/$NAME-$VERSION
 rm -rf "${D:?}"
 install -Dm755 target/release/installer-cli target/release/installer-gui -t "$D/prefix/bin"
+# The build machine's libc may carry an "x86-64-v3 needed" note that would stop the binaries on older CPUs.
+iso/strip-isa-note.sh "$D/prefix/bin/installer-cli" "$D/prefix/bin/installer-gui"
 install -Dm644 "packaging/$ID.desktop" "packaging/$ID.Text.desktop" -t "$D/prefix/share/applications"
 install -Dm644 "packaging/$ID.metainfo.xml" -t "$D/prefix/share/metainfo"
 install -Dm644 packaging/icons/$NAME.svg -t "$D/prefix/share/icons/hicolor/scalable/apps"
