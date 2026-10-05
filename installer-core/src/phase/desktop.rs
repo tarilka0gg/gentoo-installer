@@ -18,6 +18,9 @@ impl Phase for DesktopPhase {
     }
 
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
+        if !ctx.settings.desktop {
+            return Ok(true);
+        }
         let Some(account) = &ctx.settings.account else {
             return Ok(false);
         };
@@ -35,6 +38,13 @@ impl Phase for DesktopPhase {
             id: self.id(),
             label: self.label().to_string(),
         });
+        if !ctx.settings.desktop {
+            let _ = tx.send(Event::PhaseFinished {
+                id: self.id(),
+                duration: std::time::Duration::default(),
+            });
+            return Ok(());
+        }
         let account = ctx.settings.account.clone().ok_or_else(|| {
             crate::Error::Other(anyhow::anyhow!(
                 "the desktop is set up for a user; none was given"

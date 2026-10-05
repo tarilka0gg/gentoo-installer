@@ -142,6 +142,8 @@ pub struct Settings {
     /// Custom stage3 tarball; `None` means the official mirror's latest.
     pub stage3: Option<crate::stage3::Stage3Source>,
     pub wm: crate::wm::WmChoice,
+    /// Install the desktop at all (`false`: a console-only system, e.g. a server).
+    pub desktop: bool,
     /// Git URL of the wm-configs repository the desktop step clones.
     pub wm_configs_git_url: String,
     /// Ids from `packages::GROUPS` to install after the desktop.
@@ -163,6 +165,7 @@ impl Default for Settings {
             hostname: "gentoo".to_string(),
             account: None,
             stage3: None,
+            desktop: true,
             wm: crate::wm::WmChoice::default(),
             wm_configs_git_url: String::new(),
             packages: Vec::new(),
@@ -630,6 +633,19 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[tokio::test]
+    async fn a_console_only_install_skips_the_desktop_without_running_anything() {
+        let dir = temp_dir("nodesktop");
+        let fake = Arc::new(FakeCommandRunner::new());
+        let mut settings = settings_for_tests();
+        settings.desktop = false;
+        let mut ctx = ctx_with(&dir, fake.clone(), settings);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(DesktopPhase.is_satisfied(&ctx).await.unwrap());
+        DesktopPhase.run(&mut ctx, &tx).await.unwrap();
+        assert!(fake.calls().is_empty(), "{:?}", fake.calls());
     }
 
     #[tokio::test]

@@ -60,6 +60,11 @@ pub async fn configure(
     let repo_dir_str = repo_dir
         .to_str()
         .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 overlay path")))?;
+    // A resumed install gets here again with the overlay already cloned (and `git clone` refuses a
+    // non-empty directory); this is our own copy of the repository, so it is simply fetched afresh.
+    if repo_dir.exists() {
+        tokio::fs::remove_dir_all(&repo_dir).await?;
+    }
     runner
         .run_status(
             "git",
@@ -100,5 +105,40 @@ fn strip_version_suffix(cpv: &str) -> String {
     match cpv.rsplit_once('-') {
         Some((base, ver)) if ver.starts_with(|c: char| c.is_ascii_digit()) => base.to_string(),
         _ => cpv.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::FakeCommandRunner;
+
+    #[tokio::test]
+    async fn a_second_run_replaces_the_overlay_instead_of_failing_on_the_existing_directory() {
+        let target =
+            std::env::temp_dir().join(format!("gentoo-installer-store-{}", std::process::id()));
+        let repo = target.join("var/db/repos/localrepo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("stale"), "x").unwrap();
+        let cfg = StoreConfig {
+            binhost_url: "http://example.invalid".into(),
+            overlay_git_url: "git://example.invalid/o".into(),
+            overlay_name: "localrepo".into(),
+        };
+        let runner = FakeCommandRunner::new();
+        configure(&runner, &target, &cfg).await.unwrap();
+        assert!(
+            !repo.join("stale").exists(),
+            "the old copy must be gone before `git clone`"
+        );
+        assert!(
+            runner
+                .calls()
+                .iter()
+                .any(|c| c.1.iter().any(|a| a == "clone")),
+            "{:?}",
+            runner.calls()
+        );
+        std::fs::remove_dir_all(&target).ok();
     }
 }

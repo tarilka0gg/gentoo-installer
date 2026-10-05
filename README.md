@@ -272,8 +272,8 @@ and offers rescan and skip. The screen is a pure state machine (`installer-cli/s
 (`GENTOO_INSTALLER_DISK`, `_CONFIRM_ERASE` — must repeat the disk path —, `_USERNAME`, `_PASSWORD`, the
 `GENTOO_STORE_*` variables, optionally `_HOSTNAME`/`_LOCALES`/`_TIMEZONE`/`_KEYBOARD`/`_STAGE3_URL`).
 `phase::run_all` is the driver: it skips phases whose `is_satisfied` holds, stops at the first failure
-and reports it. Resuming is only partly there: `Partition` tracks its state in memory, so re-running over
-a half-finished disk tries to re-partition it (and refuses while it is mounted).
+and reports it. `--resume` continues the unfinished install this live session remembers (journal in `/run/installer`), skipping what is
+already done. `GENTOO_INSTALLER_WM=none` installs no desktop (a console-only system).
 
 Running it for real in a VM (live minimal ISO, blank virtio disk, a local test store with the live
 kernel, bundled stage) found four bugs no unit test could: `git commit` in `/etc/portage` needs an

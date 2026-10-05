@@ -15,6 +15,9 @@ use super::{Ctx, Phase, PhaseId};
 use crate::event::{Event, EventTx, Level};
 use crate::{hardware, kernel, stage3, store};
 
+/// Dropped in the target root after the stage3 unpack succeeded (see `DeployPhase::run`).
+pub(super) const STAGE_UNPACKED_MARKER: &str = ".gentoo-installer-stage3-unpacked";
+
 pub struct DeployPhase;
 
 #[async_trait::async_trait]
@@ -53,16 +56,24 @@ impl Phase for DeployPhase {
             label: self.label().to_string(),
         });
 
-        let _ = tx.send(log("Resolving current stage3 release..."));
-        let source = stage3::resolve(ctx.settings.stage3.as_ref()).await?;
-        let tarball_path = std::env::temp_dir().join("gentoo-installer-stage3.tar.xz");
+        // Written once the stage3 is fully unpacked: a resumed run skips the unpack (minutes) but a run that
+        // died halfway through it, which leaves no marker, starts over.
+        let unpacked = ctx.target.join(STAGE_UNPACKED_MARKER);
+        if unpacked.is_file() {
+            let _ = tx.send(log("The stage3 is already unpacked, keeping it."));
+        } else {
+            let _ = tx.send(log("Resolving current stage3 release..."));
+            let source = stage3::resolve(ctx.settings.stage3.as_ref()).await?;
+            let tarball_path = std::env::temp_dir().join("gentoo-installer-stage3.tar.xz");
 
-        let _ = tx.send(log("Downloading stage3...".to_string()));
-        stage3::download(&source, &tarball_path).await?;
+            let _ = tx.send(log("Downloading stage3...".to_string()));
+            stage3::download(&source, &tarball_path).await?;
 
-        let _ = tx.send(log("Unpacking stage3...".to_string()));
-        stage3::unpack(ctx.runner.as_ref(), &tarball_path, &ctx.target).await?;
-        tokio::fs::remove_file(&tarball_path).await.ok();
+            let _ = tx.send(log("Unpacking stage3...".to_string()));
+            stage3::unpack(ctx.runner.as_ref(), &tarball_path, &ctx.target).await?;
+            tokio::fs::remove_file(&tarball_path).await.ok();
+            tokio::fs::write(&unpacked, "").await?;
+        }
 
         let _ = tx.send(log("Fetching the portage overlay...".to_string()));
         store::configure(ctx.runner.as_ref(), &ctx.target, &ctx.store).await?;

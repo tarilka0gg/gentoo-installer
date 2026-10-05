@@ -27,6 +27,10 @@ impl Phase for FinalizePhase {
             label: self.label().to_string(),
         });
 
+        // The resume marker has done its job; it must not stay in the installed system's root.
+        tokio::fs::remove_file(ctx.target.join(super::deploy::STAGE_UNPACKED_MARKER))
+            .await
+            .ok();
         ctx.runner.run_status("sync", &[]).await?;
 
         if let Some(parts) = &ctx.parts {
