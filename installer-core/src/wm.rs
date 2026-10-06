@@ -463,6 +463,11 @@ async fn apply_preset_from_dir(
     )
     .await?;
     copy_dir(&preset_root.join("noctalia"), &config_dir.join("noctalia")).await?;
+    // The author's fish setup (tide prompt and its plugins), for a system whose stage has fish. It goes in before the session
+    // snippet below, which adds its own file to the same conf.d.
+    if preset_root.join("fish").is_dir() && target.join("usr/bin/fish").is_file() {
+        copy_dir(&preset_root.join("fish"), &config_dir.join("fish")).await?;
+    }
     tune_for_gpu(&config_dir, choice_of(spec), render).await?;
 
     let tmpl = tokio::fs::read_to_string(preset_root.join("bash_profile.tmpl")).await?;
@@ -962,5 +967,54 @@ mod tests {
             .unwrap()
             .contains("shared_gl_context = false"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn the_presets_fish_setup_is_copied_next_to_the_session_snippet_only_when_the_stage_has_fish(
+    ) {
+        for with_fish in [true, false] {
+            let tag = format!("fish{with_fish}-{}", std::process::id());
+            let target = std::env::temp_dir().join(format!("gentoo-installer-fishcfg-t-{tag}"));
+            let repo = std::env::temp_dir().join(format!("gentoo-installer-fishcfg-r-{tag}"));
+            for d in [&target, &repo] {
+                std::fs::remove_dir_all(d).ok();
+            }
+            std::fs::create_dir_all(target.join("home/tester")).unwrap();
+            if with_fish {
+                std::fs::create_dir_all(target.join("usr/bin")).unwrap();
+                std::fs::write(target.join("usr/bin/fish"), "").unwrap();
+            }
+            make_preset_repo(&repo, "niri");
+            std::fs::create_dir_all(repo.join("fish/conf.d")).unwrap();
+            std::fs::write(repo.join("fish/config.fish"), "# preset\n").unwrap();
+            std::fs::write(
+                repo.join("fish/conf.d/tide-config.fish"),
+                "set -g tide_x 1\n",
+            )
+            .unwrap();
+
+            apply_preset_from_dir(
+                &FakeCommandRunner::new(),
+                &target,
+                &repo,
+                &spec(WmChoice::Niri),
+                "tester",
+                &Default::default(),
+            )
+            .await
+            .unwrap();
+
+            let fish = target.join("home/tester/.config/fish");
+            assert_eq!(fish.join("config.fish").exists(), with_fish);
+            assert_eq!(fish.join("conf.d/tide-config.fish").exists(), with_fish);
+            // the session start-up file is written either way and the copy did not remove it
+            assert_eq!(
+                fish.join("conf.d/10-session.fish").exists(),
+                with_fish,
+                "only with fish in the stage"
+            );
+            std::fs::remove_dir_all(&target).ok();
+            std::fs::remove_dir_all(&repo).ok();
+        }
     }
 }

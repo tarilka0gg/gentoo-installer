@@ -1,7 +1,7 @@
 #!/bin/bash
 # store-servers.sh <store-dir> <git-base-dir> start|stop   — loopback-only test "portage store" for VM installs.
 # HTTP :8123 serves <store-dir> (Packages, kernels/…, installer binaries); `git daemon` :9418 serves every
-# repository under <git-base-dir> (the overlay, gentoo-wm-configs). A QEMU user-net guest sees the host
+# repository under <git-base-dir> (the overlay, simple-linux-configs). A QEMU user-net guest sees the host
 # as 10.0.2.2. Run as the unprivileged user; stop kills only the PIDs recorded in /tmp.
 set -euo pipefail
 STORE=$(readlink -f "$1"); GITBASE=$(readlink -f "$2"); PIDS=/tmp/store-servers.pids

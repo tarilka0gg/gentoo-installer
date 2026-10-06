@@ -300,7 +300,7 @@ Advanced setup (GUI) or environment variables (TUI) choose three things:
   Steam and Discord are deliberately not offered (overlay/multilib/licence decisions).
 - **Desktop** — niri, Hyprland, Sway, Labwc, MangoWC and dwl (`GENTOO_INSTALLER_WM=…`). dwl's config is a C
   header: the preset's `config.h` goes to `/etc/portage/savedconfig/gui-wm/dwl` with `USE=savedconfig` and
-  is compiled in. Scroll and Triad from `gentoo-wm-configs` have no ebuild in `gentoo`, `guru` or the local
+  is compiled in. Scroll and Triad from `simple-linux-configs` have no ebuild in `gentoo`, `guru` or the local
   overlays, so they cannot be installed yet.
 
 ## License

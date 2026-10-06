@@ -9,7 +9,7 @@ set -euo pipefail
 W=$(readlink -f "${1:?work dir}"); NAME=${2:?rootfs name}; MODE=${3:-}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BIN=${INSTALLER_TARGET_DIR:-$HERE/../target/release}
-WM_CONFIGS=${WM_CONFIGS:-$(cd "$HERE/../.." && pwd)/gentoo-wm-configs}   # sibling checkout
+WM_CONFIGS=${WM_CONFIGS:-$(cd "$HERE/../.." && pwd)/simple-linux-configs}   # sibling checkout
 R=$W/$NAME
 KVER=$(ls "$W/modroot/lib/modules")
 

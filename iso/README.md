@@ -78,7 +78,7 @@ For comparison, the official Gentoo minimal install CD is 975.8 MiB and its Live
 
 Same kernel and boot path, `ROOTFS=live-root-gui ./assemble-iso.sh <work> out.iso`. The rootfs
 adds GTK4, libadwaita, Mesa (with LLVM), seatd, **niri, Noctalia, xwayland-satellite and
-ghostty** — the compositor and shell from `gentoo-wm-configs`, with that repo's `niri/config.kdl`
+ghostty** — the compositor and shell from `simple-linux-configs`, with that repo's `niri/config.kdl`
 and `noctalia/config.toml` copied unchanged into root's home. `prepare-rootfs.sh <root> <cli>
 <gui> <wm-configs-dir>` appends two live-only blocks to the *copy* of the niri config (start
 `installer-gui` as a floating window, so Noctalia's bar stays visible). tty1 starts `dbus-run-session -- niri --session` (stderr
@@ -201,6 +201,13 @@ as the handler of .deb/.AppImage/.flatpak files on its first start (`ustan unreg
 need Rust and Zig): the `ustan` command always, `ustan-gui` with its menu entry and icon only when the target has libadwaita (a desktop was installed, since the copy
 is linked against it). Nothing is copied from a live system without ustan. `GENTOO_INSTALLER_USTAN=0` (headless) skips it; it is not tracked by Portage, so it is
 not updated with the system.
+
+## The configs repository
+
+The desktop and shell configs the installer puts into the new user's home come from
+[simple-linux-configs](https://github.com/tarilka0gg/simple-linux-configs) (it was `gentoo-wm-configs`; GitHub redirects the old name). The live image sets
+`GENTOO_WM_CONFIGS_URL` to it by default (`WM_CONFIGS_DEFAULT_URL` changes that at build time), so an install no longer needs the variable set by hand.
+Besides the compositor and Noctalia directories the repository has `fish/`: the author's fish with the tide prompt, copied to `~/.config/fish` when the stage has fish.
 
 ## Startup time
 

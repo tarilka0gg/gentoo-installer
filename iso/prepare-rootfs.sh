@@ -1,5 +1,5 @@
 #!/bin/bash
-# prepare-rootfs.sh <rootfs> <installer-cli-binary> [installer-gui-binary gentoo-wm-configs-dir [profile-dir]]
+# prepare-rootfs.sh <rootfs> <installer-cli-binary> [installer-gui-binary simple-linux-configs-dir [profile-dir]]
 # Turns an unpacked stage3 (with the runtime tools already emerged) into the live system:
 # root autologin on tty1 + serial, the installer started from root's login shell, iwd and
 # dhcpcd on boot, an empty root password (this is a live ISO, not an installed system).
@@ -35,7 +35,7 @@ grep -q '^ttyS0$' "$ROOT/etc/securetty" 2>/dev/null || echo ttyS0 >> "$ROOT/etc/
 
 # Start the installer on the first console that logs in; leaving it drops to a shell.
 # With a GUI binary, tty1 starts the user's own niri + Noctalia session (config from the
-# gentoo-wm-configs repo) with installer-gui launched on top, full screen; if the session
+# simple-linux-configs repo) with installer-gui launched on top, full screen; if the session
 # ends, the text installer takes over. The serial console always gets the TUI.
 if [ -n "$GUI" ]; then
     install -Dm755 "$GUI" "$ROOT/usr/local/bin/installer-gui"
@@ -75,7 +75,7 @@ Categories=Network;WebBrowser;
 MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
 StartupWMClass=zen
 ZENDESKTOP
-    [ -n "$WMCONF" ] || { echo "GUI mode needs the gentoo-wm-configs directory" >&2; exit 1; }
+    [ -n "$WMCONF" ] || { echo "GUI mode needs the simple-linux-configs directory" >&2; exit 1; }
     install -d "$ROOT/root/.config/niri" "$ROOT/root/.config/noctalia"
     cp "$WMCONF/niri/config.kdl" "$ROOT/root/.config/niri/config.kdl"
     cp "$WMCONF/noctalia/config.toml" "$ROOT/root/.config/noctalia/config.toml"
@@ -276,18 +276,22 @@ fi
 # aliases) from the latest release; its digest is read from the `.sha512` file next to it. Both shells get it, only when
 # nothing is set already and no stage3 is shipped on the medium (STAGE_TARBALL builds keep using theirs).
 STAGE_URL=${STAGE3_DEFAULT_URL:-https://github.com/tarilka0gg/simple-linux/releases/latest/download/simple-linux-stage3-amd64-openrc.tar.xz}
+CONFIGS_URL=${WM_CONFIGS_DEFAULT_URL:-https://github.com/tarilka0gg/simple-linux-configs.git}
 install -d "$ROOT/etc/profile.d" "$ROOT/etc/fish/conf.d"
 cat > "$ROOT/etc/profile.d/installer-stage.sh" <<SHENV
 # Written by prepare-rootfs.sh: where the installer gets its stage3 when the medium carries none.
 if [ -z "\${GENTOO_INSTALLER_STAGE3_URL:-}" ] && [ ! -d /run/initramfs/live/stage ] && [ ! -d /run/live/medium/stage ]; then
     export GENTOO_INSTALLER_STAGE3_URL=$STAGE_URL
 fi
+# The configs the installer puts in the new user's home (compositor, Noctalia, fish with tide): this project's repository.
+[ -n "\${GENTOO_WM_CONFIGS_URL:-}" ] || export GENTOO_WM_CONFIGS_URL=$CONFIGS_URL
 SHENV
 cat > "$ROOT/etc/fish/conf.d/20-installer-stage.fish" <<FISHENV
 # Written by prepare-rootfs.sh: where the installer gets its stage3 when the medium carries none.
 if not set -q GENTOO_INSTALLER_STAGE3_URL; and not test -d /run/initramfs/live/stage; and not test -d /run/live/medium/stage
     set -gx GENTOO_INSTALLER_STAGE3_URL $STAGE_URL
 end
+set -q GENTOO_WM_CONFIGS_URL; or set -gx GENTOO_WM_CONFIGS_URL $CONFIGS_URL
 FISHENV
 
 # Start OpenRC services in parallel: the boot is mostly waiting for file reads (decompressing the root image), and several
