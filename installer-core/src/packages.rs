@@ -63,9 +63,81 @@ pub const GROUPS: &[Group] = &[
     Group {
         id: "browser",
         name: "Web browser",
-        description: "Firefox (prebuilt binary — no hours of compiling)",
+        description: "Zen Browser (prebuilt binary from GURU; the same browser as in the live image)",
         default: true,
-        atoms: &["www-client/firefox-bin"],
+        atoms: &["www-client/zen-bin"],
+        testing: &["www-client/zen-bin"],
+        use_flags: &[],
+        services: &[],
+        licenses: &[],
+        guru: true,
+    },
+    Group {
+        id: "tools",
+        name: "Command-line tools",
+        description: "git, btop, fastfetch, fish, micro, tmux, screen, lsof, strace",
+        default: true,
+        atoms: &["dev-vcs/git", "sys-process/btop", "app-misc/fastfetch", "app-shells/fish", "app-editors/micro", "app-misc/tmux", "app-misc/screen", "sys-process/lsof", "dev-debug/strace"],
+        testing: &["app-editors/micro"],
+        use_flags: &[],
+        services: &[],
+        licenses: &[],
+        guru: false,
+    },
+    Group {
+        id: "files",
+        name: "Files",
+        description: "Thunar with thumbnails and gvfs (mounting drives and network places), as in the live image",
+        default: true,
+        atoms: &["xfce-base/thunar", "xfce-base/tumbler", "gnome-base/gvfs"],
+        testing: &["xfce-base/thunar", "gnome-base/gvfs"],
+        use_flags: &["gnome-base/gvfs udisks", "x11-libs/gtk+ X", "x11-libs/cairo X", "xfce-base/libxfce4ui wayland", "xfce-base/libxfce4windowing wayland", "xfce-base/xfce4-panel wayland"],
+        services: &[],
+        licenses: &[],
+        guru: false,
+    },
+    Group {
+        id: "audio",
+        name: "Audio",
+        description: "PipeWire with WirePlumber, ALSA and the sound server",
+        default: true,
+        atoms: &["media-video/pipewire", "media-video/wireplumber"],
+        testing: &[],
+        use_flags: &["media-video/pipewire sound-server pipewire-alsa"],
+        services: &[],
+        licenses: &[],
+        guru: false,
+    },
+    Group {
+        id: "desktop-utils",
+        name: "Desktop utilities",
+        description: "wl-clipboard, imv (images), the XDG portals, Adwaita icons, DejaVu fonts",
+        default: true,
+        atoms: &["gui-apps/wl-clipboard", "media-gfx/imv", "sys-apps/xdg-desktop-portal", "sys-apps/xdg-desktop-portal-gtk", "x11-themes/adwaita-icon-theme", "media-fonts/dejavu"],
+        testing: &["x11-themes/adwaita-icon-theme"],
+        use_flags: &[],
+        services: &[],
+        licenses: &[],
+        guru: false,
+    },
+    Group {
+        id: "disks",
+        name: "Disk and rescue tools",
+        description: "GParted, parted, btrfs/xfs/f2fs/exfat/ntfs/FAT tools, LVM, mdadm, cryptsetup, ddrescue, testdisk, smartmontools, nvme-cli",
+        default: true,
+        atoms: &["sys-block/gparted", "sys-block/parted", "sys-fs/btrfs-progs", "sys-fs/dosfstools", "sys-fs/exfatprogs", "sys-fs/f2fs-tools", "sys-fs/xfsprogs", "sys-fs/ntfs3g", "sys-fs/cryptsetup", "sys-fs/mdadm", "sys-fs/lvm2", "sys-fs/ddrescue", "app-admin/testdisk", "sys-apps/smartmontools", "sys-apps/nvme-cli", "sys-apps/hdparm", "sys-apps/gptfdisk"],
+        testing: &[],
+        use_flags: &["sys-fs/lvm2 lvm", "dev-cpp/gtkmm X", "dev-cpp/cairomm X", "x11-libs/gtk+ X", "x11-libs/cairo X"],
+        services: &[],
+        licenses: &[],
+        guru: false,
+    },
+    Group {
+        id: "hardware",
+        name: "Hardware and network tools",
+        description: "pciutils, usbutils, dmidecode, ethtool, nmap, tcpdump, traceroute, iw, wpa_supplicant",
+        default: true,
+        atoms: &["sys-apps/pciutils", "sys-apps/usbutils", "sys-apps/dmidecode", "sys-apps/ethtool", "net-analyzer/nmap", "net-analyzer/tcpdump", "net-analyzer/traceroute", "net-wireless/iw", "net-wireless/wpa_supplicant"],
         testing: &[],
         use_flags: &[],
         services: &[],
@@ -73,12 +145,12 @@ pub const GROUPS: &[Group] = &[
         guru: false,
     },
     Group {
-        id: "tools",
-        name: "Command-line tools",
-        description: "git, btop, fish, micro",
+        id: "gentoo-tools",
+        name: "Gentoo tools",
+        description: "eix, gentoolkit (equery), cpuid2cpuflags",
         default: true,
-        atoms: &["dev-vcs/git", "sys-process/btop", "app-shells/fish", "app-editors/micro"],
-        testing: &["app-editors/micro"],
+        atoms: &["app-portage/eix", "app-portage/gentoolkit", "app-portage/cpuid2cpuflags"],
+        testing: &[],
         use_flags: &[],
         services: &[],
         licenses: &[],
@@ -386,7 +458,7 @@ mod tests {
                 "--noreplace",
                 "--autounmask-write",
                 "--autounmask-continue",
-                "www-client/firefox-bin",
+                "www-client/zen-bin",
                 "games-util/gamemode",
                 "games-util/mangohud"
             ]
@@ -396,6 +468,7 @@ mod tests {
         assert!(
             kw.contains("games-util/gamemode ~amd64")
                 && kw.contains("games-util/mangohud ~amd64")
+                && kw.contains("www-client/zen-bin ~amd64")
                 && !kw.contains("firefox"),
             "{kw}"
         );
@@ -491,9 +564,9 @@ mod use_tests {
         assert!(!installed(&dir, &["browser".into()]));
         assert!(!installed(&dir, &["no-such-group".into()]));
 
-        std::fs::create_dir_all(dir.join("var/db/pkg/www-client/firefox-bin-157.0")).unwrap();
+        std::fs::create_dir_all(dir.join("var/db/pkg/www-client/zen-bin-1.23")).unwrap();
         assert!(installed(&dir, &["browser".into()]));
-        // `firefox-bin-157.0` must not satisfy a package that merely starts with the same letters.
+        // `zen-bin-1.23` must not satisfy a package that merely starts with the same letters.
         std::fs::create_dir_all(dir.join("var/db/pkg/app-editors")).unwrap();
         std::fs::create_dir_all(dir.join("var/db/pkg/app-editors/micro-extra-1")).unwrap();
         assert!(
