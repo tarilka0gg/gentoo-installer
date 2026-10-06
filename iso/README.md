@@ -195,6 +195,13 @@ live ebuild, which it puts in a small overlay inside the rootfs (the ebuild come
 overrides). Rust and Zig stay build-time only (`zig-bin` is installed first so Portage does not compile Zig from source). `ustan-gui` registers itself
 as the handler of .deb/.AppImage/.flatpak files on its first start (`ustan unregister` undoes it).
 
+### ustan on the installed system
+
+`installer-core/src/ustan.rs` copies ustan from the live system into `/usr/local` of the target at the end of the Packages phase (compiling it there would
+need Rust and Zig): the `ustan` command always, `ustan-gui` with its menu entry and icon only when the target has libadwaita (a desktop was installed, since the copy
+is linked against it). Nothing is copied from a live system without ustan. `GENTOO_INSTALLER_USTAN=0` (headless) skips it; it is not tracked by Portage, so it is
+not updated with the system.
+
 ## Startup time
 
 Profiled in QEMU/KVM (2 CPUs): from the kernel's start every OpenRC service is up in 2-4 s (EROFS image: `local` at 4.6 s), so the wait for the GUI was

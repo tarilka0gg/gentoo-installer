@@ -80,6 +80,7 @@ impl InstallOptions {
             stage3: self.stage3,
             wm: self.wm,
             desktop: true,
+            ustan: true,
             wm_configs_git_url: self.wm_configs_git_url,
             packages: self.packages,
             gpu_override: self.gpu_override,

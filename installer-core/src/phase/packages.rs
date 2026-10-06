@@ -3,6 +3,8 @@
 use super::{Ctx, Phase, PhaseId};
 use crate::event::{Event, EventTx};
 use crate::packages;
+use crate::ustan;
+use std::path::Path;
 
 pub struct PackagesPhase;
 
@@ -17,7 +19,10 @@ impl Phase for PackagesPhase {
     }
 
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
-        Ok(packages::installed(&ctx.target, &ctx.settings.packages))
+        let ustan_done = !ctx.settings.ustan
+            || ustan::installed(&ctx.target)
+            || !ustan::available(Path::new("/"));
+        Ok(packages::installed(&ctx.target, &ctx.settings.packages) && ustan_done)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
@@ -26,6 +31,15 @@ impl Phase for PackagesPhase {
             label: self.label().to_string(),
         });
         packages::install(ctx.runner.as_ref(), &ctx.target, &ctx.settings.packages).await?;
+        if ctx.settings.ustan {
+            let copied = ustan::install_from_live(Path::new("/"), &ctx.target).await?;
+            if !copied.is_empty() {
+                let _ = tx.send(Event::Log {
+                    line: format!("ustan copied to /usr/local ({})", copied.join(", ")),
+                    level: crate::event::Level::Info,
+                });
+            }
+        }
         let _ = tx.send(Event::PhaseFinished {
             id: self.id(),
             duration: std::time::Duration::default(),

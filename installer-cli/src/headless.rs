@@ -12,6 +12,7 @@
 //! | `GENTOO_STORE_BINHOST_URL`, `GENTOO_STORE_OVERLAY_URL`, … | see `StoreEnv` |
 //! | `GENTOO_INSTALLER_HOSTNAME`, `_LOCALES` (comma), `_TIMEZONE`, `_KEYBOARD` | optional |
 //! | `GENTOO_INSTALLER_STAGE3_URL`, `_SHA512` | optional custom stage3 (else the bundled one) |
+//! | `GENTOO_INSTALLER_USTAN=0` | do not copy ustan from the live image into the installed system |
 //! | `GENTOO_INSTALLER_WM` (`none` = no desktop), `_PACKAGES`, `_GPU`, `_OPT_LEVEL`, `_PACKAGE_MODE` | same meaning as in the TUI |
 //!
 //! `--resume` continues the unfinished install this live session remembers on the same disk (the journal
@@ -76,6 +77,7 @@ pub async fn run() -> Result<()> {
         settings.keyboard_layout = v;
     }
     settings.desktop = std::env::var("GENTOO_INSTALLER_WM").as_deref() != Ok("none");
+    settings.ustan = std::env::var("GENTOO_INSTALLER_USTAN").as_deref() != Ok("0");
     settings.wm = match std::env::var("GENTOO_INSTALLER_WM").as_deref() {
         Ok("hyprland") => WmChoice::Hyprland,
         Ok("sway") => WmChoice::Sway,
