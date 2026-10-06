@@ -211,7 +211,7 @@ pub fn build(app: &adw::Application) {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .default_width(900)
+        .default_width(800)
         .default_height(640)
         .content(&toolbar_view)
         .title("Gentoo Installer")

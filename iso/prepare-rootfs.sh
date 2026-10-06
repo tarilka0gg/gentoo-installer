@@ -118,6 +118,8 @@ spawn-at-startup "installer-gui"
 window-rule {
     match app-id="org.gentoo_diy.Installer"
     open-floating true
+    default-column-width { fixed 800; }
+    default-window-height { fixed 640; }   // 5:4
 }
 NIRILIVE
     install -d "$ROOT/usr/local/bin"
