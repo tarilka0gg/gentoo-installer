@@ -26,6 +26,13 @@ fi
 : > "$W/$ROOTFS/etc/resolv.conf"
 
 cp "$W/vmlinuz-live" "$ISO/boot/vmlinuz"
+# Memtest86+ (installed in the rootfs) boots straight from the menu, BIOS or UEFI.
+MEMTEST=
+if [ -f "$W/$ROOTFS/boot/memtest86plus/memtest64.bios" ] && [ -f "$W/$ROOTFS/boot/memtest86plus/memtest.efi64" ]; then
+    mkdir -p "$ISO/boot/memtest"
+    cp "$W/$ROOTFS/boot/memtest86plus/memtest64.bios" "$W/$ROOTFS/boot/memtest86plus/memtest.efi64" "$ISO/boot/memtest/"
+    MEMTEST=1
+fi
 cp "$W/$ROOTFS/boot/initramfs-live.img" "$ISO/boot/initramfs.img"
 chmod 644 "$ISO/boot/"*
 cp /usr/share/limine/limine-bios-cd.bin /usr/share/limine/limine-bios.sys "$ISO/boot/limine/"
@@ -40,7 +47,7 @@ cp /usr/share/limine/BOOTX64.EFI "$ISO/EFI/BOOT/"
 BASE="root=live:CDLABEL=$LABEL rd.live.image rd.live.dir=LiveOS rd.live.squashimg=squashfs.img rd.shell"
 cat > "$ISO/limine.conf" <<CONF
 timeout: 5
-default_entry: 1
+default_entry: ${DEFAULT_ENTRY:-1}
 
 /Simple Linux (live)
     protocol: linux
@@ -72,6 +79,18 @@ default_entry: 1
     module_path: boot():/boot/initramfs.img
     cmdline: $BASE console=tty0 console=ttyS0,115200 loglevel=5 ${EXTRA_CMDLINE:-}
 CONF
+if [ -n "$MEMTEST" ]; then
+cat >> "$ISO/limine.conf" <<CONF
+
+/Memory test - Memtest86+ (BIOS)
+    protocol: linux
+    kernel_path: boot():/boot/memtest/memtest64.bios
+
+/Memory test - Memtest86+ (UEFI)
+    protocol: efi
+    image_path: boot():/boot/memtest/memtest.efi64
+CONF
+fi
 # Optional Secure Boot: SECUREBOOT_KEYS=<dir from secureboot/make-keys.sh> signs Limine and pins the config,
 # kernel and initramfs by hash (see secureboot/sign.sh); db.cer goes on the medium for enrolling.
 if [ -n "${SECUREBOOT_KEYS:-}" ]; then
@@ -109,13 +128,14 @@ GRUBCFG
 # kernel and initramfs are copied in too (~30 MB - cheaper than a second config dialect).
 EFI=$W/efiboot.img
 # Sized to what goes in (+8 MB slack); FAT32 with 512-byte clusters needs >= ~33 MB to be valid.
-need=$(( $(stat -c %s "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" "$ISO/EFI/BOOT/BOOTX64.EFI" | paste -sd+ | bc) / 1048576 + 8 ))
+need=$(( $(stat -c %s "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" "$ISO/EFI/BOOT/BOOTX64.EFI" | paste -sd+ | bc) / 1048576 + 12 ))
 [ "$need" -lt 36 ] && need=36
 rm -f "$EFI"; truncate -s ${need}M "$EFI"; mkfs.vfat -F 32 -s 1 -n EFIBOOT "$EFI" >/dev/null
 mmd -i "$EFI" ::/EFI ::/EFI/BOOT ::/boot
 mcopy -i "$EFI" "$ISO/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "$EFI" "$ISO/limine.conf" ::/limine.conf
 mcopy -i "$EFI" "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" ::/boot/
+if [ -n "$MEMTEST" ]; then mmd -i "$EFI" ::/boot/memtest; mcopy -i "$EFI" "$ISO/boot/memtest/"* ::/boot/memtest/; fi
 cp "$EFI" "$ISO/boot/efiboot.img"
 
 # Build-time-only weight: the Portage tree, compilers' data, headers and docs. The live
@@ -156,7 +176,6 @@ usr/share/gcc-data
 usr/share/binutils-data
 usr/libexec/gcc
 usr/lib/binutils
-usr/lib/python3.14
 usr/bin/sway
 usr/bin/swaymsg
 usr/bin/swaynag

@@ -163,6 +163,15 @@ so a missing live medium drops to a shell instead of hanging.
 
 `test/run-gl-vm.sh` and `test/guest-shot.py` are the GL-VM test described below, kept in the repo.
 
+## Added tools, Memtest86+, size
+
+The rootfs also carries `gptfdisk`, `iw`, `wpa_supplicant`, `nmap`, `traceroute`, `eix`, `gentoolkit`, `screen` and `memtest86+`
+(the picks from the official installcd package list that fit our use). They are emerged into both rootfs trees
+(`USE="ncat nping"`), Python stays in the squashfs for `equery`, and `assemble-iso.sh` copies Memtest86+ to `boot/memtest/` and adds
+two menu entries (`protocol: linux` for the BIOS image, `protocol: efi` for the UEFI one; both hash-pinned by `sign.sh`). `DEFAULT_ENTRY=6`
+(or 7) makes the build boot straight into one, which is how both were tested. `/opt/rust-bin-*` and `/opt/zig-bin-*` are build-time
+only and are excluded from the squashfs. Sizes: minimal 1091 MiB, gui 1467 MiB.
+
 ## Ventoy, and CPUs older than Haswell
 
 **Ventoy** ignores `limine.conf`; `assemble-iso.sh` also writes `boot/grub/grub.cfg` with the same entries. Checked with Ventoy

@@ -12,7 +12,7 @@ ROOT=${ROOT:?ROOT = the directory that boot() or fslabel() in the config maps to
 tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
 while IFS= read -r line; do
     case $line in
-        *kernel_path:*|*module_path:*)
+        *kernel_path:*|*module_path:*|*image_path:*)
             p=${line#*):}; p=${p%%#*}   # the path after boot(): or fslabel(NAME):
             [ -f "$ROOT$p" ] || { echo "sign.sh: $ROOT$p missing" >&2; exit 1; }
             printf '%s#%s\n' "${line%%#*}" "$(b2sum "$ROOT$p" | cut -d' ' -f1)" ;;
