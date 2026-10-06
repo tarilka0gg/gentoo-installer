@@ -11,6 +11,11 @@ const APP_ID: &str = "org.gentoo_diy.Installer";
 
 fn main() -> glib::ExitCode {
     let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(window::build);
-    app.run()
+    if std::env::args().any(|a| a == "--debug-icons") {
+        app.connect_activate(window::build_debug_icons);
+    } else {
+        app.connect_activate(window::build);
+    }
+    // Our own flags must not reach GApplication, which rejects unknown options.
+    app.run_with_args::<&str>(&[])
 }

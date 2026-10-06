@@ -132,32 +132,58 @@ log() { echo "$(date +%T) $*" >> "$LOG"; }
 export XDG_RUNTIME_DIR=/run/user/0 LIBSEAT_BACKEND=seatd
 mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 
-dbus-run-session -- niri --session 2>/var/log/niri-session.log &
-pid=$!
-i=0
-while [ "$i" -lt 25 ] && kill -0 "$pid" 2>/dev/null; do sleep 1; i=$((i + 1)); done
-
-if kill -0 "$pid" 2>/dev/null; then
-    sock=$(ls /run/user/0 2>/dev/null | grep -m1 '^niri\..*\.sock$')
-    out=
-    [ -n "$sock" ] && out=$(NIRI_SOCKET="/run/user/0/$sock" niri msg outputs 2>/dev/null)
-    if [ -n "$out" ]; then
-        log "niri has an output after ${i}s; leaving the session running"
+# Is there a GPU driver that can do 3D? simpledrm/efifb/bochs/cirrus/qxl cannot, and niri then sits there without an output
+# (it used to be waited out for 25 s). The driver binds a second or two after udev starts: wait for udev, then up to 3 s more.
+accel_gpu() {
+    for c in /sys/class/drm/card[0-9]*; do
+        [ -e "$c/device/driver" ] || continue
+        case $(basename "$(readlink -f "$c/device/driver")") in
+            i915|xe|amdgpu|radeon|nouveau|nvidia|virtio_gpu|vmwgfx|msm|panfrost|panthor|v3d|vc4|etnaviv|lima) return 0 ;;
+        esac
+    done
+    ls /dev/dri/renderD* >/dev/null 2>&1
+}
+# GPU machines must not pay for this: look for a 3D driver for 2 s first. Only if there is none, let udev finish loading drivers
+# (bounded) and look 1.5 s more; on a machine whose cards are all unaccelerated that settles the question in about 3 s.
+t=0
+while ! accel_gpu && [ "$t" -lt 4 ]; do sleep 0.5; t=$((t + 1)); done
+if ! accel_gpu; then
+    udevadm settle --timeout=5 >/dev/null 2>&1
+    t=0
+    while ! accel_gpu && [ "$t" -lt 3 ]; do sleep 0.5; t=$((t + 1)); done
+fi
+if ! accel_gpu; then
+    log "no 3D-capable GPU driver after $((t / 2))s: skipping niri"
+else
+    log "3D-capable GPU after $((t / 2))s; starting niri"
+    dbus-run-session -- niri --session 2>/var/log/niri-session.log &
+    pid=$!
+    # Poll for an output twice a second, up to 15 s (was a fixed 25 s sleep, also when niri was already up).
+    i=0; ok=
+    while [ "$i" -lt 30 ] && kill -0 "$pid" 2>/dev/null; do
+        sock=$(ls /run/user/0 2>/dev/null | grep -m1 '^niri\..*\.sock$')
+        if [ -n "$sock" ] && [ -n "$(NIRI_SOCKET="/run/user/0/$sock" niri msg outputs 2>/dev/null)" ]; then ok=1; break; fi
+        sleep 0.5; i=$((i + 1))
+    done
+    if [ -n "$ok" ]; then
+        log "niri has an output after $((i / 2))s; leaving the session running"
         wait "$pid"
         log "niri session ended (status $?)"
         exit 0
     fi
-    kids=$(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ')
-    log "niri has no output after ${i}s (socket=[$sock]); stopping dbus-run-session $pid and children [$kids]"
-    kill -TERM $kids "$pid" >> "$LOG" 2>&1
-    sleep 3
-    kill -KILL $kids "$pid" >> "$LOG" 2>&1
-    pkill -KILL -x installer-gui >> "$LOG" 2>&1
-    wait "$pid" 2>/dev/null
-    log "niri stopped; still alive: [$(pgrep -x niri | tr '\n' ' ')]"
-else
-    wait "$pid"
-    log "niri exited by itself within ${i}s (status $?)"
+    if kill -0 "$pid" 2>/dev/null; then
+        kids=$(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ')
+        log "niri has no output after $((i / 2))s; stopping dbus-run-session $pid and children [$kids]"
+        kill -TERM $kids "$pid" >> "$LOG" 2>&1
+        sleep 1
+        kill -KILL $kids "$pid" >> "$LOG" 2>&1
+        pkill -KILL -x installer-gui >> "$LOG" 2>&1
+        wait "$pid" 2>/dev/null
+        log "niri stopped; still alive: [$(pgrep -x niri | tr '\n' ' ')]"
+    else
+        wait "$pid"
+        log "niri exited by itself within $((i / 2))s (status $?)"
+    fi
 fi
 
 echo "No hardware-accelerated graphics (niri needs it). Trying a software-rendered window..."

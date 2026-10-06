@@ -187,6 +187,16 @@ no checksum is published there, so it is HTTPS only) into `~/.local/share/zen` (
 menu, then runs it. Checked in a VM: 111 MB downloaded, unpacked and started (`Mozilla Zen 1.23b`). Without the NVIDIA firmware the live GUI on a new NVIDIA card has no accelerated
 nouveau and falls back to the software (cage) installer; the installed system uses the proprietary driver and is not affected. Sizes: minimal 747 MiB, GUI about 1000 MiB.
 
+## Startup time
+
+Profiled in QEMU/KVM (2 CPUs): from the kernel's start every OpenRC service is up in 2-4 s (EROFS image: `local` at 4.6 s), so the wait for the GUI was
+not the system booting. `live-gui` slept a fixed **25 s** whenever niri stayed alive, and without a 3D GPU niri stays alive without an output, then 3 s more
+to stop it before cage started (the installer window came ~31 s after the kernel started). It now looks at the DRM drivers: with a 3D-capable one
+(`i915 xe amdgpu radeon nouveau nvidia virtio_gpu vmwgfx` and the ARM ones) it starts niri at once and polls for an output twice a second (up to 15 s);
+with none after 2 s it lets udev settle, looks 1.5 s more and goes to cage: the window starts **~9 s** after the kernel instead of ~31 s (measured, twice).
+The Limine menu waits 3 s instead of 5. A 3D virtual GPU (virgl) still takes ~14 s to reach niri because OpenRC sits ~10 s between sysinit and the boot
+runlevel there; I did not find why and could not tell whether it also happens on real GPUs.
+
 ## What was cut from the image (0.2.7)
 
 | What | Why it was there | Saved (ISO) |

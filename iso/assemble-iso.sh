@@ -46,7 +46,7 @@ cp /usr/share/limine/BOOTX64.EFI "$ISO/EFI/BOOT/"
 #  * Limine's own `serial: yes` is only for the serial entry's benefit and is off by default.
 BASE="root=live:CDLABEL=$LABEL rd.live.image rd.live.dir=LiveOS rd.live.squashimg=squashfs.img rd.shell"
 cat > "$ISO/limine.conf" <<CONF
-timeout: 5
+timeout: 3
 default_entry: ${DEFAULT_ENTRY:-1}
 
 /Simple Linux (live)

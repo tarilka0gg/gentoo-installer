@@ -222,6 +222,84 @@ pub fn build(app: &adw::Application) {
 
 /// One shared stylesheet for the whole app — disk-card selection state and the
 /// partition-bar/legend swatch colors, which libadwaita has no ready-made classes for.
+/// Round icon badge. The image must expand inside the fixed-size circle: a horizontal
+/// `GtkBox` hands a non-expanding child only its natural width at the start edge, so
+/// `halign(Center)` alone leaves the glyph pinned to the left of the backing.
+fn icon_badge(icon: &str, pixel_size: i32) -> gtk::Box {
+    let image = gtk::Image::builder()
+        .icon_name(icon)
+        .pixel_size(pixel_size)
+        .hexpand(true)
+        .vexpand(true)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .build();
+    let badge = gtk::Box::builder()
+        .css_classes(vec!["info-tile-icon".to_string()])
+        .halign(gtk::Align::Center)
+        .build();
+    badge.append(&image);
+    badge
+}
+
+/// `--debug-icons`: a do-nothing window that lays the app's icon badges out over centre
+/// guide lines, to eyeball whether glyphs sit in the middle of their backing.
+pub fn build_debug_icons(app: &adw::Application) {
+    install_css();
+    let row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(24)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .margin_top(24)
+        .margin_bottom(24)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+    for icon in [
+        "drive-harddisk-symbolic",
+        "cpu-symbolic",
+        "system-run-symbolic",
+        "emblem-ok-symbolic",
+        "network-wireless-symbolic",
+        "go-previous-symbolic",
+    ] {
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&icon_badge(icon, 22)));
+        for (class, halign, valign) in [
+            ("debug-guide-v", gtk::Align::Center, gtk::Align::Fill),
+            ("debug-guide-h", gtk::Align::Fill, gtk::Align::Center),
+        ] {
+            let guide = gtk::Box::builder()
+                .css_classes(vec![class.to_string()])
+                .halign(halign)
+                .valign(valign)
+                .can_target(false)
+                .build();
+            overlay.add_overlay(&guide);
+        }
+        let label = gtk::Label::builder()
+            .label(icon)
+            .css_classes(vec!["caption".to_string(), "dim-label".to_string()])
+            .build();
+        let cell = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(8)
+            .build();
+        cell.append(&overlay);
+        cell.append(&label);
+        row.append(&cell);
+    }
+    let window = adw::ApplicationWindow::builder()
+        .application(app)
+        .title("Icon alignment debug")
+        .default_width(900)
+        .default_height(200)
+        .content(&row)
+        .build();
+    window.present();
+}
+
 fn install_css() {
     let provider = gtk::CssProvider::new();
     provider.load_from_data(
@@ -239,6 +317,8 @@ fn install_css() {
         .info-tile { padding: 16px 10px; border-radius: 12px; }\n\
         .info-tile-icon { border-radius: 999px; min-width: 44px; min-height: 44px; \
             background-color: alpha(currentColor, 0.10); }\n\
+        .debug-guide-v { min-width: 1px; background-color: rgba(255, 0, 0, 0.8); }\n\
+        .debug-guide-h { min-height: 1px; background-color: rgba(255, 0, 0, 0.8); }\n\
         .category-tile { min-height: 88px; padding: 0 18px; border-radius: 16px; border: none; \
             color: #ffffff; font-size: 1.15rem; font-weight: 800; \
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); box-shadow: none; }\n\
@@ -336,17 +416,7 @@ fn welcome_page(
         ("cpu-symbolic", "Kernel", "prebuilt for your CPU and GPU"),
         ("system-run-symbolic", "Boot", "Limine, UEFI or BIOS"),
     ] {
-        let image = gtk::Image::builder()
-            .icon_name(icon)
-            .pixel_size(22)
-            .halign(gtk::Align::Center)
-            .valign(gtk::Align::Center)
-            .build();
-        let badge = gtk::Box::builder()
-            .css_classes(vec!["info-tile-icon".to_string()])
-            .halign(gtk::Align::Center)
-            .build();
-        badge.append(&image);
+        let badge = icon_badge(icon, 22);
         let head = gtk::Label::builder()
             .label(head)
             .css_classes(vec!["section-heading".to_string()])
