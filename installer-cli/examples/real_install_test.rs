@@ -45,7 +45,8 @@ async fn main() {
             password: "testpassword123".into(),
         },
         wm: WmChoice::Niri,
-        wm_configs_git_url: "file:///home/tarilka0gg/Documents/projects/simple-linux-configs".into(),
+        wm_configs_git_url: "file:///home/tarilka0gg/Documents/projects/simple-linux-configs"
+            .into(),
         opt_level: OptLevel::O2,
         package_mode: PackageMode::Binary,
         simulate: false,

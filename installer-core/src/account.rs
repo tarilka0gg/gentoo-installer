@@ -121,6 +121,22 @@ pub const DOAS_CONF: &str = "permit :wheel\n";
 /// Root stays locked (`*` in `/etc/shadow`; a stage3 ships neither `doas` nor `sudo`),
 /// so without an escalation tool the installed system has a user that can never become
 /// root. `doas` refuses to trust a config other users can write, hence `0400`.
+/// Gives root fish as its login shell when the target has it (the account stays locked: this is the shell `su -`, `doas -s` or a rescue login gets).
+/// Does nothing on a stage without fish. Safe to run again.
+pub async fn set_root_shell(runner: &dyn CommandRunner, target: &Path) -> crate::Result<bool> {
+    let shell = login_shell(target);
+    if shell != "/usr/bin/fish" {
+        return Ok(false);
+    }
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| crate::Error::Other(anyhow::anyhow!("non-utf8 target path")))?;
+    runner
+        .run_status("usermod", &["-R", target_str, "-s", shell, "root"])
+        .await?;
+    Ok(true)
+}
+
 pub async fn configure_privilege(target: &Path) -> crate::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -394,5 +410,22 @@ mod tests {
             shown.contains("solomiya") && !shown.contains("hunter2"),
             "{shown}"
         );
+    }
+
+    #[tokio::test]
+    async fn root_gets_fish_only_when_the_stage_has_it() {
+        let dir = std::env::temp_dir().join(format!("gi-rootshell-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("usr/bin")).unwrap();
+        let runner = FakeCommandRunner::new();
+        assert!(!set_root_shell(&runner, &dir).await.unwrap());
+        assert!(runner.calls().is_empty(), "{:?}", runner.calls());
+        std::fs::write(dir.join("usr/bin/fish"), "").unwrap();
+        assert!(set_root_shell(&runner, &dir).await.unwrap());
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "usermod");
+        assert_eq!(calls[0].1[2..], ["-s", "/usr/bin/fish", "root"]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

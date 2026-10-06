@@ -467,6 +467,10 @@ async fn apply_preset_from_dir(
     // snippet below, which adds its own file to the same conf.d.
     if preset_root.join("fish").is_dir() && target.join("usr/bin/fish").is_file() {
         copy_dir(&preset_root.join("fish"), &config_dir.join("fish")).await?;
+        // root has fish as its shell as well (see `account::set_root_shell`) and the same setup; the installer runs as root, so
+        // the files are root's already.
+        let root_fish = target.join("root/.config/fish");
+        copy_dir(&preset_root.join("fish"), &root_fish).await?;
     }
     tune_for_gpu(&config_dir, choice_of(spec), render).await?;
 
@@ -1007,6 +1011,17 @@ mod tests {
             let fish = target.join("home/tester/.config/fish");
             assert_eq!(fish.join("config.fish").exists(), with_fish);
             assert_eq!(fish.join("conf.d/tide-config.fish").exists(), with_fish);
+            // root gets the same setup (it has fish as its shell then)
+            assert_eq!(
+                target.join("root/.config/fish/config.fish").exists(),
+                with_fish
+            );
+            assert!(
+                !target
+                    .join("root/.config/fish/conf.d/10-session.fish")
+                    .exists(),
+                "root must not auto-start the desktop"
+            );
             // the session start-up file is written either way and the copy did not remove it
             assert_eq!(
                 fish.join("conf.d/10-session.fish").exists(),

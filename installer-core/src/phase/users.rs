@@ -56,6 +56,12 @@ impl Phase for UsersPhase {
         }
         account::configure_privilege(&ctx.target).await?;
         account::install_doas(ctx.runner.as_ref(), &ctx.target).await?;
+        if account::set_root_shell(ctx.runner.as_ref(), &ctx.target).await? {
+            let _ = tx.send(Event::Log {
+                line: "root's login shell is fish".into(),
+                level: Level::Info,
+            });
+        }
 
         let _ = tx.send(Event::Log {
             line: format!("{} can run commands as root with doas (wheel group); the root account stays locked", acct.username),
