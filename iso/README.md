@@ -179,6 +179,22 @@ two menu entries (`protocol: linux` for the BIOS image, `protocol: efi` for the 
 (or 7) makes the build boot straight into one, which is how both were tested. `/opt/rust-bin-*` and `/opt/zig-bin-*` are build-time
 only and are excluded from the squashfs. Sizes: minimal 1091 MiB, gui 1467 MiB.
 
+## Zen Browser and NVIDIA firmware are not on the medium
+
+Zen (113 MB compressed) and `usr/lib/firmware/nvidia` (the GSP firmware nouveau needs on RTX 20xx and newer, 102 MB) are left out of the squashfs. The
+GUI image has `get-zen` and a "Zen Browser" menu entry: the first start downloads the tarball from the project's GitHub release (`ZEN_URL` overrides it;
+no checksum is published there, so it is HTTPS only) into `~/.local/share/zen` (RAM on the live system), opens a terminal for the progress when started from a
+menu, then runs it. Checked in a VM: 111 MB downloaded, unpacked and started (`Mozilla Zen 1.23b`). Without the NVIDIA firmware the live GUI on a new NVIDIA card has no accelerated
+nouveau and falls back to the software (cage) installer; the installed system uses the proprietary driver and is not affected. Sizes: minimal 747 MiB, GUI about 1000 MiB.
+
+## Compressing on another machine
+
+The squashfs is the only heavy step (zstd 19: about 1 minute here, 6.5 on a 4-thread Westmere build server). `SQUASHFS_FROM=<file>` makes `assemble-iso.sh`
+use a prebuilt one. Used for 0.2.5: `tar -C <rootfs> --anchored --no-wildcards --exclude-from=<squashfs-excludes.txt with `./` in front> --numeric-owner --xattrs -cf rootfs.tar .`
+(also excluding `dev/console`, `dev/null` and fifos, which a rootless container cannot create), copied to the server together with `mksquashfs` and its libraries from the
+builder chroot, then `sqfstar -comp zstd -Xcompression-level 19 -b 1M -processors 4 -p "dev d 755 0 0" -p "dev/console c 600 0 0 5 1" -p "dev/null c 666 0 0 1 3" out.sqsh < rootfs.tar`
+(`sqfstar` is `mksquashfs` under another name and reads the ownership from the tar). The result booted under Secure Boot like the locally built one.
+
 ## Ventoy, and CPUs older than Haswell
 
 **Ventoy** ignores `limine.conf`; `assemble-iso.sh` also writes `boot/grub/grub.cfg` with the same entries. Checked with Ventoy

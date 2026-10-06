@@ -40,6 +40,41 @@ grep -q '^ttyS0$' "$ROOT/etc/securetty" 2>/dev/null || echo ttyS0 >> "$ROOT/etc/
 if [ -n "$GUI" ]; then
     install -Dm755 "$GUI" "$ROOT/usr/local/bin/installer-gui"
 "$(dirname "$(readlink -f "$0")")/strip-isa-note.sh" "$ROOT/usr/local/bin/installer-gui"
+
+    # Zen Browser is not on the medium (it was 113 MB compressed): the first start downloads it from the project's own GitHub release.
+    cat > "$ROOT/usr/local/bin/get-zen" <<'GETZEN'
+#!/bin/sh
+# Starts Zen Browser, downloading it first if this live session has not got it yet. It is fetched over HTTPS from the project's
+# GitHub release (no checksum is published there) into ~/.local/share/zen, which lives in RAM on the live system.
+set -eu
+D=${XDG_DATA_HOME:-$HOME/.local/share}/zen
+BIN=$D/zen/zen-bin
+URL=${ZEN_URL:-https://github.com/zen-browser/desktop/releases/latest/download/zen.linux-x86_64.tar.xz}
+if [ ! -x "$BIN" ]; then
+    # Started from a menu there is no terminal to show the progress in: open one for the download.
+    if [ ! -t 1 ] && command -v ghostty >/dev/null 2>&1; then exec ghostty -e "$0" "$@"; fi
+    echo "Downloading Zen Browser (about 110 MB) from GitHub..." >&2
+    mkdir -p "$D"
+    curl -fL --retry 10 --retry-delay 3 --retry-all-errors --progress-bar -o "$D/zen.tar.xz" "$URL"
+    tar -C "$D" -xf "$D/zen.tar.xz"
+    rm -f "$D/zen.tar.xz"
+    [ -x "$BIN" ] || { echo "get-zen: $BIN missing after unpacking" >&2; exit 1; }
+fi
+exec "$BIN" "$@"
+GETZEN
+    chmod 755 "$ROOT/usr/local/bin/get-zen"
+    cat > "$ROOT/usr/share/applications/zen-browser.desktop" <<'ZENDESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Zen Browser
+Comment=Downloads Zen Browser on first start (not on the medium), then runs it
+Icon=web-browser
+Exec=get-zen %u
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=zen
+ZENDESKTOP
     [ -n "$WMCONF" ] || { echo "GUI mode needs the gentoo-wm-configs directory" >&2; exit 1; }
     install -d "$ROOT/root/.config/niri" "$ROOT/root/.config/noctalia"
     cp "$WMCONF/niri/config.kdl" "$ROOT/root/.config/niri/config.kdl"

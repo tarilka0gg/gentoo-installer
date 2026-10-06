@@ -154,6 +154,10 @@ else
 fi
 # Toolchains installed under /opt only to build things (Rust, Zig): the live system compiles nothing.
 OPT_EXCLUDES=$(cd "$W/$ROOTFS" && ls -d opt/rust-bin-* opt/zig-bin-* 2>/dev/null || true)
+# Zen Browser is fetched on first use by get-zen (113 MB compressed) instead of being on the medium.
+ZEN_EXCLUDES="opt/zen
+usr/bin/zen
+usr/share/applications/zen-zen-bin.desktop"
 cat > "$W/squashfs-excludes.txt" <<EXCL
 var/db/repos/gentoo
 var/db/repos/guru
@@ -167,6 +171,7 @@ var/cache/distfiles
 var/cache/binpkgs
 $LLVM_EXCLUDES
 $OPT_EXCLUDES
+$ZEN_EXCLUDES
 usr/include
 usr/share/locale
 usr/share/i18n
@@ -189,7 +194,9 @@ usr/lib/python3.14/test
 EXCL
 
 # linux-firmware is ~1.9 GB raw. Keep what laptops/desktops need (Wi-Fi, GPU, Bluetooth, audio,
-# Ethernet); leave out server NICs, SoC/phone firmware, and old per-chip Wi-Fi versions.
+# Ethernet); leave out server NICs, SoC/phone firmware, and old per-chip Wi-Fi versions. `nvidia` (GSP firmware for nouveau on
+# RTX 20xx and newer, 102 MB compressed) is out too: without it the live GUI there runs in software (the cage fallback);
+# the installed system uses the proprietary driver and does not depend on this directory.
 # Computed from the rootfs, so a missing firmware dir just adds nothing.
 python3 - "$W/$ROOTFS" >> "$W/squashfs-excludes.txt" <<'FWPY'
 import glob, os, re, sys, collections
@@ -198,7 +205,7 @@ fw = os.path.join(root, "usr/lib/firmware")
 if os.path.isdir(fw):
     drop = """qcom netronome mellanox mrvl qed dpaa2 liquidio cxgb4 bnx2x bnx2 myri10ge sfc e100 tigon
     ql2xxx ql2400 ql2500 ti-keystone amphion imx nxp arm rockchip meson powervr vpu airoha
-    mediatek/mt8* qat_* intel/ipu intel/vsc intel/ice intel/qat intel/vpu intel/catpt intel/avs""".split()
+    nvidia mediatek/mt8* qat_* intel/ipu intel/vsc intel/ice intel/qat intel/vpu intel/catpt intel/avs""".split()
     for pat in drop:
         for p in glob.glob(os.path.join(fw, pat)):
             print("usr/lib/firmware/" + os.path.relpath(p, fw))
@@ -215,10 +222,18 @@ if os.path.isdir(fw):
             print("usr/lib/firmware/intel/iwlwifi/" + f)
 FWPY
 
+# squashfs + xorriso inside the builder chroot. SQUASHFS_FROM=<file> uses a squashfs made elsewhere (e.g. on a build server, from a tar of the
+# same tree minus squashfs-excludes.txt) instead of compressing here: the compression is the only heavy step.
+if [ -n "${SQUASHFS_FROM:-}" ]; then
+    mkdir -p "$ISO/LiveOS"; cp "$SQUASHFS_FROM" "$ISO/LiveOS/squashfs.img"
+    SQUASH_STEP="echo 'using the prebuilt squashfs'"
+else
+    SQUASH_STEP="mksquashfs /mnt/live-root /mnt/work/isoroot/LiveOS/squashfs.img -comp zstd -Xcompression-level 19 -b 1M -noappend -no-progress -ef /mnt/work/squashfs-excludes.txt"
+fi
 # squashfs + xorriso inside the builder chroot
 cat > "$W/inner.sh" <<INNER
 set -e
-mksquashfs /mnt/live-root /mnt/work/isoroot/LiveOS/squashfs.img -comp zstd -Xcompression-level 19 -b 1M -noappend -no-progress -ef /mnt/work/squashfs-excludes.txt
+$SQUASH_STEP
 xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid $LABEL -R -J \
   -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
   --efi-boot boot/efiboot.img -efi-boot-part --efi-boot-image --protective-msdos-label \
