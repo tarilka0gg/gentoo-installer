@@ -41,24 +41,42 @@ if [ -n "$GUI" ]; then
     install -Dm755 "$GUI" "$ROOT/usr/local/bin/installer-gui"
 "$(dirname "$(readlink -f "$0")")/strip-isa-note.sh" "$ROOT/usr/local/bin/installer-gui"
 
-    # Zen Browser is not on the medium (it was 113 MB compressed): the first start downloads it from the project's own GitHub release.
+    # Zen Browser is not on the medium (it was 113 MB compressed): the graphical session fetches it in the background from the project's
+    # own GitHub release as soon as it starts (`get-zen --fetch`); starting Zen earlier just waits for that download. No terminal.
     cat > "$ROOT/usr/local/bin/get-zen" <<'GETZEN'
 #!/bin/sh
-# Starts Zen Browser, downloading it first if this live session has not got it yet. It is fetched over HTTPS from the project's
-# GitHub release (no checksum is published there) into ~/.local/share/zen, which lives in RAM on the live system.
+# get-zen [--fetch] [args]   Starts Zen Browser, downloading it first if this live session has not got it yet. It is fetched over HTTPS
+# from the project's GitHub release (no checksum is published there) into ~/.local/share/zen, which lives in RAM on the live system.
+#   --fetch  only download (quietly, waiting for the network if needed); used at session start so Zen is ready when you open it.
+# One download at a time: a second caller waits for the first one's lock.
 set -eu
 D=${XDG_DATA_HOME:-$HOME/.local/share}/zen
 BIN=$D/zen/zen-bin
 URL=${ZEN_URL:-https://github.com/zen-browser/desktop/releases/latest/download/zen.linux-x86_64.tar.xz}
-if [ ! -x "$BIN" ]; then
-    # Started from a menu there is no terminal to show the progress in: open one for the download.
-    if [ ! -t 1 ] && command -v ghostty >/dev/null 2>&1; then exec ghostty -e "$0" "$@"; fi
-    echo "Downloading Zen Browser (about 110 MB) from GitHub..." >&2
+
+fetch() {
     mkdir -p "$D"
-    curl -fL --retry 10 --retry-delay 3 --retry-all-errors --progress-bar -o "$D/zen.tar.xz" "$URL"
+    exec 9>"$D/.lock"; flock 9
+    [ -x "$BIN" ] && return 0
+    q=-s; [ -t 2 ] && q=--progress-bar
+    n=0
+    # No network yet right after boot: keep trying (about 10 minutes), the live session may still be bringing the link up.
+    until curl -fL --retry 5 --retry-delay 3 --retry-all-errors $q -o "$D/zen.tar.xz" "$URL"; do
+        n=$((n + 1)); [ "$n" -ge 120 ] && { echo "get-zen: download failed" >&2; return 1; }
+        sleep 5
+    done
     tar -C "$D" -xf "$D/zen.tar.xz"
     rm -f "$D/zen.tar.xz"
-    [ -x "$BIN" ] || { echo "get-zen: $BIN missing after unpacking" >&2; exit 1; }
+    [ -x "$BIN" ] || { echo "get-zen: $BIN missing after unpacking" >&2; return 1; }
+}
+
+if [ "${1:-}" = --fetch ]; then
+    [ -x "$BIN" ] || fetch
+    exit 0
+fi
+if [ ! -x "$BIN" ]; then
+    command -v notify-send >/dev/null 2>&1 && notify-send -a "Zen Browser" "Zen Browser is still downloading" "It will open as soon as the download finishes." || true
+    fetch
 fi
 exec "$BIN" "$@"
 GETZEN
@@ -67,7 +85,7 @@ GETZEN
 [Desktop Entry]
 Type=Application
 Name=Zen Browser
-Comment=Downloads Zen Browser on first start (not on the medium), then runs it
+Comment=Zen Browser (downloaded in the background when the live session starts)
 Icon=web-browser
 Exec=get-zen %u
 Terminal=false
@@ -115,6 +133,7 @@ spawn-at-startup "pipewire"
 spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
 spawn-at-startup "installer-gui"
+spawn-at-startup "get-zen" "--fetch"
 window-rule {
     match app-id="org.gentoo_diy.Installer"
     open-floating true
