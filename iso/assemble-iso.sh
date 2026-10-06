@@ -224,6 +224,11 @@ FWPY
 
 # squashfs + xorriso inside the builder chroot. SQUASHFS_FROM=<file> uses a squashfs made elsewhere (e.g. on a build server, from a tar of the
 # same tree minus squashfs-excludes.txt) instead of compressing here: the compression is the only heavy step.
+# ROOT_IMAGE=erofs (default) builds the root image with make-erofs.sh; ROOT_IMAGE=squashfs keeps mksquashfs/zstd. The file is
+# called squashfs.img either way (rd.live.squashimg); dracut tells the filesystem type from the content.
+if [ -z "${SQUASHFS_FROM:-}" ] && [ "${ROOT_IMAGE:-erofs}" = erofs ]; then
+    SQUASHFS_FROM=$("$(dirname "$(readlink -f "$0")")/make-erofs.sh" "$W/$ROOTFS" "$W/squashfs-excludes.txt" "$W/rootfs.erofs")
+fi
 if [ -n "${SQUASHFS_FROM:-}" ]; then
     mkdir -p "$ISO/LiveOS"; cp "$SQUASHFS_FROM" "$ISO/LiveOS/squashfs.img"
     SQUASH_STEP="echo 'using the prebuilt squashfs'"

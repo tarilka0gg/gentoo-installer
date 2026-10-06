@@ -264,6 +264,11 @@ if not set -q GENTOO_INSTALLER_STAGE3_URL; and not test -d /run/initramfs/live/s
 end
 FISHENV
 
+# Start OpenRC services in parallel: the boot is mostly waiting for file reads (decompressing the root image), and several
+# services reading at once keep more CPUs busy decompressing (measured with the EROFS image, see the iso README).
+sed -i 's/^#\?rc_parallel=.*/rc_parallel="YES"/' "$ROOT/etc/rc.conf"
+grep -q '^rc_parallel="YES"' "$ROOT/etc/rc.conf" || echo 'rc_parallel="YES"' >> "$ROOT/etc/rc.conf"
+
 echo gentoo-live > "$ROOT/etc/hostname"
 sed -i 's/^hostname=.*/hostname="gentoo-live"/' "$ROOT/etc/conf.d/hostname"
 

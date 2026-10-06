@@ -187,6 +187,21 @@ no checksum is published there, so it is HTTPS only) into `~/.local/share/zen` (
 menu, then runs it. Checked in a VM: 111 MB downloaded, unpacked and started (`Mozilla Zen 1.23b`). Without the NVIDIA firmware the live GUI on a new NVIDIA card has no accelerated
 nouveau and falls back to the software (cage) installer; the installed system uses the proprietary driver and is not affected. Sizes: minimal 747 MiB, GUI about 1000 MiB.
 
+## The root image: EROFS with LZMA
+
+Measured on the GUI tree (2.8 GiB after the exclusions), same files each time:
+
+| Image | Size | Build | `local` started (VM, 2 or 8 CPUs) |
+|---|---|---|---|
+| squashfs, zstd-19, 1 MiB blocks | 859 MiB | ~2 min | 2.6 s after kernel start (with `rc_parallel`) |
+| EROFS, zstd-19/22, 1 MiB clusters, fragments + dedupe | 828 MiB | 12-14 min | not measured |
+| **EROFS, lzma-9, 1 MiB clusters, fragments + dedupe** | **740 MiB** | **~1 min** | **4.6 s** (6.1 s without `rc_parallel`) |
+
+`make-erofs.sh` builds it (needs `sys-fs/erofs-utils`; from a directory, not a tar: mkfs.erofs 1.8.10 with a tar and `fragdedupe=inode` stored
+almost nothing), `ROOT_IMAGE=squashfs` keeps the old one. The kernel needs `CONFIG_EROFS_FS` with LZMA (in `kernel-live.config`); dracut 103+ mounts either
+type from the same `squashfs.img`. Extra CPUs do not help the boot (the reads are mostly sequential); `rc_parallel="YES"` does (about 1.5 s on the EROFS image).
+Zstd levels above 19 change nothing at 1 MiB blocks, and squashfs with xz is 9 times slower to decompress (146 vs 1328 MB/s per core) for 6-8 % less.
+
 ## Compressing on another machine
 
 The squashfs is the only heavy step (zstd 19: about 1 minute here, 6.5 on a 4-thread Westmere build server). `SQUASHFS_FROM=<file>` makes `assemble-iso.sh`
