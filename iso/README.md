@@ -187,6 +187,14 @@ no checksum is published there, so it is HTTPS only) into `~/.local/share/zen` (
 menu, then runs it. Checked in a VM: 111 MB downloaded, unpacked and started (`Mozilla Zen 1.23b`). Without the NVIDIA firmware the live GUI on a new NVIDIA card has no accelerated
 nouveau and falls back to the software (cage) installer; the installed system uses the proprietary driver and is not affected. Sizes: minimal 747 MiB, GUI about 1000 MiB.
 
+## ustan in the images
+
+[ustan](https://github.com/tarilka0gg/ustan) (the Windows-style installer for .deb, AppImage, Flatpak and .exe) is in both images: the GUI image has
+`ustan` and `ustan-gui` (with the menu entry), the minimal one only the `ustan` command. `add-ustan.sh <rootfs> gui|cli` emerges it into a rootfs from its
+live ebuild, which it puts in a small overlay inside the rootfs (the ebuild comes from the ustan checkout next to this repository, `USTAN_EBUILD_DIR`
+overrides). Rust and Zig stay build-time only (`zig-bin` is installed first so Portage does not compile Zig from source). `ustan-gui` registers itself
+as the handler of .deb/.AppImage/.flatpak files on its first start (`ustan unregister` undoes it).
+
 ## Startup time
 
 Profiled in QEMU/KVM (2 CPUs): from the kernel's start every OpenRC service is up in 2-4 s (EROFS image: `local` at 4.6 s), so the wait for the GUI was
