@@ -147,7 +147,12 @@ pub fn build(app: &adw::Application) {
     };
     let opt_level_page =
         opt_level_select_page(nav.clone(), state.clone(), target_after_prelude.clone());
-    let packages_page = packages_select_page(nav.clone(), state.clone(), opt_level_page.clone());
+    let packages_page = packages_select_page(
+        nav.clone(),
+        state.clone(),
+        opt_level_page.clone(),
+        target_after_prelude.clone(),
+    );
     let gpu_page = gpu_select_page(nav.clone(), state.clone(), packages_page.clone());
     let wm_page = wm_select_page(nav.clone(), state.clone(), gpu_page.clone());
     let timezone_page = timezone_select_page(nav.clone(), state.clone(), wm_page.clone());
@@ -156,7 +161,7 @@ pub fn build(app: &adw::Application) {
         &nav,
         state.clone(),
         keyboard_page.clone(),
-        target_after_prelude,
+        packages_page.clone(),
     ));
     nav.add(&keyboard_page);
     nav.add(&timezone_page);
@@ -230,13 +235,13 @@ fn icon_badge(icon: &str, pixel_size: i32) -> gtk::Box {
         .icon_name(icon)
         .pixel_size(pixel_size)
         .hexpand(true)
-        .vexpand(true)
         .halign(gtk::Align::Center)
         .valign(gtk::Align::Center)
         .build();
     let badge = gtk::Box::builder()
         .css_classes(vec!["info-tile-icon".to_string()])
         .halign(gtk::Align::Center)
+        .valign(gtk::Align::Start)
         .build();
     badge.append(&image);
     badge
@@ -258,7 +263,7 @@ pub fn build_debug_icons(app: &adw::Application) {
         .build();
     for icon in [
         "drive-harddisk-symbolic",
-        "cpu-symbolic",
+        "computer-symbolic",
         "system-run-symbolic",
         "emblem-ok-symbolic",
         "network-wireless-symbolic",
@@ -372,8 +377,7 @@ fn advanced_setup_popover(state: Rc<WizardState>) -> gtk::Popover {
     gtk::Popover::builder().child(&row).build()
 }
 
-/// `next_page` (Disk directly if there's already an ethernet link, else Network) is
-/// only used when Advanced setup is off — with it on, Start goes to Keyboard first
+/// `next_page` (Software selection) is only used when Advanced setup is off — with it on, Start goes to Keyboard first
 /// regardless.
 fn welcome_page(
     nav: &adw::NavigationView,
@@ -413,7 +417,7 @@ fn welcome_page(
             "Disk",
             "btrfs, ESP and swap laid out for you",
         ),
-        ("cpu-symbolic", "Kernel", "prebuilt for your CPU and GPU"),
+        ("computer-symbolic", "Kernel", "prebuilt for your CPU and GPU"),
         ("system-run-symbolic", "Boot", "Limine, UEFI or BIOS"),
     ] {
         let badge = icon_badge(icon, 22);
@@ -516,6 +520,12 @@ fn keyboard_select_page(
         .selected(selected_index)
         .build();
     dropdown.set_enable_search(true);
+    // A StringList has no default search key: without this the search box matches nothing.
+    dropdown.set_expression(Some(&gtk::PropertyExpression::new(
+        gtk::StringObject::static_type(),
+        None::<gtk::Expression>,
+        "string",
+    )));
 
     {
         let state = state.clone();
@@ -596,6 +606,12 @@ fn timezone_select_page(
         .selected(selected_index)
         .build();
     dropdown.set_enable_search(true);
+    // A StringList has no default search key: without this the search box matches nothing.
+    dropdown.set_expression(Some(&gtk::PropertyExpression::new(
+        gtk::StringObject::static_type(),
+        None::<gtk::Expression>,
+        "string",
+    )));
 
     {
         let state = state.clone();
@@ -830,6 +846,7 @@ fn packages_select_page(
     nav: adw::NavigationView,
     state: Rc<WizardState>,
     next_page: adw::NavigationPage,
+    normal_next_page: adw::NavigationPage,
 ) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
         .label("Software")
@@ -891,7 +908,14 @@ fn packages_select_page(
     content.append(&next_button);
     {
         let nav = nav.clone();
-        next_button.connect_clicked(move |_| nav.push(&next_page));
+        next_button.connect_clicked(move |_| {
+            // Advanced continues to the optimization level; the normal flow skips it.
+            if state.advanced.get() {
+                nav.push(&next_page);
+            } else {
+                nav.push(&normal_next_page);
+            }
+        });
     }
     let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
