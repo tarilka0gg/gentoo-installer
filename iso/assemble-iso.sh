@@ -222,6 +222,34 @@ if os.path.isdir(fw):
             print("usr/lib/firmware/intel/iwlwifi/" + f)
 FWPY
 
+# More weight the live system never uses:
+#  * /boot of the rootfs holds the initramfs (50 MB, already compressed) and the microcode images (30 MB) that are also on the medium;
+#    the kernel and initramfs are loaded from there, not from the root image.
+#  * Python is kept only for equery (gentoolkit): portage, _emerge and gentoolkit are what it imports (checked with `python -X importtime`
+#    over the equery subcommands); the rest of site-packages (sphinx, babel, meson, pygments, docutils, ...) was installed to build things.
+python3 - "$W/$ROOTFS" >> "$W/squashfs-excludes.txt" <<'PYPY'
+import glob, os, sys
+root = sys.argv[1]
+for f in ("initramfs-live.img", "intel-uc.img", "amd-uc.img", "memtest86plus"):
+    print("boot/" + f)
+for sp in glob.glob(os.path.join(root, "usr/lib/python3.*/site-packages")):
+    rel = os.path.relpath(sp, root)
+    for e in os.listdir(sp):
+        if e not in ("portage", "_emerge", "gentoolkit"):
+            print(rel + "/" + e)
+    lib = os.path.dirname(sp)
+    for n in ("test", "idle_test", "idlelib", "tkinter", "turtledemo", "ensurepip", "pydoc_data", "turtle.py"):
+        if os.path.exists(os.path.join(lib, n)):
+            print(os.path.relpath(lib, root) + "/" + n)
+KEEP = set("""python python3 archive-conf dispatch-conf ebuild eclean eclean-dist eclean-pkg egencache ekeyword emaint emerge emirrordist
+enalyze env-update epkginfo equery eshowkw fixpackages glsa-check gpkg-sign imlate merge-driver-ekeyword portageq quickpkg regenworld
+revdep-rebuild""".split())
+for d in glob.glob(os.path.join(root, "usr/lib/python-exec/python3.*")):
+    for n in os.listdir(d):
+        if n not in KEEP:
+            print(os.path.relpath(d, root) + "/" + n)
+PYPY
+
 # squashfs + xorriso inside the builder chroot. SQUASHFS_FROM=<file> uses a squashfs made elsewhere (e.g. on a build server, from a tar of the
 # same tree minus squashfs-excludes.txt) instead of compressing here: the compression is the only heavy step.
 # ROOT_IMAGE=erofs (default) builds the root image with make-erofs.sh; ROOT_IMAGE=squashfs keeps mksquashfs/zstd. The file is

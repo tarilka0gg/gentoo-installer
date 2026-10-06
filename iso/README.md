@@ -187,6 +187,17 @@ no checksum is published there, so it is HTTPS only) into `~/.local/share/zen` (
 menu, then runs it. Checked in a VM: 111 MB downloaded, unpacked and started (`Mozilla Zen 1.23b`). Without the NVIDIA firmware the live GUI on a new NVIDIA card has no accelerated
 nouveau and falls back to the software (cage) installer; the installed system uses the proprietary driver and is not affected. Sizes: minimal 747 MiB, GUI about 1000 MiB.
 
+## What was cut from the image (0.2.7)
+
+| What | Why it was there | Saved (ISO) |
+|---|---|---|
+| the rootfs's own `/boot` (initramfs 50 MB, microcode images 30 MB, memtest) | copies of what is already on the medium | ~100 MB of the root image |
+| Intel microcode for `06-ad/ae` (Granite Rapids), `06-af` (Sierra Forest), `06-dd`, `06-b6` (Grand Ridge), `06-cf` (Emerald Rapids): 37 → 23 MB (`prune-microcode.sh`) | the early-microcode cpio is stored uncompressed and the initramfs is on the ISO twice | initramfs 50 → 36 MiB, twice |
+| all of Python's `site-packages` but `portage`, `_emerge`, `gentoolkit`; the stdlib's `test`, `idlelib`, `tkinter`, `ensurepip`, `pydoc_data`; the python scripts that are not portage/gentoolkit tools | only `equery` needs Python; the rest (sphinx, babel, meson, pygments, docutils, ...) built things | ~20 MB |
+
+`06-8f` (Sapphire Rapids, also the Xeon W workstations) is kept; `KEEP_MICROCODE=all` keeps all of it. A CPU whose file is gone still boots on the firmware's microcode.
+The equery import set was found with `python -X importtime` over its subcommands. Checked: `equery`, `import portage, gentoolkit`, an empty `/boot` and the three images booting.
+
 ## The root image: EROFS with LZMA
 
 Measured on the GUI tree (2.8 GiB after the exclusions), same files each time:
