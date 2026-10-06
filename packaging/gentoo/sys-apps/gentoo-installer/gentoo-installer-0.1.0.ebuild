@@ -280,6 +280,8 @@ CRATES="
 	zvariant_utils@4.0.0
 "
 
+RUST_MIN_VER="1.88.0"
+
 inherit cargo desktop xdg
 
 DESCRIPTION="Gentoo installer: btrfs layout, per-hardware kernel, Limine; GTK4 and TUI"
