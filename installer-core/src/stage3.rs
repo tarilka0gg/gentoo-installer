@@ -45,9 +45,32 @@ pub fn bundled_from(dir: &Path) -> Option<Stage3Source> {
     let tarball = tarballs.pop()?;
     let sha512 = std::fs::read_to_string(format!("{}.sha512", tarball.display()))
         .ok()
-        .and_then(|t| t.split_whitespace().next().map(str::to_string))
-        .filter(|h| h.len() == 128 && h.chars().all(|c| c.is_ascii_hexdigit()));
+        .and_then(|t| parse_sha512sum(&t));
     Some(Stage3Source::custom(tarball.to_string_lossy(), sha512))
+}
+
+/// The digest from a `sha512sum`-format file (`<128 hex>  <name>`), if it holds a valid one.
+pub fn parse_sha512sum(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .next()
+        .filter(|h| h.len() == 128 && h.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(str::to_ascii_lowercase)
+}
+
+/// A custom stage3 given by URL without a digest: look for `<url>.sha512` next to it (the Simple Linux releases
+/// publish one) and verify against that. No sidecar, or one that does not parse, means no verification.
+async fn with_sidecar_digest(source: &Stage3Source) -> Stage3Source {
+    if source.sha512.is_some() || local_path(&source.url).is_some() {
+        return source.clone();
+    }
+    let sha512 = match fetch_digests_body(&format!("{}.sha512", source.url)).await {
+        Some(body) => parse_sha512sum(&body),
+        None => None,
+    };
+    Stage3Source {
+        url: source.url.clone(),
+        sha512,
+    }
 }
 
 /// The stage3 on the live medium, if this is a live ISO that carries one.
@@ -59,7 +82,7 @@ pub fn bundled() -> Option<Stage3Source> {
 /// else the official mirror's current stage3 (which needs the network).
 pub async fn resolve(custom: Option<&Stage3Source>) -> crate::Result<Stage3Source> {
     if let Some(c) = custom {
-        return Ok(c.clone());
+        return Ok(with_sidecar_digest(c).await);
     }
     match bundled() {
         Some(b) => Ok(b),
@@ -393,5 +416,21 @@ iQFPBAEBCAA5FiEEU05CCatJ7uHBnZYWLERpXbn2BD0FAmp65NUbFIAAAAAABAAO
             "a malformed digest file is ignored, not trusted"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_sha512sum_file_gives_its_digest_and_junk_gives_none() {
+        let h = "ab".repeat(64);
+        assert_eq!(
+            parse_sha512sum(&format!("{h}  stage.tar.xz\n")),
+            Some(h.clone())
+        );
+        assert_eq!(
+            parse_sha512sum(&format!("{}  x", h.to_uppercase())),
+            Some(h)
+        );
+        assert_eq!(parse_sha512sum("not a digest  x"), None);
+        assert_eq!(parse_sha512sum(&"ab".repeat(10)), None);
+        assert_eq!(parse_sha512sum(""), None);
     }
 }

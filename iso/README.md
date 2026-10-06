@@ -109,9 +109,16 @@ the bar remain.
 Add `live.debug` to the kernel command line (`EXTRA_CMDLINE=live.debug` when assembling) to get a
 plain shell on the serial console instead of the installer.
 
-## Shipping the custom stage on the ISO
+## The stage3: downloaded by default, optionally shipped on the ISO
 
-`STAGE_TARBALL=<file> assemble-iso.sh …` copies the tarball (and its `.sha512`) to `stage/` on the
+By default the image carries **no** stage3 (that was 240 MB of the disc): `prepare-rootfs.sh` writes `/etc/profile.d/installer-stage.sh` and
+`/etc/fish/conf.d/20-installer-stage.fish`, which set `GENTOO_INSTALLER_STAGE3_URL` to the latest Simple Linux release's stage3
+(`STAGE3_DEFAULT_URL=` changes it at build time) when nothing is set and no stage3 is on the medium. For a URL without a digest the installer
+reads `<url>.sha512` (`sha512sum` format) next to it and verifies the download against that (`stage3::with_sidecar_digest`); the releases
+publish that file. Checked in a VM: the image booted without a bundled stage, the install pulled the stage3 from GitHub, and the installed system had fish, eza,
+micro and no nano. Sizes without it: minimal 851 MiB, GUI 1227 MiB.
+
+An offline image: `STAGE_TARBALL=<file> assemble-iso.sh …` copies the tarball (and its `.sha512`) to `stage/` on the
 medium — outside the squashfs, so it does not occupy RAM (checked: ~330 MB used with it on the disc).
 The installer finds it at `/run/initramfs/live/stage` (`stage3::bundled`), verifies the digest and
 unpacks it, so the stage3 step needs no network. Precedence: `GENTOO_INSTALLER_STAGE3_URL` >

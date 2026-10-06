@@ -211,6 +211,24 @@ FISHCONF
     fi
 fi
 
+# Without a stage3 on the medium the installer downloads one. The default is this project's own (fish, eza, micro, the house
+# aliases) from the latest release; its digest is read from the `.sha512` file next to it. Both shells get it, only when
+# nothing is set already and no stage3 is shipped on the medium (STAGE_TARBALL builds keep using theirs).
+STAGE_URL=${STAGE3_DEFAULT_URL:-https://github.com/tarilka0gg/simple-linux/releases/latest/download/simple-linux-stage3-amd64-openrc.tar.xz}
+install -d "$ROOT/etc/profile.d" "$ROOT/etc/fish/conf.d"
+cat > "$ROOT/etc/profile.d/installer-stage.sh" <<SHENV
+# Written by prepare-rootfs.sh: where the installer gets its stage3 when the medium carries none.
+if [ -z "\${GENTOO_INSTALLER_STAGE3_URL:-}" ] && [ ! -d /run/initramfs/live/stage ] && [ ! -d /run/live/medium/stage ]; then
+    export GENTOO_INSTALLER_STAGE3_URL=$STAGE_URL
+fi
+SHENV
+cat > "$ROOT/etc/fish/conf.d/20-installer-stage.fish" <<FISHENV
+# Written by prepare-rootfs.sh: where the installer gets its stage3 when the medium carries none.
+if not set -q GENTOO_INSTALLER_STAGE3_URL; and not test -d /run/initramfs/live/stage; and not test -d /run/live/medium/stage
+    set -gx GENTOO_INSTALLER_STAGE3_URL $STAGE_URL
+end
+FISHENV
+
 echo gentoo-live > "$ROOT/etc/hostname"
 sed -i 's/^hostname=.*/hostname="gentoo-live"/' "$ROOT/etc/conf.d/hostname"
 

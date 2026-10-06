@@ -268,9 +268,11 @@ from the installed disk; see `iso/README.md` for what was and was not covered.
 The installer normally unpacks Gentoo's latest stage3. `GENTOO_INSTALLER_STAGE3_URL` (TUI and GUI;
 `InstallOptions::stage3` / `Settings::stage3` in code) points it at your own tarball instead: an
 `https://` URL, a `file://` path or a plain absolute path, with `GENTOO_INSTALLER_STAGE3_SHA512`
-checked while it downloads (a mismatch aborts before anything is unpacked). Without the variable the
-installer looks for a stage3 shipped on the live medium (`/run/initramfs/live/stage`, see
-`iso/README.md`) and only then falls back to Gentoo's latest from the mirror.
+checked while it downloads (a mismatch aborts before anything is unpacked). For a URL given without a
+digest the installer fetches `<url>.sha512` (`sha512sum` format) and verifies against that. Without the
+variable the installer looks for a stage3 shipped on the live medium (`/run/initramfs/live/stage`, see
+`iso/README.md`) and only then falls back to Gentoo's latest from the mirror. The Simple Linux live
+images set the variable themselves to the latest release's stage3, so they ship none.
 
 `iso/make-stage.sh` builds one: Gentoo's stage3 + fish, eza, dust, gping and micro (installed from
 binary packages, nothing compiled there), `nano` removed, the house aliases in
@@ -280,7 +282,8 @@ has it, otherwise bash; root stays locked either way.
 
 Tested end to end with the real `tar`/`useradd` (`a_custom_stage_is_fetched_verified_unpacked_and_gives_the_user_fish`
 in `installer-core/tests/real_target.rs`: digest mismatch refused, tarball unpacked, user's shell is
-fish). A full install from the custom stage has not been run (the store has no kernels).
+fish). A full install from the custom stage, downloaded from a GitHub release by the live image, was run in a VM:
+the installed system booted with fish, eza, micro and no nano.
 
 ## Choices: desktop, graphics driver, software
 
