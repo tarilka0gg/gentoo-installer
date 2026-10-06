@@ -146,6 +146,8 @@ pub struct Settings {
     pub desktop: bool,
     /// Copy ustan from the live image into the installed system (when the live system has it).
     pub ustan: bool,
+    /// Copy portage-store (and its doas rule) from the live image when the target has a desktop.
+    pub portage_store: bool,
     /// Git URL of the wm-configs repository the desktop step clones.
     pub wm_configs_git_url: String,
     /// Ids from `packages::GROUPS` to install after the desktop.
@@ -169,6 +171,7 @@ impl Default for Settings {
             stage3: None,
             desktop: true,
             ustan: true,
+            portage_store: true,
             wm: crate::wm::WmChoice::default(),
             wm_configs_git_url: String::new(),
             packages: Vec::new(),

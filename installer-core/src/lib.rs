@@ -22,6 +22,7 @@ pub mod network;
 pub mod packages;
 pub mod partition;
 pub mod phase;
+pub mod portage_store;
 pub mod services;
 pub mod stage3;
 pub mod store;

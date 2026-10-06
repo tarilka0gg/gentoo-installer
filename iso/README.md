@@ -187,6 +187,10 @@ no checksum is published there, so it is HTTPS only) into `~/.local/share/zen` (
 menu, then runs it. Checked in a VM: 111 MB downloaded, unpacked and started (`Mozilla Zen 1.23b`). Without the NVIDIA firmware the live GUI on a new NVIDIA card has no accelerated
 nouveau and falls back to the software (cage) installer; the installed system uses the proprietary driver and is not affected. Sizes: minimal 747 MiB, GUI about 1000 MiB.
 
+## portage-store in the GUI image and the installed desktop
+
+`add-store.sh` emerges [portage-store](https://github.com/tarilka0gg/portage-store) (GTK4 app store for Portage, with `portage-store-cli` and its root-owned helper) into the GUI rootfs from its live ebuild. The minimal image does not have it (no GTK). On a target that got a desktop (libadwaita present) the installer copies it from the live system, like ustan: programs and menu entry under `/usr/local`, the helper stays in `/usr/libexec/portage-store/` (the program and the doas rule name that path), `/var/log/portage-store` is `root:portage 0750`, and `/etc/doas.conf` gets `permit nopass :wheel cmd /usr/libexec/portage-store/priv-helper` - the single rule the helper is designed around. `GENTOO_INSTALLER_STORE=0` turns it off.
+
 ## ustan in the images
 
 [ustan](https://github.com/tarilka0gg/ustan) (the Windows-style installer for .deb, AppImage, Flatpak and .exe) is in both images: the GUI image has

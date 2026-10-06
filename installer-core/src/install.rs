@@ -81,6 +81,7 @@ impl InstallOptions {
             wm: self.wm,
             desktop: true,
             ustan: true,
+            portage_store: true,
             wm_configs_git_url: self.wm_configs_git_url,
             packages: self.packages,
             gpu_override: self.gpu_override,

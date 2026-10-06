@@ -3,6 +3,7 @@
 use super::{Ctx, Phase, PhaseId};
 use crate::event::{Event, EventTx};
 use crate::packages;
+use crate::portage_store;
 use crate::ustan;
 use std::path::Path;
 
@@ -22,7 +23,11 @@ impl Phase for PackagesPhase {
         let ustan_done = !ctx.settings.ustan
             || ustan::installed(&ctx.target)
             || !ustan::available(Path::new("/"));
-        Ok(packages::installed(&ctx.target, &ctx.settings.packages) && ustan_done)
+        let store_done = !ctx.settings.portage_store
+            || portage_store::installed(&ctx.target)
+            || !portage_store::available(Path::new("/"))
+            || !ustan::target_has_gtk(&ctx.target);
+        Ok(packages::installed(&ctx.target, &ctx.settings.packages) && ustan_done && store_done)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
@@ -36,6 +41,15 @@ impl Phase for PackagesPhase {
             if !copied.is_empty() {
                 let _ = tx.send(Event::Log {
                     line: format!("ustan copied to /usr/local ({})", copied.join(", ")),
+                    level: crate::event::Level::Info,
+                });
+            }
+        }
+        if ctx.settings.portage_store {
+            let copied = portage_store::install_from_live(Path::new("/"), &ctx.target).await?;
+            if !copied.is_empty() {
+                let _ = tx.send(Event::Log {
+                    line: format!("portage-store copied ({})", copied.join(", ")),
                     level: crate::event::Level::Info,
                 });
             }
