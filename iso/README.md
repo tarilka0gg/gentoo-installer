@@ -132,7 +132,7 @@ Both images carry `linux-firmware` (Wi-Fi, GPU, Bluetooth, audio; the kernel's d
 real hardware without it), `sof-firmware` and `intel-microcode`, and the usual rescue kit: `xfsprogs`,
 `ntfs-3g`, `exfatprogs`, `f2fs-tools`, `cryptsetup`, `lvm2` (with its tools — the stage3 builds it
 without), `mdadm`, `testdisk`, `ddrescue`, `smartmontools`, `nvme-cli`, `hdparm`, `usbutils`,
-`dmidecode`, `lsof`, `htop`, `tmux`, `tcpdump`, `ethtool`, `strace`. The kernel fragment adds the modules
+`dmidecode`, `lsof`, `btop`, `fastfetch`, `tmux`, `tcpdump`, `ethtool`, `strace`. The kernel fragment adds the modules
 for them (`dm-crypt`, software RAID, XFS, F2FS, NTFS3, exFAT) and compressed-firmware loading.
 Checked in a VM: the modules load and the tools are on `PATH`.
 
@@ -271,6 +271,10 @@ Both images use **fish** as root's shell, with the author's aliases in `/etc/fis
 (`ls`/`ll`/`lt` → `eza`, `nano` → `micro`, `du` → `dust`, `ping` → `gping`, `EDITOR=micro`) and no
 `nano`. The installer is started from `~/.config/fish/config.fish` (same logic as `.bash_profile`,
 fish syntax). `micro` and `gping` are `~amd64` (`micro` from `gentoo`, `gping` from GURU).
+
+## Same tools in the image and in the installed system
+
+Both images carry `btop` (it replaced `htop`, which is removed) and `fastfetch`; `add-tools.sh` adds them to an existing rootfs. The installer's default package groups now cover everything the GUI image has: `tools` (git, btop, fastfetch, fish, micro, tmux, screen, lsof, strace), `browser` (Zen from GURU), `files`, `audio`, `desktop-utils`, `disks`, `hardware`, `gentoo-tools`. That is about 186 packages (~800 MB to download); without a binhost some of them compile, so a default install takes much longer than before. Untick groups to slim it down.
 
 ## Desktop programs (GUI image)
 
