@@ -257,6 +257,10 @@ use a prebuilt one. Used for 0.2.5: `tar -C <rootfs> --anchored --no-wildcards -
 builder chroot, then `sqfstar -comp zstd -Xcompression-level 19 -b 1M -processors 4 -p "dev d 755 0 0" -p "dev/console c 600 0 0 5 1" -p "dev/null c 666 0 0 1 3" out.sqsh < rootfs.tar`
 (`sqfstar` is `mksquashfs` under another name and reads the ownership from the tar). The result booted under Secure Boot like the locally built one.
 
+## Ventoy in normal mode on BIOS (0.2.15)
+
+Stock Limine 12.3.3 stops with "Could not determine boot drive" when Ventoy starts the image in normal mode on BIOS: `disk_create_index` only treats a 2048-byte-sector drive as optical when it is also flagged removable or ATAPI, and Ventoy's virtual CD is neither, so it is skipped as an extra hard disk. `patches/limine-12.3.3-ventoy-bios.patch` drops the removable condition; `build-limine-bios.sh <dir>` builds the BIOS stages with it (clang + lld, nasm, mtools), and `LIMINE_BIOS_DIR=<dir> LIMINE_TOOL=<dir>/limine ./assemble-iso.sh` uses them. Without hashes the next failure was a Blake2b mismatch for `initramfs.img` (the data Ventoy's virtual CD returns differs from the file), so `assemble-iso.sh` now keeps the hashed `limine.conf` only on the ESP image (UEFI/Secure Boot, where it is enrolled) and puts a plain one on the medium for BIOS. The UEFI path is unchanged. Tested in QEMU: Ventoy 1.1.17 (BIOS and UEFI, normal and grub2 mode) and direct USB (BIOS, UEFI, Secure Boot), both images.
+
 ## Ventoy, and CPUs older than Haswell
 
 **Ventoy** ignores `limine.conf`; `assemble-iso.sh` also writes `boot/grub/grub.cfg` with the same entries. Checked with Ventoy

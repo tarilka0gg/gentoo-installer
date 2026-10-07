@@ -1,0 +1,11 @@
+--- a/common/drivers/disk.s2.c	2026-06-09 09:21:35.000000000 +0300
++++ b/common/drivers/disk.s2.c	2026-10-07 11:15:40.493151476 +0300
+@@ -264,7 +264,7 @@
+ 
+         // Detect optical drives via DPTE ATAPI bit (bit 6) or sector size heuristic
+         bool is_atapi = (dpte != NULL && (dpte->flags & (1 << 6)));
+-        block->is_optical = is_atapi || (block->sector_size == 2048 && is_removable);
++        block->is_optical = is_atapi || block->sector_size == 2048;
+ 
+         // Ugly workaround for VMware, because it puts the optical drive at 0x9f but does
+         // not expose DPTE.

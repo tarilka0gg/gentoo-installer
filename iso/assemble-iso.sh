@@ -35,7 +35,9 @@ if [ -f "$W/$ROOTFS/boot/memtest86plus/memtest64.bios" ] && [ -f "$W/$ROOTFS/boo
 fi
 cp "$W/$ROOTFS/boot/initramfs-live.img" "$ISO/boot/initramfs.img"
 chmod 644 "$ISO/boot/"*
-cp /usr/share/limine/limine-bios-cd.bin /usr/share/limine/limine-bios.sys "$ISO/boot/limine/"
+# LIMINE_BIOS_DIR/LIMINE_TOOL: a differently built BIOS stage (and the matching `limine` tool), e.g. one patched for Ventoy.
+LIMINE_BIOS_DIR=${LIMINE_BIOS_DIR:-/usr/share/limine}; LIMINE_TOOL=${LIMINE_TOOL:-limine}
+cp "$LIMINE_BIOS_DIR/limine-bios-cd.bin" "$LIMINE_BIOS_DIR/limine-bios.sys" "$ISO/boot/limine/"
 cp /usr/share/limine/BOOTX64.EFI "$ISO/EFI/BOOT/"
 
 # Real hardware first. Three lessons from the first laptop test:
@@ -93,11 +95,13 @@ CONF
 fi
 # Optional Secure Boot: SECUREBOOT_KEYS=<dir from secureboot/make-keys.sh> signs Limine and pins the config,
 # kernel and initramfs by hash (see secureboot/sign.sh); db.cer goes on the medium for enrolling.
+cp "$ISO/limine.conf" "$ISO/limine-nohash.conf"   # BIOS has no Secure Boot, so its config carries no hashes
 if [ -n "${SECUREBOOT_KEYS:-}" ]; then
     ROOT=$ISO "$(dirname "$(readlink -f "$0")")/secureboot/sign.sh" "$SECUREBOOT_KEYS" "$ISO/limine.conf" "$ISO/EFI/BOOT/BOOTX64.EFI"
     mkdir -p "$ISO/secureboot"; cp "$SECUREBOOT_KEYS/db.cer" "$ISO/secureboot/simple-linux-db.cer"
 fi
 cp "$ISO/limine.conf" "$ISO/boot/limine/limine.conf"
+if [ "${BIOS_CONF_HASHES:-0}" != 1 ]; then cp "$ISO/limine-nohash.conf" "$ISO/boot/limine/limine.conf"; fi
 
 # Ventoy ignores limine.conf: it reads GRUB-style menus ("Boot in grub2 mode", and the normal mode for Linux ISOs), loads
 # the kernel itself, and injects the hook that makes the ISO visible as /dev/mapper/ventoy. Same entries as Limine's.
@@ -134,6 +138,9 @@ rm -f "$EFI"; truncate -s ${need}M "$EFI"; mkfs.vfat -F 32 -s 1 -n EFIBOOT "$EFI
 mmd -i "$EFI" ::/EFI ::/EFI/BOOT ::/boot
 mcopy -i "$EFI" "$ISO/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "$EFI" "$ISO/limine.conf" ::/limine.conf
+# The ESP (UEFI, Secure Boot) keeps the hashed config; the medium itself, which only BIOS Limine reads, gets the plain one.
+[ "${BIOS_CONF_HASHES:-0}" = 1 ] || cp "$ISO/limine-nohash.conf" "$ISO/limine.conf"
+rm -f "$ISO/limine-nohash.conf"
 mcopy -i "$EFI" "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" ::/boot/
 if [ -n "$MEMTEST" ]; then mmd -i "$EFI" ::/boot/memtest; mcopy -i "$EFI" "$ISO/boot/memtest/"* ::/boot/memtest/; fi
 cp "$EFI" "$ISO/boot/efiboot.img"
@@ -283,6 +290,6 @@ chroot \$B nice -n 10 bash /mnt/work/inner.sh
 OUTER
 unshare --mount --propagation private bash "$W/outer.sh"
 
-limine bios-install "$W/out.iso" >/dev/null
+"$LIMINE_TOOL" bios-install "$W/out.iso" >/dev/null
 mv "$W/out.iso" "$OUT"
 ls -lh "$OUT"
