@@ -9,6 +9,8 @@ label=$1
 [ -e "/dev/disk/by-label/$label" ] && exit 0      # a real CD, or Ventoy's virtual one: nothing to do
 ismounted /run/initramfs/isoscan && exit 0
 
+say() { echo "Simple Linux: $*" > /dev/console 2> /dev/null; }
+[ -e /tmp/isoautoscan-said ] || { : > /tmp/isoautoscan-said; say "no device labelled $label yet, looking for the ISO on the drives..."; }
 mkdir -p /run/initramfs/isoscan
 for dev in /dev/disk/by-uuid/*; do
     [ -e "$dev" ] || continue
@@ -23,6 +25,7 @@ for dev in /dev/disk/by-uuid/*; do
     iso=$(cat /tmp/isoautoscan-found)
     if [ -n "$iso" ]; then
         info "iso-autoscan: $iso on $dev"
+        say "found ${iso#/run/initramfs/isoscan} on $dev"
         losetup -f "$iso"
         udevadm trigger --action=add > /dev/null 2>&1
         ln -sf "$dev" /run/initramfs/isoscandev
