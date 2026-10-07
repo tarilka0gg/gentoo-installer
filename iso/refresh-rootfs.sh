@@ -25,12 +25,14 @@ else
     bash "$HERE/prepare-rootfs.sh" "$R" "$BIN/installer-cli"
 fi
 chroot "$R" depmod "$KVER"
+rm -rf "$R/usr/lib/dracut/modules.d/76iso-autoscan"
+cp -a "$HERE/dracut/76iso-autoscan" "$R/usr/lib/dracut/modules.d/"
 # Early microcode: stored uncompressed in front of the initramfs, and the ISO carries the initramfs
 # twice (boot/ and the UEFI image), so it costs ~80 MB — but without it the kernel runs on whatever
 # the firmware loaded ("TSC_DEADLINE disabled ... please update microcode" on the first real test).
 bash "$HERE/prune-microcode.sh" "$R"
 chroot "$R" env LC_ALL=C.UTF-8 dracut --force --no-hostonly --early-microcode --kver "$KVER" \
-    --add dmsquash-live --omit "plymouth nfs iscsi multipath crypt lvm mdraid" --compress zstd /boot/initramfs-live.img
+    --add "dmsquash-live iso-autoscan" --omit "plymouth nfs iscsi multipath crypt lvm mdraid" --compress zstd /boot/initramfs-live.img
 INNER
 unshare --mount --propagation private bash "$W/refresh-inner.sh"
 rm -f "$W/refresh-inner.sh"
