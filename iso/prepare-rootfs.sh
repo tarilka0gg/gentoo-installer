@@ -105,10 +105,9 @@ ZENDESKTOP
         install -d "$ROOT/root/.local/state"
         cp -r "$PROFILE/state/noctalia" "$ROOT/root/.local/state/"
     fi
-    # GTK look: $THEME_ASSETS holds icons/<theme> and themes/<theme> directories (WhiteSur icons,
-    # Gruvbox GTK theme) that are copied in as they are; the settings point GTK 3/4 at them.
-    # Noctalia's gtk3/gtk4 templates write noctalia.css (Gruvbox colours) next to gtk.css.
-    if [ -n "${THEME_ASSETS:-}" ] && [ -d "$THEME_ASSETS" ]; then
+    # GTK look: $THEME_ASSETS holds icons/<theme> and themes/<theme> directories (WhiteSur icons;
+    # optional GTK themes) that are copied in as they are; the settings point GTK 3/4 at them.
+        if [ -n "${THEME_ASSETS:-}" ] && [ -d "$THEME_ASSETS" ]; then
         for kind in icons themes; do
             [ -d "$THEME_ASSETS/$kind" ] || continue
             install -d "$ROOT/usr/share/$kind"
@@ -120,14 +119,37 @@ ZENDESKTOP
     fi
     for v in 3.0 4.0; do
         install -d "$ROOT/root/.config/gtk-$v"
-        printf '[Settings]\ngtk-theme-name=Gruvbox-Light\ngtk-icon-theme-name=WhiteSur-dark\ngtk-application-prefer-dark-theme=false\n' \
+        printf '[Settings]\ngtk-theme-name=Adwaita\ngtk-icon-theme-name=WhiteSur-dark\ngtk-application-prefer-dark-theme=false\n' \
             > "$ROOT/root/.config/gtk-$v/settings.ini"
+        # Noctalia's gtk3/gtk4 templates write noctalia.css (colours from the wallpaper) here.
         printf '@import url("noctalia.css");\n' > "$ROOT/root/.config/gtk-$v/gtk.css"
     done
+    # A different wallpaper on every start: wait for Noctalia to listen, then ask for a random one
+    # (it picks from ~/Pictures/Wallpapers, sub-folders included).
+    cat > "$ROOT/usr/local/bin/random-wallpaper" <<'RANDWP'
+#!/bin/sh
+for _ in $(seq 1 60); do
+    noctalia msg wallpaper-random >/dev/null 2>&1 && exit 0
+    sleep 1
+done
+RANDWP
+    chmod 755 "$ROOT/usr/local/bin/random-wallpaper"
+    # A launcher entry for the installer: without it the dock/launcher have no icon or name for
+    # its window (app id org.gentoo_diy.Installer).
+    cat > "$ROOT/usr/share/applications/org.gentoo_diy.Installer.desktop" <<'INSTDESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Install Simple Linux
+Comment=Install Gentoo with btrfs, a prebuilt kernel and Limine
+Exec=installer-gui
+Icon=system-software-install
+Categories=System;
+StartupWMClass=org.gentoo_diy.Installer
+INSTDESKTOP
     # GTK 4 under Wayland takes the icon/GTK theme from GSettings before settings.ini, so the
     # same names go in as schema defaults.
     install -d "$ROOT/usr/share/glib-2.0/schemas"
-    printf "[org.gnome.desktop.interface]\nicon-theme='WhiteSur-dark'\ngtk-theme='Gruvbox-Light'\ncolor-scheme='default'\n" \
+    printf "[org.gnome.desktop.interface]\nicon-theme='WhiteSur-dark'\ngtk-theme='Adwaita'\ncolor-scheme='default'\n" \
         > "$ROOT/usr/share/glib-2.0/schemas/90_simple-linux.gschema.override"
     chroot "$ROOT" glib-compile-schemas /usr/share/glib-2.0/schemas
     # Wallpapers: Noctalia's wallpaper directory is ~/Pictures/Wallpapers, so the Simple Linux
@@ -166,6 +188,7 @@ spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
 spawn-at-startup "installer-gui"
 spawn-at-startup "get-zen" "--fetch"
+spawn-at-startup "random-wallpaper"
 window-rule {
     match app-id="org.gentoo_diy.Installer"
     open-floating true

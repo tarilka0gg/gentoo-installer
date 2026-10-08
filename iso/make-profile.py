@@ -91,7 +91,7 @@ def settings(src):
 
 (out / "noctalia").mkdir(exist_ok=True)
 cfg = (HOME / ".config/noctalia/config.toml").read_text()
-cfg = re.sub(r'(?m)^(directory\s*=\s*)".*Wallpapers"', r'\1"~/Pictures/Wallpapers"', cfg)
+cfg = re.sub(r'(?m)^(directory\s*=\s*)".*Wallpapers"', r'\1"~/Pictures/Wallpapers/simple"', cfg)
 (out / "noctalia/config.toml").write_text(cfg)
 
 state = HOME / ".local/state/noctalia"
