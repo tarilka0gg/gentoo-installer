@@ -105,6 +105,31 @@ ZENDESKTOP
         install -d "$ROOT/root/.local/state"
         cp -r "$PROFILE/state/noctalia" "$ROOT/root/.local/state/"
     fi
+    # GTK look: $THEME_ASSETS holds icons/<theme> and themes/<theme> directories (WhiteSur icons,
+    # Gruvbox GTK theme) that are copied in as they are; the settings point GTK 3/4 at them.
+    # Noctalia's gtk3/gtk4 templates write noctalia.css (Gruvbox colours) next to gtk.css.
+    if [ -n "${THEME_ASSETS:-}" ] && [ -d "$THEME_ASSETS" ]; then
+        for kind in icons themes; do
+            [ -d "$THEME_ASSETS/$kind" ] || continue
+            install -d "$ROOT/usr/share/$kind"
+            for t in "$THEME_ASSETS/$kind"/*; do
+                rm -rf "$ROOT/usr/share/$kind/$(basename "$t")"
+                cp -a "$t" "$ROOT/usr/share/$kind/"
+            done
+        done
+    fi
+    for v in 3.0 4.0; do
+        install -d "$ROOT/root/.config/gtk-$v"
+        printf '[Settings]\ngtk-theme-name=Gruvbox-Light\ngtk-icon-theme-name=WhiteSur-dark\ngtk-application-prefer-dark-theme=false\n' \
+            > "$ROOT/root/.config/gtk-$v/settings.ini"
+        printf '@import url("noctalia.css");\n' > "$ROOT/root/.config/gtk-$v/gtk.css"
+    done
+    # GTK 4 under Wayland takes the icon/GTK theme from GSettings before settings.ini, so the
+    # same names go in as schema defaults.
+    install -d "$ROOT/usr/share/glib-2.0/schemas"
+    printf "[org.gnome.desktop.interface]\nicon-theme='WhiteSur-dark'\ngtk-theme='Gruvbox-Light'\ncolor-scheme='default'\n" \
+        > "$ROOT/usr/share/glib-2.0/schemas/90_simple-linux.gschema.override"
+    chroot "$ROOT" glib-compile-schemas /usr/share/glib-2.0/schemas
     # Wallpapers: Noctalia's wallpaper directory is ~/Pictures/Wallpapers, so the Simple Linux
     # set lands in its "simple" sub-folder. $WALLPAPERS = a directory holding that set.
     if [ -n "${WALLPAPERS:-}" ] && [ -d "$WALLPAPERS" ]; then
