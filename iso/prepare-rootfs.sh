@@ -86,7 +86,7 @@ GETZEN
 Type=Application
 Name=Zen Browser
 Comment=Zen Browser (downloaded in the background when the live session starts)
-Icon=web-browser
+Icon=zen
 Exec=get-zen %u
 Terminal=false
 Categories=Network;WebBrowser;
@@ -128,9 +128,13 @@ ZENDESKTOP
     # (it picks from ~/Pictures/Wallpapers, sub-folders included).
     cat > "$ROOT/usr/local/bin/random-wallpaper" <<'RANDWP'
 #!/bin/sh
+# Noctalia answers on its socket a moment before it applies wallpapers, so ask until the
+# wallpaper it reports is a real file.
 for _ in $(seq 1 60); do
-    noctalia msg wallpaper-random >/dev/null 2>&1 && exit 0
-    sleep 1
+    noctalia msg wallpaper-random >/dev/null 2>&1
+    sleep 2
+    wp=$(noctalia msg wallpaper-get 2>/dev/null | head -n1)
+    [ -n "$wp" ] && [ -f "$wp" ] && exit 0
 done
 RANDWP
     chmod 755 "$ROOT/usr/local/bin/random-wallpaper"
@@ -146,6 +150,28 @@ Icon=system-software-install
 Categories=System;
 StartupWMClass=org.gentoo_diy.Installer
 INSTDESKTOP
+    # Noctalia's niri template fills noctalia.kdl (focus ring, borders) from the wallpaper palette;
+    # niri has to find the file at start, so an empty one is there until Noctalia writes it.
+    : > "$ROOT/root/.config/niri/noctalia.kdl"
+    grep -q '^include "noctalia.kdl"' "$ROOT/root/.config/niri/config.kdl" \
+        || printf '\ninclude "noctalia.kdl"\n' >> "$ROOT/root/.config/niri/config.kdl"
+    # Launcher entries nobody needs in a live session (console tools included; the zen-bin package ships its own "Zen"
+    # entry next to ours, which is the one that downloads the browser).
+    for d in zen-zen-bin dev.noctalia.Noctalia panel-preferences xfce4-about thunar-bulk-rename thunar-settings btop micro; do
+        f="$ROOT/usr/share/applications/$d.desktop"
+        [ -f "$f" ] && ! grep -q '^NoDisplay=true' "$f" && sed -i '0,/^\[Desktop Entry\]/s//[Desktop Entry]\nNoDisplay=true/' "$f"
+    done
+    # Noctalia recolours application icons to the wallpaper palette, which only gives a readable
+    # picture for glyph-style (symbolic) icons; the full-colour ones turn into solid blobs. So the
+    # launcher entries point at symbolic glyphs.
+    sym() { f="$ROOT/usr/share/applications/$1.desktop"; [ -f "$f" ] && sed -i "0,/^Icon=.*/s//Icon=$2/" "$f"; return 0; }
+    sym com.mitchellh.ghostty utilities-terminal-symbolic
+    sym gparted drive-harddisk-symbolic
+    sym org.gentoo_diy.Installer system-software-install-symbolic
+    sym io.github.tarilka0gg.PortageStore package-x-generic-symbolic
+    sym thunar system-file-manager-symbolic
+    sym io.github.tarilka0gg.Ustan application-x-executable-symbolic
+    sym zen-browser web-browser-symbolic
     # GTK 4 under Wayland takes the icon/GTK theme from GSettings before settings.ini, so the
     # same names go in as schema defaults.
     install -d "$ROOT/usr/share/glib-2.0/schemas"
