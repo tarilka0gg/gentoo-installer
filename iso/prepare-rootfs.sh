@@ -105,6 +105,13 @@ ZENDESKTOP
         install -d "$ROOT/root/.local/state"
         cp -r "$PROFILE/state/noctalia" "$ROOT/root/.local/state/"
     fi
+    # Wallpapers: Noctalia's wallpaper directory is ~/Pictures/Wallpapers, so the Simple Linux
+    # set lands in its "simple" sub-folder. $WALLPAPERS = a directory holding that set.
+    if [ -n "${WALLPAPERS:-}" ] && [ -d "$WALLPAPERS" ]; then
+        rm -rf "$ROOT/root/Pictures/Wallpapers/simple"
+        install -d "$ROOT/root/Pictures/Wallpapers/simple"
+        cp -r "$WALLPAPERS"/. "$ROOT/root/Pictures/Wallpapers/simple/"
+    fi
     # Live-only additions, appended to the *copy*: start the installer and give it the whole
     # screen. The preset itself is left exactly as the repo has it.
     # Noctalia shows a first-run wizard on top of everything until this marker exists; on a

@@ -4,7 +4,7 @@
 # regenerates the dracut initramfs. "gui" = also install installer-gui and the niri profile.
 # Expects: <work>/modroot (make modules_install INSTALL_MOD_PATH), the release binaries in
 # $INSTALLER_TARGET_DIR (default ../target/release), the wm-configs repo in $WM_CONFIGS and,
-# optionally, a make-profile.py output in $PROFILE.
+# optionally, a make-profile.py output in $PROFILE and a wallpaper set in $WALLPAPERS.
 set -euo pipefail
 W=$(readlink -f "${1:?work dir}"); NAME=${2:?rootfs name}; MODE=${3:-}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
