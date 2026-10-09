@@ -54,6 +54,13 @@ user gives fish with `micro`, `nano` absent, the btrfs subvolumes (`@`, `@home`,
 from `/etc/fstab`, and `doas` installed. Not covered: the desktop and GPU steps (the legacy path that installs
 niri was not run), a real store with real kernels, real hardware.
 
+## Making a release
+
+`release.sh <version> [step...]` runs the recipe (build, Limine BIOS stages, rootfs refresh, both ISOs with Secure Boot signing, stage3 and kernel files
+from the previous release, signed `SHA256SUMS`). `release.sh 0.2.22 check` is read-only: it refuses a dirty tree, a binary older than the sources
+(the cause of the stale installer in 0.2.14/0.2.15) and missing inputs. The release directory gets a `BUILD-INFO` with the commits and binary hashes. It does
+not commit or publish: the README section and the GitHub release stay manual.
+
 ## Testing
 
 ```
@@ -322,4 +329,4 @@ Both are invisible with serial-only testing and were only noticed from screensho
 - The TUI's network screen says Wi-Fi (iwd) is "not wired into this screen yet": on a machine without Ethernet the installer cannot get online from the TUI.
 - Nothing runs a real install from the ISO: the store has no kernels to install (see the
   main README), so the TUI has been started but not driven end to end.
-- Secure Boot: images can be signed (see `secureboot/README.md`); the installed system is not set up for it yet. Releases carry `SHA256SUMS` and an ssh signature.
+- Secure Boot: images can be signed (see `secureboot/README.md`); an installed system can get its own key (see the main README). Releases carry `SHA256SUMS` and an ssh signature.

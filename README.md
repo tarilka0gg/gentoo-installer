@@ -132,10 +132,28 @@ Needs `GENTOO_STORE_BINHOST_URL` / `GENTOO_STORE_OVERLAY_URL` for real runs (the
 
 **Not done:** `Initramfs` is unused (the kernel store ships ready-made initramfs-less builds); a plan-JSON driver;
 preset/edition integration from `portage_store`; the iwd passphrase agent is only exercised against a fake (no Wi-Fi radio in the VM);
-LUKS; Secure Boot for the *installed* system; a translated installer UI (only locale defaults are guessed); any real hardware.
+LUKS; a translated installer UI (only locale defaults are guessed); any real hardware.
 
 **Known gap**: `CommandRunner` covers shell-outs, not HTTP — `stage3::download`, `store::list_binhost_atoms` and `kernel::deploy`'s
 fetches are real `reqwest` calls with no fake layer, so Deploy is tested in a VM, not in `cargo test`.
+
+## After the install: updates and Secure Boot
+
+`simple-linux-update` (in `/usr/local/sbin`, from `installer-core/assets/`) is installed with the system. `check` reports whether the
+store has a different build of this machine's kernel; `kernel` fetches it, keeps the running one as a **previous kernel** boot
+entry (`vmlinuz.old`), extracts the modules and keeps the newest two module trees; `system` runs `emerge --sync` and
+`emerge -uDN @world`; no argument does both. A machine with a built-in NVIDIA module is refused (`--force` overrides): the module is built
+for one exact kernel and the update would leave the desktop without it. ustan and portage-store are not updated by it: they are
+copied from the live image and have no published releases to fetch. The kernel store has no version index either, so "newer" means
+"the published file differs" (ETag, then a byte comparison). Tested against a real `limine`/`sbsign` and a local HTTP store, not on an installed system yet.
+
+**Secure Boot** is off by default (`secure_boot` in `Settings`; the Optimization page of the graphical installer on UEFI,
+`GENTOO_INSTALLER_SECUREBOOT=1` for the TUI and `--headless`). When on, the installer makes an RSA-3072 `db` key for *this machine*
+(`/etc/simple-linux/secureboot`, root only, **unencrypted**: there is no LUKS), signs Limine, pins the config and the kernel by
+BLAKE2b exactly like the live images (`iso/secureboot/README.md`), and puts `db.cer` in `/boot/secureboot/` to enrol through the
+firmware menu. The unsigned originals stay in `/etc/simple-linux/limine.conf` and `/usr/local/share/simple-linux/BOOTX64.EFI`; the update tool
+re-signs after a new kernel, because an unsigned or unpinned kernel does not boot. Preflight refuses the option when the live system lacks
+`limine`, `sbsign`, `sbverify`, `b2sum` or `openssl`. Not tested under OVMF with a full install yet.
 
 ## Images, Ventoy, old CPUs
 

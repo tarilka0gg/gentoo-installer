@@ -15,5 +15,5 @@ matching private key (the author's), for everything signed with it.
 **Tested:** `test-ovmf.sh <keys> <iso>` — OVMF with our PK/KEK/db enrolled boots through Limine to the installer;
 the same image under OVMF's stock Microsoft keys is refused.
 
-**Not covered:** the installed system. Its bootloader is unsigned Limine; Secure Boot on an installed machine is
-not set up by the installer yet. The private keys never go into git or onto an image.
+**The installed system** can sign its own Limine with a key generated on that machine (`installer-core/src/sltools.rs`, `assets/sb-sign.sh`, same chain
+as above); the author's key is not involved. The private keys of the images never go into git or onto an image.
