@@ -114,6 +114,7 @@ const OWNED_KEYS: &[&str] = &[
     "CPU_FLAGS_X86",
     "VIDEO_CARDS",
     "FEATURES",
+    "EMERGE_DEFAULT_OPTS",
 ];
 
 /// Generates and writes make.conf. `jobs` is the target's own core count (`nproc`,
@@ -168,6 +169,11 @@ pub fn binhost_video_cards(detected: &str) -> String {
     cards.join(" ")
 }
 
+/// How many packages `emerge` handles at once on a machine with `cores` threads: a quarter of them, between 1 and 4.
+pub fn emerge_jobs(cores: u32) -> u32 {
+    (cores / 4).clamp(1, 4)
+}
+
 /// Pure string transform — strips any existing line assigning one of `OWNED_KEYS`
 /// (stage3's own make.conf sets generic `COMMON_FLAGS`/`MAKEOPTS`), then appends this
 /// machine's detected values. Split out from `generate` so the interesting logic is
@@ -218,6 +224,13 @@ fn render(
             out.push_str(&format!("VIDEO_CARDS=\"{cards}\"\n"));
         }
     }
+    // Several packages at once: unpacking and merging binary packages (and their downloads) is mostly waiting for the disk
+    // and the network, one at a time left the CPUs idle. `--load-average` keeps compiles from piling up when something
+    // does have to be built.
+    out.push_str(&format!(
+        "EMERGE_DEFAULT_OPTS=\"--jobs={} --load-average={jobs}\"\n",
+        emerge_jobs(jobs)
+    ));
     if package_mode == PackageMode::Binary {
         // Stage3 already ships a working, signature-verified `[gentoo]` binrepos.conf
         // entry (confirmed by reading a real unpacked stage3) — this is the only flip
@@ -270,6 +283,27 @@ mod tests {
         // binhost's packages mismatch, and Portage compiles them.
         assert!(!out.contains("CPU_FLAGS_X86"), "{out}");
         assert!(out.contains("VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi\""));
+    }
+
+    #[test]
+    fn packages_are_merged_in_parallel_in_proportion_to_the_cores() {
+        assert_eq!(emerge_jobs(2), 1);
+        assert_eq!(emerge_jobs(8), 2);
+        assert_eq!(emerge_jobs(16), 4);
+        assert_eq!(emerge_jobs(64), 4);
+        let out = render(
+            "EMERGE_DEFAULT_OPTS=\"--ask\"\n",
+            CpuArch::AmdZnver4,
+            &detected(None, None),
+            16,
+            OptLevel::O2,
+            PackageMode::Binary,
+        );
+        assert_eq!(out.matches("EMERGE_DEFAULT_OPTS=").count(), 1, "{out}");
+        assert!(
+            out.contains("EMERGE_DEFAULT_OPTS=\"--jobs=4 --load-average=16\""),
+            "{out}"
+        );
     }
 
     #[test]

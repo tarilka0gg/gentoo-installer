@@ -379,6 +379,11 @@ fi
 # nothing is set already and no stage3 is shipped on the medium (STAGE_TARBALL builds keep using theirs).
 STAGE_URL=${STAGE3_DEFAULT_URL:-https://github.com/tarilka0gg/simple-linux/releases/latest/download/simple-linux-stage3-amd64-openrc.tar.xz}
 CONFIGS_URL=${WM_CONFIGS_DEFAULT_URL:-https://github.com/tarilka0gg/simple-linux-configs.git}
+# The store (kernel builds, Portage overlay) has no public address yet, so no default is invented: a build that has one passes
+# STORE_BINHOST_DEFAULT_URL and STORE_OVERLAY_DEFAULT_URL (a test build points them at its own servers). Without them the installer
+# says "store not configured" until the variables are set by hand.
+STORE_BINHOST=${STORE_BINHOST_DEFAULT_URL:-}
+STORE_OVERLAY=${STORE_OVERLAY_DEFAULT_URL:-}
 install -d "$ROOT/etc/profile.d" "$ROOT/etc/fish/conf.d"
 cat > "$ROOT/etc/profile.d/installer-stage.sh" <<SHENV
 # Written by prepare-rootfs.sh: where the installer gets its stage3 when the medium carries none.
@@ -388,6 +393,12 @@ fi
 # The configs the installer puts in the new user's home (compositor, Noctalia, fish with tide): this project's repository.
 [ -n "\${GENTOO_WM_CONFIGS_URL:-}" ] || export GENTOO_WM_CONFIGS_URL=$CONFIGS_URL
 SHENV
+if [ -n "$STORE_BINHOST" ] && [ -n "$STORE_OVERLAY" ]; then
+    cat >> "$ROOT/etc/profile.d/installer-stage.sh" <<SHSTORE
+[ -n "\${GENTOO_STORE_BINHOST_URL:-}" ] || export GENTOO_STORE_BINHOST_URL=$STORE_BINHOST
+[ -n "\${GENTOO_STORE_OVERLAY_URL:-}" ] || export GENTOO_STORE_OVERLAY_URL=$STORE_OVERLAY
+SHSTORE
+fi
 cat > "$ROOT/etc/fish/conf.d/20-installer-stage.fish" <<FISHENV
 # Written by prepare-rootfs.sh: where the installer gets its stage3 when the medium carries none.
 if not set -q GENTOO_INSTALLER_STAGE3_URL; and not test -d /run/initramfs/live/stage; and not test -d /run/live/medium/stage
@@ -395,6 +406,12 @@ if not set -q GENTOO_INSTALLER_STAGE3_URL; and not test -d /run/initramfs/live/s
 end
 set -q GENTOO_WM_CONFIGS_URL; or set -gx GENTOO_WM_CONFIGS_URL $CONFIGS_URL
 FISHENV
+if [ -n "$STORE_BINHOST" ] && [ -n "$STORE_OVERLAY" ]; then
+    cat >> "$ROOT/etc/fish/conf.d/20-installer-stage.fish" <<FISHSTORE
+set -q GENTOO_STORE_BINHOST_URL; or set -gx GENTOO_STORE_BINHOST_URL $STORE_BINHOST
+set -q GENTOO_STORE_OVERLAY_URL; or set -gx GENTOO_STORE_OVERLAY_URL $STORE_OVERLAY
+FISHSTORE
+fi
 
 # Start OpenRC services in parallel: the boot is mostly waiting for file reads (decompressing the root image), and several
 # services reading at once keep more CPUs busy decompressing (measured with the EROFS image, see the iso README).
