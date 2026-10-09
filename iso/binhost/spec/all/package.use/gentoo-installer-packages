@@ -11,4 +11,11 @@ dev-cpp/gtkmm X
 dev-cpp/cairomm X
 x11-libs/gtk+ X
 x11-libs/cairo X
+dev-qt/* opengl
+dev-qt/qt5compat qml
+kde-frameworks/sonnet qml
+media-libs/vulkan-loader X
+app-text/poppler cairo
+media-libs/gegl cairo lcms
 games-util/gamemode elogind
+sys-apps/dbus elogind

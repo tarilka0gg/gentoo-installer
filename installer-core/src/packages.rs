@@ -175,7 +175,14 @@ pub const GROUPS: &[Group] = &[
         default: false,
         atoms: &["media-video/mpv", "media-video/vlc"],
         testing: &[],
-        use_flags: &[],
+        // vlc[gui] wants Qt with OpenGL and QML (every Qt module the same: prebuilt ones that ask for -opengl cannot be mixed with it), mpv wants the Vulkan loader with X. Portage names these as "USE changes necessary", but
+        // autounmask does not write them when the package that asks for them is a prebuilt one, so they are stated here.
+        use_flags: &[
+            "dev-qt/* opengl",
+            "dev-qt/qt5compat qml",
+            "kde-frameworks/sonnet qml",
+            "media-libs/vulkan-loader X",
+        ],
         services: &[],
         licenses: &[],
         guru: false,
@@ -187,7 +194,7 @@ pub const GROUPS: &[Group] = &[
         default: false,
         atoms: &["media-gfx/gimp"],
         testing: &[],
-        use_flags: &[],
+        use_flags: &["app-text/poppler cairo", "media-libs/gegl cairo lcms"],
         services: &[],
         licenses: &[],
         guru: false,
@@ -223,7 +230,7 @@ pub const GROUPS: &[Group] = &[
         default: false,
         atoms: &["games-util/gamemode", "games-util/mangohud"],
         testing: &["games-util/gamemode", "games-util/mangohud"],
-        use_flags: &["games-util/gamemode elogind"],
+        use_flags: &["games-util/gamemode elogind", "sys-apps/dbus elogind"],
         services: &[],
         licenses: &[],
         guru: true,

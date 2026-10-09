@@ -6,6 +6,7 @@ x11-themes/adwaita-icon-theme ~amd64
 net-im/telegram-desktop-bin ~amd64
 games-util/gamemode ~amd64
 games-util/mangohud ~amd64
+*/*::guru ~amd64
 gui-wm/niri ~amd64
 gui-apps/noctalia **
 dev-cpp/sdbus-c++ ~amd64

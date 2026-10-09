@@ -9,4 +9,11 @@ media-video/pipewire sound-server pipewire-alsa
 sys-fs/lvm2 lvm
 dev-cpp/gtkmm X
 dev-cpp/cairomm X
+dev-qt/* opengl
+dev-qt/qt5compat qml
+kde-frameworks/sonnet qml
+media-libs/vulkan-loader X
+app-text/poppler cairo
+media-libs/gegl cairo lcms
 games-util/gamemode elogind
+sys-apps/dbus elogind
