@@ -112,10 +112,15 @@ ZENDESKTOP
     # The live image's look, whoever's bar and settings the config above came from: colours generated from the wallpaper
     # (Material You, m3-tonal-spot, light), the wallpapers of this project and no one's own wallpaper folder. A personal profile
     # normally pins a palette ("community"/"builtin") and its own wallpaper directory; neither belongs in the image.
-    python3 - "$ROOT/root/.config/noctalia/config.toml" <<'THEMEPY'
+    # The same two files twice: config.toml, and the saved settings of a personal profile (state/noctalia/settings.toml: the bar
+    # layout, widgets, and also a [theme] that takes precedence over config.toml).
+    for noctalia_file in "$ROOT/root/.config/noctalia/config.toml" "$ROOT/root/.local/state/noctalia/settings.toml"; do
+    [ -f "$noctalia_file" ] || continue
+    python3 - "$noctalia_file" <<'THEMEPY'
 import re, sys
 path = sys.argv[1]
 text = open(path).read()
+settings_file = path.endswith('settings.toml')
 def section(name, fn):
     global text
     m = re.search(r'(?ms)^\[%s\]\n(.*?)(?=^\[|\Z)' % re.escape(name), text)
@@ -132,11 +137,16 @@ def setkey(body, key, value):
 def theme(body):
     body = setkey(body, 'mode', 'light')
     body = setkey(body, 'source', 'wallpaper')
-    return setkey(body, 'wallpaper_scheme', 'm3-tonal-spot')
+    body = setkey(body, 'wallpaper_scheme', 'm3-tonal-spot')
+    # the author's own palette is not part of the image
+    return re.sub(r'(?m)^community_palette\s*=[^\n]*\n', '', body)
 section('theme', theme)
-section('wallpaper', lambda b: setkey(b, 'directory', '~/Pictures/Wallpapers'))
+if not settings_file:
+    section('wallpaper', lambda b: setkey(b, 'directory', '~/Pictures/Wallpapers'))
 open(path, 'w').write(text)
 THEMEPY
+    done
+    rm -f "$ROOT"/root/.local/state/noctalia/community-palettes/Futuro*
     # GTK look: $THEME_ASSETS holds icons/<theme> and themes/<theme> directories (WhiteSur icons;
     # optional GTK themes) that are copied in as they are; the settings point GTK 3/4 at them.
         if [ -n "${THEME_ASSETS:-}" ] && [ -d "$THEME_ASSETS" ]; then
