@@ -141,6 +141,10 @@ def theme(body):
     # the author's own palette is not part of the image
     return re.sub(r'(?m)^community_palette\s*=[^\n]*\n', '', body)
 section('theme', theme)
+# Icons recoloured to a palette role: a profile tuned for a dark palette says "surface", which on a light wallpaper palette is the
+# colour of the dock itself and the icons vanish. The role of the documented default is readable on any palette.
+if settings_file:
+    section('shell', lambda b: re.sub(r'(?m)^(app_icon_color\s*=\s*)"[^"]*"', r'\1"on_surface"', b))
 if not settings_file:
     section('wallpaper', lambda b: setkey(b, 'directory', '~/Pictures/Wallpapers'))
 open(path, 'w').write(text)
