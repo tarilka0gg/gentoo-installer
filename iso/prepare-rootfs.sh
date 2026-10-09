@@ -99,6 +99,8 @@ ZENDESKTOP
     cp "$WMCONF/noctalia/config.toml" "$ROOT/root/.config/noctalia/config.toml"
     # Starting configs for the programs Noctalia themes (ghostty, btop): its hooks only edit a config that exists.
     [ -d "$WMCONF/apps" ] && cp -r "$WMCONF/apps/." "$ROOT/root/.config/"
+    # The scripts Noctalia is started and hooked through (start.sh picks the wallpaper before Noctalia's first render).
+    [ -d "$WMCONF/noctalia/hooks" ] && cp -r "$WMCONF/noctalia/hooks" "$ROOT/root/.config/noctalia/"
     if [ -n "$PROFILE" ]; then
         # The user's own look, bar and dock (already stripped of machine-specific parts by
         # make-profile.py) replace the repo presets.
@@ -111,6 +113,26 @@ ZENDESKTOP
         # Noctalia state (wallpaper, theme) otherwise, and the image would show someone's own desktop.
         rm -rf "$ROOT/root/.local/state/noctalia"
     fi
+    # niri: the colours of the ring, the border and the overview backdrop come from Noctalia's niri template (noctalia.kdl, included at the
+    # end), not from the ones a personal config pins; Noctalia is started through hooks/start.sh, which chooses the wallpaper first
+    # (no flash of the default theme), and that script replaces the separate random-wallpaper start.
+    python3 - "$ROOT/root/.config/niri/config.kdl" <<'NIRIPY'
+import re, sys
+path = sys.argv[1]
+t = open(path).read()
+def drop_colours(block_name):
+    global t
+    t = re.sub(r'(?ms)(^\s*%s\s*\{)(.*?)(^\s*\})' % block_name,
+               lambda m: m.group(1) + re.sub(r'(?m)^\s*(active|inactive|urgent)-color\s+"#[0-9A-Fa-f]{3,8}"\s*\n', '', m.group(2)) + m.group(3), t, count=1)
+drop_colours('border')
+drop_colours('focus-ring')
+t = re.sub(r'(?m)^\s*backdrop-color\s+"#[0-9A-Fa-f]{3,8}"\s*\n', '', t)
+t = t.replace('spawn-at-startup "noctalia"', 'spawn-at-startup "bash" "-c" "exec bash ~/.config/noctalia/hooks/start.sh"')
+t = re.sub(r'(?m)^\s*spawn-at-startup\s+"random-wallpaper"\s*\n', '', t)
+# black until the wallpaper is drawn (the compositor's default is a dark blue, a flash of the wrong colour)
+t = re.sub(r'(?m)^(\s*)//\s*background-color\s+"transparent"', r'\1background-color "#000000"', t, count=1)
+open(path, 'w').write(t)
+NIRIPY
     # The live image's look, whoever's bar and settings the config above came from: colours generated from the wallpaper
     # (Material You, m3-tonal-spot, light), the wallpapers of this project and no one's own wallpaper folder. A personal profile
     # normally pins a palette ("community"/"builtin") and its own wallpaper directory; neither belongs in the image.
@@ -150,6 +172,8 @@ if settings_file:
 # The dock pins the browser by desktop-entry id. A profile from a machine that has the zen-bin package pins "zen-zen-bin", an entry the
 # live image hides (Zen is not on the medium); the one that downloads it and has the right name and icon is "zen-browser".
 text = text.replace('"zen-zen-bin"', '"zen-browser"')
+# the niri template: noctalia.kdl (ring, border) from the palette
+text = re.sub(r'(?m)^(\s*builtin_ids\s*=\s*\[)(?![^\]]*"niri")', r'\1 "niri",', text, count=1)
 if not settings_file:
     section('wallpaper', lambda b: setkey(b, 'directory', '~/Pictures/Wallpapers'))
 open(path, 'w').write(text)
@@ -265,7 +289,6 @@ spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
 spawn-at-startup "installer-gui"
 spawn-at-startup "get-zen" "--fetch"
-spawn-at-startup "random-wallpaper"
 window-rule {
     match app-id="org.gentoo_diy.Installer"
     open-floating true
