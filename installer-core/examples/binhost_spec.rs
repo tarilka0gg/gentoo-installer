@@ -30,7 +30,15 @@ fn main() {
         std::fs::create_dir_all(dir.join(sub)).unwrap();
     }
     std::fs::write(dir.join("world-groups"), world).unwrap();
-    std::fs::write(dir.join("package.accept_keywords/gentoo-installer-packages"), keywords).unwrap();
+    std::fs::write(
+        dir.join("package.accept_keywords/gentoo-installer-packages"),
+        keywords,
+    )
+    .unwrap();
     std::fs::write(dir.join("package.use/gentoo-installer-packages"), uses).unwrap();
-    std::fs::write(dir.join("package.license/gentoo-installer-packages"), licenses).unwrap();
+    std::fs::write(
+        dir.join("package.license/gentoo-installer-packages"),
+        licenses,
+    )
+    .unwrap();
 }

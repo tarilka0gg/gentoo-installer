@@ -1,5 +1,6 @@
 pub mod account;
 pub mod autodetect;
+pub mod binhost;
 pub mod bootloader;
 mod chroot_emerge;
 pub mod command;

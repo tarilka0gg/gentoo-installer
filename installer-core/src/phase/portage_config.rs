@@ -24,10 +24,13 @@ impl Phase for PortageConfigPhase {
     }
 
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
-        Ok(
-            std::fs::read_to_string(ctx.target.join("etc/portage/make.conf"))
-                .is_ok_and(|t| t.contains(make_conf::GENERATED_MARKER)),
-        )
+        let make_conf_done = std::fs::read_to_string(ctx.target.join("etc/portage/make.conf"))
+            .is_ok_and(|t| t.contains(make_conf::GENERATED_MARKER));
+        // A binary install also needs the project's binhost; a run that stopped between the two is not done.
+        let binhost_done = ctx.settings.package_mode != make_conf::PackageMode::Binary
+            || crate::binhost::url_from_env().is_none()
+            || crate::binhost::configured(&ctx.target);
+        Ok(make_conf_done && binhost_done)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
@@ -59,6 +62,17 @@ impl Phase for PortageConfigPhase {
             ctx.settings.package_mode,
         )
         .await?;
+
+        if ctx.settings.package_mode == make_conf::PackageMode::Binary {
+            if let Some(url) = crate::binhost::url_from_env() {
+                let _ = tx.send(Event::Step {
+                    id: self.id(),
+                    text: "Connecting the Simple Linux binary package host".into(),
+                    fraction: Some(0.5),
+                });
+                crate::binhost::configure(ctx.runner.as_ref(), &ctx.target, &url).await?;
+            }
+        }
 
         let _ = tx.send(Event::PhaseFinished {
             id: self.id(),
