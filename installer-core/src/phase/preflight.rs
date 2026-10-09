@@ -51,6 +51,16 @@ impl Phase for PreflightPhase {
             if efi { "UEFI" } else { "BIOS/legacy" }
         )));
 
+        if ctx.settings.secure_boot && efi {
+            let missing = crate::sltools::missing_tools(ctx.runner.as_ref()).await;
+            if !missing.is_empty() {
+                return Err(crate::Error::Other(anyhow::anyhow!(
+                    "Secure Boot needs {} on the live system; turn it off or use an image that has them",
+                    missing.join(", ")
+                )));
+            }
+        }
+
         let on_battery = std::fs::read_to_string("/sys/class/power_supply/AC/online")
             .map(|s| s.trim() == "0")
             .unwrap_or(false);

@@ -24,6 +24,7 @@ async fn main() {
     println!("Layout: {layout:?}");
 
     let opts = install::InstallOptions {
+        secure_boot: false,
         layout,
         target: "/mnt/gentoo-installer-test".into(),
         store: store::StoreConfig {

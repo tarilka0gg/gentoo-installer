@@ -374,6 +374,45 @@ pub(super) fn opt_level_select_page(
     content.append(&pkg_body);
     content.append(&pkg_row);
 
+    // Secure Boot only means something on UEFI.
+    if std::path::Path::new("/sys/firmware/efi").is_dir() {
+        let sb_body = gtk::Label::builder()
+            .label(
+                "Signs the bootloader with a key made on this computer, so only the kernel installed here can start. \
+                 Afterwards you add the certificate (/boot/secureboot/simple-linux-db.cer) to the firmware's Secure Boot \
+                 keys and turn Secure Boot on. The key is stored unencrypted on the disk.",
+            )
+            .css_classes(vec!["dim-label".to_string()])
+            .halign(gtk::Align::Start)
+            .wrap(true)
+            .build();
+        let sb_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(12)
+            .margin_top(12)
+            .build();
+        let sb_label = gtk::Label::builder()
+            .label("Prepare Secure Boot")
+            .halign(gtk::Align::Start)
+            .hexpand(true)
+            .build();
+        let sb_switch = gtk::Switch::builder()
+            .active(state.secure_boot.get())
+            .valign(gtk::Align::Center)
+            .build();
+        {
+            let state = state.clone();
+            sb_switch.connect_state_set(move |_, active| {
+                state.secure_boot.set(active);
+                glib::Propagation::Proceed
+            });
+        }
+        sb_row.append(&sb_label);
+        sb_row.append(&sb_switch);
+        content.append(&sb_body);
+        content.append(&sb_row);
+    }
+
     let next_button = gtk::Button::builder()
         .label("Continue")
         .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])

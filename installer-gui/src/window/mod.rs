@@ -76,6 +76,7 @@ struct WizardState {
     packages: RefCell<Vec<String>>,
     opt_level: Cell<OptLevel>,
     package_mode: Cell<PackageMode>,
+    secure_boot: Cell<bool>,
     manual_root_fs: Cell<partition::RootFs>,
     /// `None` means "use the automatic RAM-based size" — set only if the user actually
     /// changes it on the manual-partitioning page.
@@ -102,6 +103,7 @@ impl WizardState {
             packages: RefCell::new(installer_core::packages::default_ids()),
             opt_level: Cell::new(OptLevel::default()),
             package_mode: Cell::new(PackageMode::default()),
+            secure_boot: Cell::new(false),
             manual_root_fs: Cell::new(partition::RootFs::Btrfs),
             manual_swap_gib: RefCell::new(None),
             username: RefCell::new(String::new()),

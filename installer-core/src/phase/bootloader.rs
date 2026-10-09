@@ -2,7 +2,9 @@
 
 use super::{Ctx, Phase, PhaseId};
 use crate::bootloader;
-use crate::event::{Event, EventTx};
+use crate::event::{Event, EventTx, Level};
+use crate::sltools;
+use std::path::Path;
 
 pub struct BootloaderPhase;
 
@@ -38,6 +40,23 @@ impl Phase for BootloaderPhase {
         };
         bootloader::configure(ctx.runner.as_ref(), &ctx.target, &ctx.layout, parts, extra).await?;
         bootloader::install(ctx.runner.as_ref(), &ctx.target, &ctx.layout.disk).await?;
+        if let Some(pkg) = &ctx.kernel_pkg {
+            sltools::install_update_tool(&ctx.target, &ctx.store.binhost_url, &pkg.combo).await?;
+        }
+        if ctx.settings.secure_boot {
+            if Path::new("/sys/firmware/efi").is_dir() {
+                sltools::setup_secure_boot(ctx.runner.as_ref(), &ctx.target).await?;
+                let _ = tx.send(Event::Log {
+                    line: "Secure Boot: the bootloader is signed with this machine's own key. Enrol /boot/secureboot/simple-linux-db.cer in the firmware, then turn Secure Boot on.".into(),
+                    level: Level::Info,
+                });
+            } else {
+                let _ = tx.send(Event::Log {
+                    line: "Secure Boot was asked for, but this is a BIOS boot: skipped.".into(),
+                    level: Level::Warn,
+                });
+            }
+        }
         let _ = tx.send(Event::PhaseFinished {
             id: self.id(),
             duration: std::time::Duration::default(),

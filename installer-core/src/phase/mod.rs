@@ -148,6 +148,8 @@ pub struct Settings {
     pub ustan: bool,
     /// Copy portage-store (and its doas rule) from the live image when the target has a desktop.
     pub portage_store: bool,
+    /// Sign the installed bootloader with a key made for this machine (UEFI only); the user enrols its certificate afterwards.
+    pub secure_boot: bool,
     /// Git URL of the wm-configs repository the desktop step clones.
     pub wm_configs_git_url: String,
     /// Ids from `packages::GROUPS` to install after the desktop.
@@ -172,6 +174,7 @@ impl Default for Settings {
             desktop: true,
             ustan: true,
             portage_store: true,
+            secure_boot: false,
             wm: crate::wm::WmChoice::default(),
             wm_configs_git_url: String::new(),
             packages: Vec::new(),

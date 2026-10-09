@@ -14,6 +14,7 @@
 //! | `GENTOO_INSTALLER_STAGE3_URL`, `_SHA512` | optional custom stage3 (else the bundled one) |
 //! | `GENTOO_INSTALLER_USTAN=0` | do not copy ustan from the live image into the installed system |
 //! | `GENTOO_INSTALLER_STORE=0` | do not copy portage-store from the live image into the installed system |
+//! | `GENTOO_INSTALLER_SECUREBOOT=1` | sign the installed bootloader with a key made on this machine (UEFI only); enrol `/boot/secureboot/simple-linux-db.cer` afterwards |
 //! | `GENTOO_INSTALLER_WM` (`none` = no desktop), `_PACKAGES`, `_GPU`, `_OPT_LEVEL`, `_PACKAGE_MODE` | same meaning as in the TUI |
 //!
 //! `--resume` continues the unfinished install this live session remembers on the same disk (the journal
@@ -80,6 +81,7 @@ pub async fn run() -> Result<()> {
     settings.desktop = std::env::var("GENTOO_INSTALLER_WM").as_deref() != Ok("none");
     settings.ustan = std::env::var("GENTOO_INSTALLER_USTAN").as_deref() != Ok("0");
     settings.portage_store = std::env::var("GENTOO_INSTALLER_STORE").as_deref() != Ok("0");
+    settings.secure_boot = std::env::var("GENTOO_INSTALLER_SECUREBOOT").as_deref() == Ok("1");
     settings.wm = match std::env::var("GENTOO_INSTALLER_WM").as_deref() {
         Ok("hyprland") => WmChoice::Hyprland,
         Ok("sway") => WmChoice::Sway,

@@ -233,6 +233,7 @@ pub(super) fn confirm_page_build(
                 .locales,
                 account,
                 gpu_override: state.gpu.get(),
+                secure_boot: state.secure_boot.get(),
                 render: Default::default(),
                 packages: state.packages.borrow().clone(),
                 stage3: std::env::var("GENTOO_INSTALLER_STAGE3_URL")

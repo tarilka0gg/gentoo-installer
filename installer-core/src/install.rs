@@ -59,6 +59,8 @@ pub struct InstallOptions {
     /// Git URL of the wm-configs preset repo `wm::install` clones for the chosen
     /// compositor's config + Noctalia's shared config + tty1-autostart template.
     pub wm_configs_git_url: String,
+    /// Sign the installed bootloader with a key made on this machine (UEFI only).
+    pub secure_boot: bool,
     /// UI dry-run: walks through the same `Progress` sequence with the same timing
     /// shape, but never touches a disk, the network, or a chroot — for clicking through
     /// the wizard while iterating on the frontend. Hardware detection still runs for
@@ -82,6 +84,7 @@ impl InstallOptions {
             desktop: true,
             ustan: true,
             portage_store: true,
+            secure_boot: self.secure_boot,
             wm_configs_git_url: self.wm_configs_git_url,
             packages: self.packages,
             gpu_override: self.gpu_override,
@@ -188,6 +191,7 @@ mod tests {
 
     fn options() -> InstallOptions {
         InstallOptions {
+            secure_boot: false,
             layout: partition::plan("/dev/vda", partition::RootFs::Btrfs, 16 << 30),
             target: "/mnt/gentoo".into(),
             store: store::StoreConfig {

@@ -419,6 +419,7 @@ fn start_install(state: &mut AppState, mode: RunMode) {
 
     let layout = partition::plan(&disk.path, partition::RootFs::Btrfs, profile.ram_bytes);
     let opts = install::InstallOptions {
+        secure_boot: std::env::var("GENTOO_INSTALLER_SECUREBOOT").as_deref() == Ok("1"),
         layout,
         target: "/mnt/gentoo".into(),
         store: store::StoreConfig {
