@@ -13,7 +13,7 @@
 
 use super::{Ctx, Phase, PhaseId};
 use crate::event::{Event, EventTx, Level};
-use crate::{hardware, kernel, stage3, store};
+use crate::{hardware, kernel, progress, stage3, store};
 
 /// Dropped in the target root after the stage3 unpack succeeded (see `DeployPhase::run`).
 pub(super) const STAGE_UNPACKED_MARKER: &str = ".gentoo-installer-stage3-unpacked";
@@ -67,17 +67,68 @@ impl Phase for DeployPhase {
             let tarball_path = std::env::temp_dir().join("gentoo-installer-stage3.tar.xz");
 
             let _ = tx.send(log("Downloading stage3...".to_string()));
-            stage3::download(&source, &tarball_path).await?;
+            let (id, txc, mut last) = (self.id(), tx.clone(), std::time::Instant::now());
+            stage3::download_with_progress(&source, &tarball_path, &mut |done, total| {
+                // Chunks arrive many times a second; the screen needs a few updates a second.
+                if last.elapsed() < std::time::Duration::from_millis(250) {
+                    return;
+                }
+                last = std::time::Instant::now();
+                let (text, fraction) = match total {
+                    Some(t) if t > 0 => (
+                        format!(
+                            "Downloading the base system: {} of {}",
+                            progress::megabytes(done),
+                            progress::megabytes(t)
+                        ),
+                        Some(0.30 * (done as f64 / t as f64).min(1.0)),
+                    ),
+                    _ => (
+                        format!("Downloading the base system: {}", progress::megabytes(done)),
+                        None,
+                    ),
+                };
+                let _ = txc.send(Event::Step { id, text, fraction });
+            })
+            .await?;
 
             let _ = tx.send(log("Unpacking stage3...".to_string()));
-            stage3::unpack(ctx.runner.as_ref(), &tarball_path, &ctx.target).await?;
+            let (id, txc) = (self.id(), tx.clone());
+            let _ = tx.send(Event::Step {
+                id,
+                text: "Unpacking the base system".into(),
+                fraction: Some(0.30),
+            });
+            stage3::unpack_with_progress(
+                ctx.runner.as_ref(),
+                &tarball_path,
+                &ctx.target,
+                &mut |f| {
+                    let _ = txc.send(Event::Step {
+                        id,
+                        text: format!("Unpacking the base system: {:.0} %", f * 100.0),
+                        fraction: Some(0.30 + 0.55 * f),
+                    });
+                },
+            )
+            .await?;
             tokio::fs::remove_file(&tarball_path).await.ok();
             tokio::fs::write(&unpacked, "").await?;
         }
 
+        let _ = tx.send(Event::Step {
+            id: self.id(),
+            text: "Fetching the package overlay".into(),
+            fraction: Some(0.88),
+        });
         let _ = tx.send(log("Fetching the portage overlay...".to_string()));
         store::configure(ctx.runner.as_ref(), &ctx.target, &ctx.store).await?;
 
+        let _ = tx.send(Event::Step {
+            id: self.id(),
+            text: "Choosing and downloading the kernel for this hardware".into(),
+            fraction: Some(0.93),
+        });
         let _ = tx.send(log("Matching kernel to detected hardware...".to_string()));
         let atoms = store::list_binhost_atoms(&ctx.store.binhost_url).await?;
         let profile = match &ctx.profile {

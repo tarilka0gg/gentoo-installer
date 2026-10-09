@@ -43,6 +43,7 @@ use account::*;
 use confirm::*;
 use desktop::*;
 use locale::*;
+pub use progress::build_debug_progress;
 use progress::*;
 use storage::*;
 use welcome::*;

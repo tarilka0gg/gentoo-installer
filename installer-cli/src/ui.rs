@@ -193,6 +193,7 @@ fn describe(event: &InstallEvent) -> Option<String> {
         InstallEvent::Failed { error, .. } => Some(format!("ERROR: {error}")),
         InstallEvent::PhaseFinished { .. }
         | InstallEvent::Progress { .. }
+        | InstallEvent::Step { .. }
         | InstallEvent::Complete => None,
     }
 }

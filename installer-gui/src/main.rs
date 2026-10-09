@@ -13,6 +13,8 @@ fn main() -> glib::ExitCode {
     let app = adw::Application::builder().application_id(APP_ID).build();
     if std::env::args().any(|a| a == "--debug-icons") {
         app.connect_activate(window::build_debug_icons);
+    } else if std::env::args().any(|a| a == "--debug-progress") {
+        app.connect_activate(window::build_debug_progress);
     } else {
         app.connect_activate(window::build);
     }

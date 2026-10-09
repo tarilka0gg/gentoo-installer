@@ -194,7 +194,18 @@ fn parse_sha512_digest(body: &str, filename: &str) -> Option<String> {
 }
 
 pub async fn download(source: &Stage3Source, dest: &Path) -> crate::Result<()> {
+    download_with_progress(source, dest, &mut |_, _| {}).await
+}
+
+/// [`download`], reporting `(bytes so far, total bytes if the server said)` as the data arrives.
+pub async fn download_with_progress(
+    source: &Stage3Source,
+    dest: &Path,
+    progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
+) -> crate::Result<()> {
     if let Some(path) = local_path(&source.url) {
+        let total = tokio::fs::metadata(&path).await.ok().map(|m| m.len());
+        let mut done = 0u64;
         let mut src = tokio::fs::File::open(path).await?;
         let mut file = tokio::fs::File::create(dest).await?;
         let mut hasher = Sha512::new();
@@ -206,6 +217,8 @@ pub async fn download(source: &Stage3Source, dest: &Path) -> crate::Result<()> {
             }
             hasher.update(&buf[..n]);
             file.write_all(&buf[..n]).await?;
+            done += n as u64;
+            progress(done, total);
         }
         file.flush().await?;
         return check_digest(&source.sha512, hex::encode(hasher.finalize()));
@@ -217,6 +230,8 @@ pub async fn download(source: &Stage3Source, dest: &Path) -> crate::Result<()> {
         .error_for_status()
         .map_err(|e| crate::Error::Other(e.into()))?;
 
+    let total = response.content_length();
+    let mut done = 0u64;
     let mut file = tokio::fs::File::create(dest).await?;
     let mut hasher = Sha512::new();
     let mut stream = response.bytes_stream();
@@ -225,10 +240,38 @@ pub async fn download(source: &Stage3Source, dest: &Path) -> crate::Result<()> {
         let chunk = chunk.map_err(|e| crate::Error::Other(e.into()))?;
         hasher.update(&chunk);
         file.write_all(&chunk).await?;
+        done += chunk.len() as u64;
+        progress(done, total);
     }
     file.flush().await?;
 
     check_digest(&source.sha512, hex::encode(hasher.finalize()))
+}
+
+/// [`unpack`], calling `progress` (0.0..=1.0, twice a second) with how much of the compressed tarball has been read.
+pub async fn unpack_with_progress(
+    runner: &dyn CommandRunner,
+    tarball: &Path,
+    root: &Path,
+    progress: &mut (dyn FnMut(f64) + Send),
+) -> crate::Result<()> {
+    let total = tokio::fs::metadata(tarball)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let work = unpack(runner, tarball, root);
+    tokio::pin!(work);
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
+    loop {
+        tokio::select! {
+            result = &mut work => return result,
+            _ = tick.tick() => {
+                if let (true, Some(pos)) = (total > 0, crate::progress::open_file_offset(tarball)) {
+                    progress((pos as f64 / total as f64).min(1.0));
+                }
+            }
+        }
+    }
 }
 
 /// Unpacks the tarball into `root` (typically the mounted target `@` subvolume),

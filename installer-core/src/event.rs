@@ -22,6 +22,13 @@ pub enum Event {
         done: u64,
         total: Option<u64>,
     },
+    /// What the current phase is doing right now, and how far into the phase that is (0.0..=1.0, when known:
+    /// a download, an unpack, "3 of 31" packages). Frontends show the text and move the bar with the fraction.
+    Step {
+        id: PhaseId,
+        text: String,
+        fraction: Option<f64>,
+    },
     Log {
         line: String,
         level: Level,

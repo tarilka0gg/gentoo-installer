@@ -23,6 +23,7 @@ pub mod packages;
 pub mod partition;
 pub mod phase;
 pub mod portage_store;
+pub mod progress;
 pub mod services;
 pub mod sltools;
 pub mod stage3;

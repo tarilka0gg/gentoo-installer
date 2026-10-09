@@ -6,7 +6,7 @@
 //! `make.conf` generators, different step order, no resume — and each fix had to be made twice.)
 
 use crate::account::Account;
-use crate::command::{CommandRunner, RealCommandRunner};
+use crate::command::{CommandRunner, StreamingCommandRunner};
 use crate::event::{Event, EventTx, Level};
 use crate::hardware::Gpu;
 use crate::journal;
@@ -110,7 +110,7 @@ pub async fn run(opts: InstallOptions, tx: EventTx, mode: RunMode) -> crate::Res
         return simulate(opts, tx).await;
     }
     let journal_path = journal::default_path();
-    let mut ctx = opts.into_ctx(Arc::new(RealCommandRunner));
+    let mut ctx = opts.into_ctx(Arc::new(StreamingCommandRunner::new(tx.clone())));
     phase::run_phases(&mut ctx, &tx, mode, Some(&journal_path)).await
 }
 
@@ -152,6 +152,11 @@ pub async fn resumable_at(path: &std::path::Path, disk: &str) -> Option<ResumeIn
 async fn simulate(opts: InstallOptions, tx: EventTx) -> crate::Result<()> {
     use tokio::time::{sleep, Duration};
 
+    // GENTOO_INSTALLER_SIMULATE_SLOW=10 stretches the click-through, to have time to look at the progress display.
+    let slow: u64 = std::env::var("GENTOO_INSTALLER_SIMULATE_SLOW")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
     for phase in phase::all_phases() {
         let id = phase.id();
         let _ = tx.send(Event::PhaseStarted {
@@ -170,10 +175,38 @@ async fn simulate(opts: InstallOptions, tx: EventTx) -> crate::Result<()> {
                 level: Level::Info,
             });
         }
-        sleep(Duration::from_millis(
-            250 + 6 * u64::from(phase.weight().min(100)),
-        ))
-        .await;
+        // A few steps per phase with output between them, so a frontend can be looked at without installing anything.
+        let steps = 8u64;
+        for i in 0..steps {
+            let f = i as f64 / steps as f64;
+            let text = match id {
+                phase::PhaseId::Deploy => format!(
+                    "Downloading the base system: {} of 240 MB",
+                    (f * 240.0) as u64
+                ),
+                phase::PhaseId::Desktop | phase::PhaseId::Packages => {
+                    format!("Building and installing packages: {} of {steps}", i + 1)
+                }
+                _ => format!("{} ({} of {steps})", phase.label(), i + 1),
+            };
+            let _ = tx.send(Event::Step {
+                id,
+                text: text.clone(),
+                fraction: Some(f),
+            });
+            let _ = tx.send(Event::Log {
+                line: format!("$ simulated-command --step {i}"),
+                level: Level::Info,
+            });
+            let _ = tx.send(Event::Log {
+                line: text,
+                level: Level::Info,
+            });
+            sleep(Duration::from_millis(
+                slow * (250 + 6 * u64::from(phase.weight().min(100))) / steps,
+            ))
+            .await;
+        }
         let _ = tx.send(Event::PhaseFinished {
             id,
             duration: Duration::default(),

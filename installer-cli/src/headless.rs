@@ -23,7 +23,7 @@
 use anyhow::{bail, Context, Result};
 use installer_core::{
     account::Account,
-    command::RealCommandRunner,
+    command::StreamingCommandRunner,
     config::StoreEnv,
     event::{Event, Level},
     journal,
@@ -133,8 +133,9 @@ pub async fn run() -> Result<()> {
 
     let profile = installer_core::hardware::Profile::detect().context("hardware detection")?;
     let layout = partition::plan(&disk, partition::RootFs::Btrfs, profile.ram_bytes);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut ctx = Ctx::new(
-        Arc::new(RealCommandRunner),
+        Arc::new(StreamingCommandRunner::new(tx.clone())),
         "/mnt/gentoo".into(),
         layout,
         store::StoreConfig {
@@ -146,7 +147,6 @@ pub async fn run() -> Result<()> {
     )
     .with_settings(settings);
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let printer = tokio::spawn(async move {
         while let Some(ev) = rx.recv().await {
             match ev {
@@ -160,7 +160,7 @@ pub async fn run() -> Result<()> {
                     };
                     println!("{tag} {line}")
                 }
-                Event::Progress { .. } => {}
+                Event::Progress { .. } | Event::Step { .. } => {}
                 Event::Failed { id, error } => println!("FAILED {id:?}: {error}"),
                 Event::Complete => println!("INSTALL COMPLETE"),
             }
