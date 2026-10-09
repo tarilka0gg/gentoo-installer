@@ -60,6 +60,24 @@ pub(super) fn account_page_build(
         .build();
     content.append(&next_button);
 
+    // Enter moves on: username -> password -> confirmation, and from the last field it is the Continue button.
+    {
+        let password_entry = password_entry.clone();
+        username_entry.connect_activate(move |_| {
+            password_entry.grab_focus();
+        });
+    }
+    {
+        let confirm_entry = confirm_entry.clone();
+        password_entry.connect_activate(move |_| {
+            confirm_entry.grab_focus();
+        });
+    }
+    {
+        let next_button = next_button.clone();
+        confirm_entry.connect_activate(move |_| next_button.emit_clicked());
+    }
+
     let confirm_page = Rc::new(RefCell::new(None::<adw::NavigationPage>));
     {
         let nav = nav.clone();

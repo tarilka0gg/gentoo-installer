@@ -411,14 +411,28 @@ pub(super) fn partition_bar(
     let total_mib = (disk_size_bytes / 1024 / 1024).max(1);
     let esp_mib = ESP_SIZE_MIB;
     let swap_mib = swap_gib * 1024;
-    let root_mib = total_mib.saturating_sub(esp_mib + swap_mib);
+    let rest_mib = total_mib.saturating_sub(esp_mib + swap_mib);
+    // `/` and `/home` side by side when the disk is big enough, exactly what the installer will do.
+    let (root_mib, home_mib) = match partition::root_home_split(disk_size_bytes, esp_mib, swap_gib)
+    {
+        Some((root, home)) => (root, Some(home)),
+        None => (rest_mib, None),
+    };
 
     const BAR_WIDTH: i32 = 480;
     const MIN_SEG: i32 = 48;
     let esp_px = MIN_SEG;
     let swap_frac = swap_mib as f64 / total_mib as f64;
     let swap_px = ((BAR_WIDTH as f64 * swap_frac) as i32).clamp(MIN_SEG, 160);
-    let root_px = (BAR_WIDTH - esp_px - swap_px).max(MIN_SEG);
+    let left_px = (BAR_WIDTH - esp_px - swap_px).max(2 * MIN_SEG);
+    let (root_px, home_px) = match home_mib {
+        Some(home) => {
+            let root_px = ((left_px as f64 * root_mib as f64 / (root_mib + home) as f64) as i32)
+                .clamp(MIN_SEG, left_px - MIN_SEG);
+            (root_px, left_px - root_px)
+        }
+        None => (left_px, 0),
+    };
 
     let bar = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
@@ -435,6 +449,9 @@ pub(super) fn partition_bar(
     bar.append(&segment("gentoo-part-esp", esp_px));
     bar.append(&segment("gentoo-part-swap", swap_px));
     bar.append(&segment("gentoo-part-root", root_px));
+    if home_mib.is_some() {
+        bar.append(&segment("gentoo-part-home", home_px));
+    }
 
     let root_fs_name = match root_fs {
         partition::RootFs::Btrfs => "btrfs",
@@ -486,6 +503,14 @@ pub(super) fn partition_bar(
         root_mib * 1024 * 1024,
         root_fs_name,
     ));
+    if let Some(home) = home_mib {
+        legend.append(&legend_row(
+            "gentoo-part-home",
+            "home",
+            home * 1024 * 1024,
+            root_fs_name,
+        ));
+    }
 
     let wrapper = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)

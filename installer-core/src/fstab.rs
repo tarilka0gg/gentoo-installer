@@ -17,6 +17,11 @@ pub async fn generate(
     let esp_uuid = blkid_uuid(runner, &parts.esp).await?;
     let swap_uuid = blkid_uuid(runner, &parts.swap).await?;
     let root_uuid = blkid_uuid(runner, &parts.root).await?;
+    // `/home` on a partition of its own (see `partition::root_home_split`) has its own filesystem and UUID.
+    let home_uuid = match &parts.home {
+        Some(home) => Some(blkid_uuid(runner, home).await?),
+        None => None,
+    };
 
     let mut fstab = format!("{GENERATED_MARKER}\n\n");
     // iocharset=utf8: see partition::mount_target's doc comment on this exact option —
@@ -33,10 +38,13 @@ pub async fn generate(
             fstab.push_str(&format!(
                 "UUID={root_uuid}  /  btrfs  subvol=@,compress=zstd:1,noatime  0 1\n"
             ));
-            for (subvol, mountpoint) in [("@home", "/home"), ("@var", "/var"), ("@log", "/var/log")]
-            {
+            for (uuid, subvol, mountpoint) in [
+                (&root_uuid, "@var", "/var"),
+                (&root_uuid, "@log", "/var/log"),
+                (home_uuid.as_ref().unwrap_or(&root_uuid), "@home", "/home"),
+            ] {
                 fstab.push_str(&format!(
-                    "UUID={root_uuid}  {mountpoint}  btrfs  subvol={subvol},compress=zstd:1,noatime  0 2\n"
+                    "UUID={uuid}  {mountpoint}  btrfs  subvol={subvol},compress=zstd:1,noatime  0 2\n"
                 ));
             }
         }
@@ -44,6 +52,11 @@ pub async fn generate(
             fstab.push_str(&format!(
                 "UUID={root_uuid}  /  ext4  defaults,noatime  0 1\n"
             ));
+            if let Some(uuid) = &home_uuid {
+                fstab.push_str(&format!(
+                    "UUID={uuid}  /home  ext4  defaults,noatime  0 2\n"
+                ));
+            }
         }
     }
 
@@ -62,4 +75,61 @@ async fn blkid_uuid(runner: &dyn CommandRunner, device: &str) -> crate::Result<S
         )));
     }
     Ok(uuid.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::FakeCommandRunner;
+    use crate::partition::{plan, RootFs};
+
+    async fn fstab_for(home: Option<&str>, fs: RootFs) -> String {
+        let t = std::env::temp_dir().join(format!(
+            "gi-fstab-{}-{}",
+            std::process::id(),
+            home.is_some()
+        ));
+        std::fs::create_dir_all(t.join("etc")).unwrap();
+        let runner = FakeCommandRunner::new();
+        runner.respond("blkid", "AAAA-BBBB\n");
+        let parts = Partitions {
+            esp: "/dev/vda1".into(),
+            swap: "/dev/vda2".into(),
+            root: "/dev/vda3".into(),
+            home: home.map(String::from),
+        };
+        generate(&runner, &t, &plan("/dev/vda", fs, 8 << 30), &parts)
+            .await
+            .unwrap();
+        let text = std::fs::read_to_string(t.join("etc/fstab")).unwrap();
+        std::fs::remove_dir_all(&t).ok();
+        text
+    }
+
+    #[tokio::test]
+    async fn home_on_its_own_partition_is_mounted_from_there_not_from_root() {
+        let text = fstab_for(Some("/dev/vda4"), RootFs::Btrfs).await;
+        assert_eq!(
+            text.matches("/home  btrfs  subvol=@home").count(),
+            1,
+            "{text}"
+        );
+        // blkid is asked about the home partition, too (the fake gives every device the same UUID)
+        assert!(
+            text.contains("/var  btrfs  subvol=@var")
+                && text.contains("/var/log  btrfs  subvol=@log")
+        );
+    }
+
+    #[tokio::test]
+    async fn without_a_home_partition_home_stays_a_subvolume_of_root() {
+        let text = fstab_for(None, RootFs::Btrfs).await;
+        assert_eq!(
+            text.matches("/home  btrfs  subvol=@home").count(),
+            1,
+            "{text}"
+        );
+        let ext4 = fstab_for(Some("/dev/vda4"), RootFs::Ext4).await;
+        assert!(ext4.contains("/home  ext4"), "{ext4}");
+    }
 }

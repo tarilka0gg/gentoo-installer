@@ -337,6 +337,7 @@ fn install_css() {
         .gentoo-part-esp { background-color: #3584e4; border-radius: 6px; }\n\
         .gentoo-part-swap { background-color: #e5a50a; border-radius: 6px; }\n\
         .gentoo-part-root { background-color: #26a269; border-radius: 6px; }\n\
+        .gentoo-part-home { background-color: #9141ac; border-radius: 6px; }\n\
         .hero-title { font-size: 1.8rem; font-weight: 800; }\n\
         .section-heading { font-size: 1.05rem; font-weight: 800; }\n\
         .info-tile { padding: 16px 10px; border-radius: 12px; }\n\
