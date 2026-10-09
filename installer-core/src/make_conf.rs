@@ -115,6 +115,7 @@ const OWNED_KEYS: &[&str] = &[
     "VIDEO_CARDS",
     "FEATURES",
     "EMERGE_DEFAULT_OPTS",
+    "DONT_MOUNT_BOOT",
 ];
 
 /// Generates and writes make.conf. `jobs` is the target's own core count (`nproc`,
@@ -224,6 +225,10 @@ fn render(
             out.push_str(&format!("VIDEO_CARDS=\"{cards}\"\n"));
         }
     }
+    // The installer copies the kernel and writes the bootloader itself. Inside the install chroot /boot is mounted from the live
+    // system, `/proc/mounts` shows the host path, and `mount-boot.eclass` (sys-kernel/linux-firmware, in the default Wi-Fi group)
+    // aborts with "Your /boot partition is not mounted": the whole software step stopped there.
+    out.push_str("DONT_MOUNT_BOOT=\"1\"\n");
     // Several packages at once: unpacking and merging binary packages (and their downloads) is mostly waiting for the disk
     // and the network, one at a time left the CPUs idle. `--load-average` keeps compiles from piling up when something
     // does have to be built.
@@ -283,6 +288,19 @@ mod tests {
         // binhost's packages mismatch, and Portage compiles them.
         assert!(!out.contains("CPU_FLAGS_X86"), "{out}");
         assert!(out.contains("VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi\""));
+    }
+
+    #[test]
+    fn the_boot_mount_check_of_the_ebuilds_is_switched_off() {
+        let out = render(
+            "",
+            CpuArch::AmdZnver4,
+            &detected(None, None),
+            8,
+            OptLevel::O2,
+            PackageMode::Binary,
+        );
+        assert!(out.contains("DONT_MOUNT_BOOT=\"1\""), "{out}");
     }
 
     #[test]
