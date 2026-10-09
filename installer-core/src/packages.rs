@@ -308,6 +308,10 @@ pub async fn install(
     for atom in groups.iter().flat_map(|g| g.testing.iter()) {
         testing.push_str(&format!("{atom} ~amd64\n"));
     }
+    // Everything GURU ships is `~amd64` only, and so are the dependencies of its packages (mangohud wants imgui and implot, both
+    // GURU): naming each atom above misses them, and emerge stops with "masked by: ~amd64 keyword" before it builds anything
+    // (autounmask does not lift this one). The overlay is cloned by the desktop step in every install.
+    testing.push_str("*/*::guru ~amd64\n");
 
     bind_mount_chroot_dirs(runner, target).await?;
     let result = async {
@@ -469,6 +473,8 @@ mod tests {
             kw.contains("games-util/gamemode ~amd64")
                 && kw.contains("games-util/mangohud ~amd64")
                 && kw.contains("www-client/zen-bin ~amd64")
+                // the dependencies of GURU packages (mangohud -> imgui, implot) are GURU too
+                && kw.contains("*/*::guru ~amd64")
                 && !kw.contains("firefox"),
             "{kw}"
         );

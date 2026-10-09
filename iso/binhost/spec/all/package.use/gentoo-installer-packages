@@ -1,0 +1,14 @@
+x11-terms/ghostty wayland
+gnome-base/gvfs udisks
+x11-libs/gtk+ X
+x11-libs/cairo X
+xfce-base/libxfce4ui wayland
+xfce-base/libxfce4windowing wayland
+xfce-base/xfce4-panel wayland
+media-video/pipewire sound-server pipewire-alsa
+sys-fs/lvm2 lvm
+dev-cpp/gtkmm X
+dev-cpp/cairomm X
+x11-libs/gtk+ X
+x11-libs/cairo X
+games-util/gamemode elogind

@@ -7,7 +7,13 @@ use std::fmt::Write as _;
 
 fn main() {
     let dir = std::path::PathBuf::from(std::env::args().nth(1).expect("output directory"));
-    let groups = packages::resolve(&packages::default_ids()).expect("default groups");
+    // `all` as the second argument: every group, not just the ticked-by-default ones (the GUI offers them all)
+    let ids: Vec<String> = if std::env::args().nth(2).as_deref() == Some("all") {
+        packages::GROUPS.iter().map(|g| g.id.to_string()).collect()
+    } else {
+        packages::default_ids()
+    };
+    let groups = packages::resolve(&ids).expect("groups");
     let (mut world, mut keywords, mut uses, mut licenses) =
         (String::new(), String::new(), String::new(), String::new());
     for g in &groups {
