@@ -49,16 +49,24 @@ pub enum Firmware {
     Bios,
 }
 
+/// `cpuid2cpuflags` prints `CPU_FLAGS_X86: aes avx ...` (a colon, no quotes; older versions printed `CPU_FLAGS_X86="..."`).
+/// Only the flags are the value: the name in front of them once ended up inside `make.conf`.
+pub fn parse_cpuid2cpuflags(output: &str) -> String {
+    let line = output.trim();
+    let line = line
+        .strip_prefix("CPU_FLAGS_X86")
+        .map_or(line, |rest| rest.trim_start_matches([':', '=']));
+    line.trim().trim_matches('"').trim().to_string()
+}
+
 pub async fn gather(runner: &dyn CommandRunner) -> DetectedSystem {
     let profile = hardware::Profile::detect().ok();
 
-    let cpu_flags = runner.run("cpuid2cpuflags", &[]).await.ok().map(|s| {
-        // Real output is "CPU_FLAGS_X86=\"...\"" on one line; keep only the value.
-        s.trim()
-            .trim_start_matches("CPU_FLAGS_X86=")
-            .trim_matches('"')
-            .to_string()
-    });
+    let cpu_flags = runner
+        .run("cpuid2cpuflags", &[])
+        .await
+        .ok()
+        .map(|s| parse_cpuid2cpuflags(&s));
 
     let gpus = match runner.run("lspci", &["-nn", "-D"]).await {
         Ok(text) => crate::gpu::parse_lspci(&text),
@@ -152,6 +160,19 @@ mod tests {
             video_cards_value(hardware::Gpu::RadeonLegacy),
             "radeon r300 r600"
         );
+    }
+
+    #[test]
+    fn the_flag_list_is_read_without_the_variable_name() {
+        assert_eq!(
+            parse_cpuid2cpuflags("CPU_FLAGS_X86: aes avx sse4_2\n"),
+            "aes avx sse4_2"
+        );
+        assert_eq!(
+            parse_cpuid2cpuflags("CPU_FLAGS_X86=\"aes avx\"\n"),
+            "aes avx"
+        );
+        assert_eq!(parse_cpuid2cpuflags("aes avx"), "aes avx");
     }
 
     #[tokio::test]

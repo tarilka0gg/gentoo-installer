@@ -151,6 +151,23 @@ pub async fn nproc(runner: &dyn CommandRunner) -> u32 {
         .unwrap_or(1)
 }
 
+/// `VIDEO_CARDS` the official binhost builds mesa and libdrm with. Any other value changes those packages' USE, so Portage
+/// rejects the binary and compiles them (mesa pulls in llvm).
+pub const BINHOST_VIDEO_CARDS: &[&str] = &["amdgpu", "intel", "nouveau", "radeon", "radeonsi"];
+
+/// The detected `VIDEO_CARDS` made binary-friendly: the binhost's own set, plus whatever else the hardware needs
+/// (`nvidia`, `virgl` in a VM). Extras are the price of that hardware, not of the choice of drivers: a machine with an AMD card does not
+/// need mesa rebuilt, a VM with virgl does.
+pub fn binhost_video_cards(detected: &str) -> String {
+    let mut cards: Vec<&str> = BINHOST_VIDEO_CARDS.to_vec();
+    for c in detected.split_whitespace() {
+        if !cards.contains(&c) {
+            cards.push(c);
+        }
+    }
+    cards.join(" ")
+}
+
 /// Pure string transform — strips any existing line assigning one of `OWNED_KEYS`
 /// (stage3's own make.conf sets generic `COMMON_FLAGS`/`MAKEOPTS`), then appends this
 /// machine's detected values. Split out from `generate` so the interesting logic is
@@ -185,12 +202,18 @@ fn render(
     out.push_str("CFLAGS=\"${COMMON_FLAGS}\"\n");
     out.push_str("CXXFLAGS=\"${COMMON_FLAGS}\"\n");
     out.push_str(&format!("MAKEOPTS=\"-j{jobs}\"\n"));
-    if let Some(flags) = &detected.cpu_flags {
+    // A binary install must match what the official binhost was built with: with this machine's own CPU_FLAGS_X86 the
+    // packages that have such flags (pixman, flac, libwebp, libjxl, libsodium...) no longer match and are compiled.
+    if let (Some(flags), PackageMode::Source) = (&detected.cpu_flags, package_mode) {
         if !flags.is_empty() {
             out.push_str(&format!("CPU_FLAGS_X86=\"{flags}\"\n"));
         }
     }
     if let Some(cards) = &detected.video_cards {
+        let cards = match package_mode {
+            PackageMode::Binary => binhost_video_cards(cards),
+            PackageMode::Source => cards.clone(),
+        };
         if !cards.is_empty() {
             out.push_str(&format!("VIDEO_CARDS=\"{cards}\"\n"));
         }
@@ -243,8 +266,36 @@ mod tests {
         );
         assert!(out.contains("-march=znver4"));
         assert!(out.contains("MAKEOPTS=\"-j16\""));
+        // Binary mode (the default) must not set this machine's CPU flags or an unusual driver set: either makes the official
+        // binhost's packages mismatch, and Portage compiles them.
+        assert!(!out.contains("CPU_FLAGS_X86"), "{out}");
+        assert!(out.contains("VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi\""));
+    }
+
+    #[test]
+    fn source_mode_keeps_the_machines_own_flags_and_drivers() {
+        let out = render(
+            "",
+            CpuArch::AmdZnver4,
+            &detected(Some("aes avx avx2 sse4_2"), Some("amdgpu")),
+            16,
+            OptLevel::O2,
+            PackageMode::Source,
+        );
         assert!(out.contains("CPU_FLAGS_X86=\"aes avx avx2 sse4_2\""));
         assert!(out.contains("VIDEO_CARDS=\"amdgpu\""));
+    }
+
+    #[test]
+    fn hardware_that_needs_another_driver_adds_it_to_the_binhost_set() {
+        assert_eq!(
+            binhost_video_cards("virgl"),
+            "amdgpu intel nouveau radeon radeonsi virgl"
+        );
+        assert_eq!(
+            binhost_video_cards("nvidia intel"),
+            "amdgpu intel nouveau radeon radeonsi nvidia"
+        );
     }
 
     #[test]
