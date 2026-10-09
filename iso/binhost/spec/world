@@ -4,6 +4,7 @@ app-containers/podman
 app-editors/micro
 app-editors/neovim
 app-misc/fastfetch
+app-misc/jq
 app-misc/screen
 app-misc/tmux
 app-office/libreoffice-bin
@@ -66,5 +67,6 @@ sys-process/lsof
 www-client/zen-bin
 x11-terms/ghostty
 x11-themes/adwaita-icon-theme
+x11-themes/adw-gtk3
 xfce-base/thunar
 xfce-base/tumbler

@@ -8,6 +8,9 @@ use super::*;
 /// the target's own uid/gid for `username` — the host and target don't necessarily agree
 /// on uid numbers, so a plain host-side `chown` isn't safe here (same reasoning
 /// `account::create` documents for why it uses `useradd -R` instead of chroot).
+/// The wallpapers of the live image (its session runs as root); the installed system's palette is generated from them.
+const LIVE_WALLPAPERS: &str = "/root/Pictures/Wallpapers/simple";
+
 pub(super) async fn apply_preset_from_dir(
     runner: &dyn CommandRunner,
     target: &Path,
@@ -26,6 +29,15 @@ pub(super) async fn apply_preset_from_dir(
     )
     .await?;
     copy_dir(&preset_root.join("noctalia"), &config_dir.join("noctalia")).await?;
+    // Starting configs of the programs whose colours Noctalia generates (ghostty, btop): its hooks only edit a config that exists.
+    if preset_root.join("apps").is_dir() {
+        copy_dir(&preset_root.join("apps"), &config_dir).await?;
+    }
+    // The palette comes from the wallpaper, so the system needs wallpapers: the live image's own set goes along.
+    let live_wallpapers = Path::new(LIVE_WALLPAPERS);
+    if live_wallpapers.is_dir() {
+        copy_dir(live_wallpapers, &home.join("Pictures/Wallpapers/simple")).await?;
+    }
     // The author's fish setup (tide prompt and its plugins), for a system whose stage has fish. It goes in before the session
     // snippet below, which adds its own file to the same conf.d.
     if preset_root.join("fish").is_dir() && target.join("usr/bin/fish").is_file() {

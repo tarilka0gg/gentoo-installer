@@ -97,6 +97,8 @@ ZENDESKTOP
     install -d "$ROOT/root/.config/niri" "$ROOT/root/.config/noctalia"
     cp "$WMCONF/niri/config.kdl" "$ROOT/root/.config/niri/config.kdl"
     cp "$WMCONF/noctalia/config.toml" "$ROOT/root/.config/noctalia/config.toml"
+    # Starting configs for the programs Noctalia themes (ghostty, btop): its hooks only edit a config that exists.
+    [ -d "$WMCONF/apps" ] && cp -r "$WMCONF/apps/." "$ROOT/root/.config/"
     if [ -n "$PROFILE" ]; then
         # The user's own look, bar and dock (already stripped of machine-specific parts by
         # make-profile.py) replace the repo presets.

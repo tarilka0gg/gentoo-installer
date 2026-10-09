@@ -11,7 +11,9 @@ app-misc/tmux
 app-misc/screen
 sys-process/lsof
 dev-debug/strace
+app-misc/jq
 xfce-base/thunar
+x11-themes/adw-gtk3
 xfce-base/tumbler
 gnome-base/gvfs
 media-video/pipewire
