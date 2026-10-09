@@ -98,9 +98,12 @@ INNER
 cat > "$W/ns.sh" <<NS
 set -e
 mount --bind /proc "$R/proc"; mount --rbind /sys "$R/sys"; mount --rbind /dev "$R/dev"
-mount -t tmpfs -o size=6g tmpfs "$R/var/tmp"       # build directories in RAM: fast, and gone afterwards
+# Build directories in RAM: fast, and gone afterwards. BUILD_TMPFS=0 keeps them on disk (the 8 GB build server ran out of memory with it).
+[ "${BUILD_TMPFS:-1}" = 0 ] || mount -t tmpfs -o size=6g tmpfs "$R/var/tmp"
 # The host's resolver may be a private one (tailscale on the build server) that fails now and then: the chroot gets public ones.
 printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > "$R/etc/resolv.conf"
+# ... and IPv4 first: on the build server an IPv6 address is returned that goes nowhere, and every download waited for its timeout.
+printf "precedence ::ffff:0:0/96  100\n" > "$R/etc/gai.conf"
 exec chroot "$R" /bin/bash /root/build-inner.sh
 NS
 echo "== build ($JOBS jobs) — log: $OUT/build.log"
