@@ -104,6 +104,10 @@ ZENDESKTOP
         cp "$PROFILE/noctalia/config.toml" "$ROOT/root/.config/noctalia/config.toml"
         install -d "$ROOT/root/.local/state"
         cp -r "$PROFILE/state/noctalia" "$ROOT/root/.local/state/"
+    else
+        # No personal profile: the repo's presets above are the whole look. A tree that an earlier build gave a profile keeps its
+        # Noctalia state (wallpaper, theme) otherwise, and the image would show someone's own desktop.
+        rm -rf "$ROOT/root/.local/state/noctalia"
     fi
     # GTK look: $THEME_ASSETS holds icons/<theme> and themes/<theme> directories (WhiteSur icons;
     # optional GTK themes) that are copied in as they are; the settings point GTK 3/4 at them.
