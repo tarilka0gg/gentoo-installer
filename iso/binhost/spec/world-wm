@@ -1,0 +1,9 @@
+app-admin/doas
+app-editors/micro
+app-shells/fish
+gui-apps/noctalia
+gui-wm/niri
+net-analyzer/gping
+sys-apps/eza
+sys-auth/seatd
+sys-block/dust

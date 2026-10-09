@@ -1,0 +1,3 @@
+gui-wm/niri ~amd64
+gui-apps/noctalia **
+dev-cpp/sdbus-c++ ~amd64
