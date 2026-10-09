@@ -109,6 +109,34 @@ ZENDESKTOP
         # Noctalia state (wallpaper, theme) otherwise, and the image would show someone's own desktop.
         rm -rf "$ROOT/root/.local/state/noctalia"
     fi
+    # The live image's look, whoever's bar and settings the config above came from: colours generated from the wallpaper
+    # (Material You, m3-tonal-spot, light), the wallpapers of this project and no one's own wallpaper folder. A personal profile
+    # normally pins a palette ("community"/"builtin") and its own wallpaper directory; neither belongs in the image.
+    python3 - "$ROOT/root/.config/noctalia/config.toml" <<'THEMEPY'
+import re, sys
+path = sys.argv[1]
+text = open(path).read()
+def section(name, fn):
+    global text
+    m = re.search(r'(?ms)^\[%s\]\n(.*?)(?=^\[|\Z)' % re.escape(name), text)
+    if not m:
+        text += '\n[%s]\n' % name; m = re.search(r'(?ms)^\[%s\]\n(.*?)(?=^\[|\Z)' % re.escape(name), text)
+    text = text[:m.start(1)] + fn(m.group(1)) + text[m.end(1):]
+def setkey(body, key, value):
+    line = '%s = "%s"' % (key, value)
+    if re.search(r'(?m)^%s\s*=' % key, body):
+        return re.sub(r'(?m)^%s\s*=[^\n]*' % key, line, body, count=1)
+    if re.search(r'(?m)^#\s*%s\s*=' % key, body):
+        return re.sub(r'(?m)^#\s*%s\s*=[^\n]*' % key, line, body, count=1)
+    return line + '\n' + body
+def theme(body):
+    body = setkey(body, 'mode', 'light')
+    body = setkey(body, 'source', 'wallpaper')
+    return setkey(body, 'wallpaper_scheme', 'm3-tonal-spot')
+section('theme', theme)
+section('wallpaper', lambda b: setkey(b, 'directory', '~/Pictures/Wallpapers'))
+open(path, 'w').write(text)
+THEMEPY
     # GTK look: $THEME_ASSETS holds icons/<theme> and themes/<theme> directories (WhiteSur icons;
     # optional GTK themes) that are copied in as they are; the settings point GTK 3/4 at them.
         if [ -n "${THEME_ASSETS:-}" ] && [ -d "$THEME_ASSETS" ]; then
