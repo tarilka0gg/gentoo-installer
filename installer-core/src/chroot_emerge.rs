@@ -43,6 +43,13 @@ pub(crate) async fn ensure_portage_tree(
     if target.join("var/db/repos/gentoo/profiles").exists() {
         return Ok(());
     }
+    // (Not in the unit tests: they use a fake runner and must not download a tree.)
+    #[cfg(not(test))]
+    if let Some(url) = crate::binhost::url_from_env() {
+        if install_pinned_tree(runner, target, &url).await {
+            return Ok(());
+        }
+    }
     runner
         .run_status("chroot", &[target_str, "emerge-webrsync"])
         .await?;
@@ -71,6 +78,39 @@ pub(crate) async fn write_portage_entry(
     };
     tokio::fs::write(target_file, content).await?;
     Ok(())
+}
+
+/// Unpacks the tree snapshot that goes with the project's binhost into `var/db/repos`. `false` (nothing half-installed is left
+/// behind) when it cannot be fetched or unpacked: the caller then syncs the day's tree the usual way.
+#[cfg_attr(test, allow(dead_code))]
+async fn install_pinned_tree(runner: &dyn CommandRunner, target: &Path, binhost_url: &str) -> bool {
+    let repos = target.join("var/db/repos");
+    let archive =
+        std::env::temp_dir().join(format!("simple-linux-tree-{}.tar.zst", std::process::id()));
+    let url = format!(
+        "{}/{}",
+        binhost_url.trim_end_matches('/'),
+        crate::binhost::TREE_ASSET
+    );
+    let ok = async {
+        tokio::fs::create_dir_all(&repos).await.ok()?;
+        crate::http::download_to_file(&url, &archive).await.ok()?;
+        runner
+            .run_status(
+                "tar",
+                &["--zstd", "-xpf", archive.to_str()?, "-C", repos.to_str()?],
+            )
+            .await
+            .ok()?;
+        repos.join("gentoo/profiles").exists().then_some(())
+    }
+    .await
+    .is_some();
+    tokio::fs::remove_file(&archive).await.ok();
+    if !ok {
+        tokio::fs::remove_dir_all(repos.join("gentoo")).await.ok();
+    }
+    ok
 }
 
 pub(crate) async fn bind_mount_chroot_dirs(

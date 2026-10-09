@@ -20,6 +20,11 @@ pub const DEFAULT_URL: &str =
 /// Fingerprint of the key the packages are signed with (`assets/binhost/binhost-signing.asc`).
 pub const KEY_FINGERPRINT: &str = "F6307025824C538E8C43844590899877B0925EC1";
 
+/// The Portage tree and GURU the packages were built from, published next to them (`gentoo/` and `guru/`, zstd tar). Installing from
+/// this snapshot instead of the day's tree keeps versions and ebuilds identical to what the binaries were built from; tomorrow's
+/// tree has newer versions, no binary for them, and Portage compiles them.
+pub const TREE_ASSET: &str = "tree.tar.zst";
+
 const KEY: &str = include_str!("../assets/binhost/binhost-signing.asc");
 const PACKAGE_USE: &str = include_str!("../assets/binhost/package.use");
 const PACKAGE_ACCEPT_KEYWORDS: &str = include_str!("../assets/binhost/package.accept_keywords");

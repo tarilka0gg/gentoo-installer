@@ -80,9 +80,6 @@ pub(super) async fn ensure_overlay(
     url: &str,
 ) -> crate::Result<()> {
     let repo_dir = target.join(format!("var/db/repos/{name}"));
-    if repo_dir.exists() {
-        return Ok(());
-    }
     let repos_conf_dir = target.join("etc/portage/repos.conf");
     tokio::fs::create_dir_all(&repos_conf_dir).await?;
     let repos_conf = format!(
@@ -93,6 +90,10 @@ pub(super) async fn ensure_overlay(
          auto-sync = yes\n"
     );
     tokio::fs::write(repos_conf_dir.join(format!("{name}.conf")), repos_conf).await?;
+    // Already there (a resumed run, or the pinned tree snapshot that carries GURU): registered above, nothing to clone.
+    if repo_dir.exists() {
+        return Ok(());
+    }
 
     tokio::fs::create_dir_all(repo_dir.parent().expect("var/db/repos always has a parent")).await?;
     let repo_dir_str = repo_dir
