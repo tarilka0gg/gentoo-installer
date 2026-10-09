@@ -145,6 +145,9 @@ section('theme', theme)
 # colour of the dock itself and the icons vanish. The role of the documented default is readable on any palette.
 if settings_file:
     section('shell', lambda b: re.sub(r'(?m)^(app_icon_color\s*=\s*)"[^"]*"', r'\1"on_surface"', b))
+# The dock pins the browser by desktop-entry id. A profile from a machine that has the zen-bin package pins "zen-zen-bin", an entry the
+# live image hides (Zen is not on the medium); the one that downloads it and has the right name and icon is "zen-browser".
+text = text.replace('"zen-zen-bin"', '"zen-browser"')
 if not settings_file:
     section('wallpaper', lambda b: setkey(b, 'directory', '~/Pictures/Wallpapers'))
 open(path, 'w').write(text)
