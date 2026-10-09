@@ -6,3 +6,4 @@ x11-themes/adwaita-icon-theme ~amd64
 net-im/telegram-desktop-bin ~amd64
 games-util/gamemode ~amd64
 games-util/mangohud ~amd64
+*/*::guru ~amd64

@@ -9,6 +9,4 @@ media-video/pipewire sound-server pipewire-alsa
 sys-fs/lvm2 lvm
 dev-cpp/gtkmm X
 dev-cpp/cairomm X
-x11-libs/gtk+ X
-x11-libs/cairo X
 games-util/gamemode elogind
