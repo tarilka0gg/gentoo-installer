@@ -43,8 +43,10 @@ disk. OpenRC only.
   - swap: always created, sized 1:1 with RAM, clamped to 8–96 GiB
     (`installer-core::partition::swap_size_gib`) — exists mainly as an
     overflow buffer for parallel (`-j`) compiles, not for hibernation
-  - root: btrfs by default with subvolumes `@` / `@home` / `@var` / `@log`;
-    ext4 (single partition, no subvolumes) available as an alternative.
+  - root and home: `/` and `/home` are **separate partitions** (so a full home cannot starve the system, nor the reverse; the way a btrfs system
+    runs into ENOSPC). What is left after ESP and swap is cut `root_home_split`: system 20 %, home 80 %; on a disk under 128 GiB system 40 %, home 60 %;
+    the system never gets under 20 GiB, and with under 40 GiB left there is no split (everything in root). btrfs by default: root with subvolumes `@` / `@var` / `@log`,
+    home's own filesystem with `@home`; ext4 (no subvolumes) available as an alternative.
     No LUKS — considered unnecessary overhead; users who want disk encryption
     set it up manually.
 - **Network**: iwd over D-Bus, not NetworkManager (too heavy for a live image).
@@ -110,7 +112,7 @@ Both frontends call into `installer-core` only; no step logic lives in them.
 
 ## Status
 
-Workspace builds and passes `cargo fmt --check`, build and tests in CI (GitHub Actions): 138 core and 17 CLI tests, plus
+Workspace builds and passes `cargo fmt --check`, build and tests in CI (GitHub Actions): 173 core and 17 CLI tests, plus
 tests that need root, a stage3 or QEMU and are run by hand (see below).
 
 What works, each exercised in a VM or QEMU rather than only in unit tests:
@@ -126,9 +128,15 @@ What works, each exercised in a VM or QEMU rather than only in unit tests:
 - **Desktop** (`wm`): Noctalia plus niri (default), Hyprland, Sway, Labwc, MangoWC or dwl, from a wm-configs preset;
   `GENTOO_INSTALLER_WM=none` installs no desktop.
 - **Kernels** come from a per-hardware store; a full install used `generic-x86-64-v3-none-desktop` from it.
+- **Progress.** `StreamingCommandRunner` sends every line a command prints to the log; `Event::Step` carries what a phase is doing and how far into it (the stage3 download in MB, the
+  unpack from the offset into the tarball read from `/proc`, `>>> Emerging (n of m)`); the GUI's Installing page shows a step list with a spinner, percent and elapsed time and the log.
+  `installer-gui --debug-progress` with `GENTOO_INSTALLER_SIMULATE_SLOW=10` previews it without installing.
 
 Needs `GENTOO_STORE_BINHOST_URL` / `GENTOO_STORE_OVERLAY_URL` for real runs (the store has no fixed public URL yet);
 `GENTOO_INSTALLER_SIMULATE=1` gives a click-through with no disk, network or chroot.
+
+**Not checked:** the graphical wizard end to end after the latest changes (the headless runs use the same phases, not the same screens), Secure Boot of an installed system under OVMF with a
+full install, any real hardware.
 
 **Not done:** `Initramfs` is unused (the kernel store ships ready-made initramfs-less builds); a plan-JSON driver;
 preset/edition integration from `portage_store`; the iwd passphrase agent is only exercised against a fake (no Wi-Fi radio in the VM);
@@ -136,6 +144,26 @@ LUKS; a translated installer UI (only locale defaults are guessed); any real har
 
 **Known gap**: `CommandRunner` covers shell-outs, not HTTP — `stage3::download`, `store::list_binhost_atoms` and `kernel::deploy`'s
 fetches are real `reqwest` calls with no fake layer, so Deploy is tested in a VM, not in `cargo test`.
+
+## Binary install
+
+The packages are not compiled on the target. `PackageMode::Binary` (the default) writes `FEATURES="getbinpkg"` and `EMERGE_DEFAULT_OPTS="--jobs=… --load-average=…"` and
+`DONT_MOUNT_BOOT="1"` (the `mount-boot` check of `sys-kernel/linux-firmware` aborts in a chroot, where `/proc/mounts` shows the host's path of `/boot`).
+Two binary hosts are used: Gentoo's own, and the project's ([simple-linux-binhost](https://github.com/tarilka0gg/simple-linux-binhost): niri, Noctalia, ghostty, the
+packages whose USE the installer changes), added by `binhost::configure` with a higher priority and signature checking on. The key is trusted the way `getuto` trusts Gentoo's:
+import, `import-ownertrust`, **and** `--check-trustdb` (without the last step gpg reports a good signature from an untrusted key and Portage rejects the package).
+
+A binary is used only when its USE flags equal the machine's, so what the installer asks for is fixed in `installer-core/assets/binhost/` (`package.use`, `package.accept_keywords`,
+`package.license`) and in the group lists (`packages.rs`); the binhost is built with the same files. In binary mode `make.conf` does **not** set this machine's `CPU_FLAGS_X86`, and
+`VIDEO_CARDS` is the binhost's set plus what the hardware needs (`nvidia`, `virgl` in a VM): either of them changes the USE of `pixman`, `flac`, `mesa`, `libdrm`, ... and Portage compiles them.
+`GENTOO_BINHOST_URL` overrides the host (a mirror, a test server), empty or `0` switches the project's host off.
+
+The Portage tree is the snapshot the packages were built from (`tree.tar.zst`, `gentoo/` and `guru/`, published next to them), unpacked into `/var/db/repos`; `emerge-webrsync` is the fallback.
+Otherwise a newer tree has newer versions with no binary and Portage compiles them. `iso/binhost/` has the builder (`build.sh`, in a clean stage3 chroot; `build-variant.sh` for another
+`VIDEO_CARDS`; `make-repo.py` for the published directory; `export-assets.sh` copies what a build converged on into the installer's assets).
+
+Measured in a VM: a full install of every software group merges 263 packages, none compiled (the only "source" merges are `linux-firmware` and `zen-bin`, which are not published and just
+install fetched files), in about 15 minutes; the default groups 261 and about 10.
 
 ## After the install: updates and Secure Boot
 
@@ -269,7 +297,10 @@ and offers rescan and skip. The screen is a pure state machine (`installer-cli/s
 
 `installer-cli --headless` runs the whole phase chain with no screens, configured from the environment
 (`GENTOO_INSTALLER_DISK`, `_CONFIRM_ERASE` — must repeat the disk path —, `_USERNAME`, `_PASSWORD`, the
-`GENTOO_STORE_*` variables, optionally `_HOSTNAME`/`_LOCALES`/`_TIMEZONE`/`_KEYBOARD`/`_STAGE3_URL`).
+`GENTOO_STORE_*` variables, optionally `_HOSTNAME`/`_LOCALES`/`_TIMEZONE`/`_KEYBOARD`/`_STAGE3_URL`, `_PACKAGES` (comma-separated group ids; default the ticked-by-default groups),
+`GENTOO_WM_CONFIGS_URL`, `GENTOO_BINHOST_URL`, `_SECUREBOOT=1`). Its output is the same event stream the GUI shows: every command and what it prints. A full install in a VM
+this way (installer fetched into the live system, output sent to the host over the network) is how most bugs of this release were found: `mangohud`'s GURU dependencies,
+`linux-firmware` in the chroot, the Qt USE for `vlc`.
 `phase::run_all` is the driver: it skips phases whose `is_satisfied` holds, stops at the first failure
 and reports it. `--resume` continues the unfinished install this live session remembers (journal in `/run/installer`), skipping what is
 already done. `GENTOO_INSTALLER_WM=none` installs no desktop (a console-only system).

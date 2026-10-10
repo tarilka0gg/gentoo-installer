@@ -71,6 +71,9 @@ qemu-system-x86_64 -machine q35 -enable-kvm -m 2048 -display none -serial stdio 
 
 ## Size
 
+(Checked against the releases: the GUI image went from 1788 MiB (0.1.2) to 734 MiB (0.2.7) and has stayed within 740-763 MiB since; the last three releases grew by 22 MiB, the 17 wallpapers (0.2.18,
+about 11 MB) and the WhiteSur icon theme (0.2.19, about 10 MB). The adw-gtk3 theme and the Noctalia hooks of the next release are 3 MB before compression.)
+
 Measured with `ls -l` on the built images: minimal 755 → **506 MB**, GUI 1.1 GB → **996 MB** (with the apps below) after
 (1) sizing the UEFI FAT image to its content instead of a fixed 96 MB, and (2) leaving out what a
 live system never uses: `usr/share/{locale,i18n,sgml,cmake,gcc-data,binutils-data}`, GCC's
