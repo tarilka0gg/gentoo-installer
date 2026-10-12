@@ -298,6 +298,8 @@ INSTDESKTOP
         f="$ROOT/usr/share/applications/$d.desktop"
         [ -f "$f" ] && ! grep -q '^NoDisplay=true' "$f" && sed -i '0,/^\[Desktop Entry\]/s//[Desktop Entry]\nNoDisplay=true/' "$f"
     done
+    # Portage Store stays in the launcher (an earlier build of this tree had hidden it, and the tree keeps what it was given).
+    sed -i '/^NoDisplay=true/d' "$ROOT/usr/share/applications/io.github.tarilka0gg.PortageStore.desktop" 2>/dev/null || true
     # Noctalia recolours application icons to the wallpaper palette, which only gives a readable
     # picture for glyph-style (symbolic) icons; the full-colour ones turn into solid blobs. So the
     # launcher entries point at symbolic glyphs.
