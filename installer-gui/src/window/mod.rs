@@ -239,7 +239,7 @@ pub fn build(app: &adw::Application) {
         .default_width(800)
         .default_height(640)
         .content(&toolbar_view)
-        .title("Gentoo Installer")
+        .title("Simple Linux Installer")
         .build();
 
     window.present();

@@ -44,7 +44,7 @@ pub(super) fn welcome_page(
         "Automated btrfs partitioning, kernel profile detection, Limine boot setup."
     };
     let title = gtk::Label::builder()
-        .label("Gentoo Installer")
+        .label("Simple Linux Installer")
         .css_classes(vec!["hero-title".to_string()])
         .halign(gtk::Align::Center)
         .build();

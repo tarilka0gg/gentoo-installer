@@ -468,7 +468,7 @@ fn draw(frame: &mut ratatui::Frame, state: &AppState) {
     let area = frame.area();
     let chunks = RtLayout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
 
-    let title = Paragraph::new(Line::from("Gentoo Installer (TUI) — minimal ISO"))
+    let title = Paragraph::new(Line::from("Simple Linux Installer (TUI) — minimal ISO"))
         .style(Style::default().fg(Color::Cyan))
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(title, chunks[0]);

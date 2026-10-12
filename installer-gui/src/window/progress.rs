@@ -480,7 +480,7 @@ pub fn build_debug_progress(app: &adw::Application) {
     nav.add(&widgets.page);
     let win = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Gentoo Installer (progress preview)")
+        .title("Simple Linux Installer (progress preview)")
         .default_width(800)
         .default_height(640)
         .content(&nav)
