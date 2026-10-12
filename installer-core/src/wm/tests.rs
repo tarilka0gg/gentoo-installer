@@ -11,6 +11,13 @@ fn make_preset_repo(root: &Path, wm_dir: &str) {
     )
     .unwrap();
     std::fs::write(root.join("bash_profile.tmpl"), "exec {{LAUNCH_CMD}}\n").unwrap();
+    // Starting configs for the programs Noctalia themes, and its hooks.
+    std::fs::create_dir_all(root.join("apps/ghostty")).unwrap();
+    std::fs::write(
+        root.join("apps/ghostty/config"),
+        "theme = noctalia\nconfig-file = ?themes/noctalia\n",
+    )
+    .unwrap();
 }
 
 #[tokio::test]
@@ -80,6 +87,13 @@ async fn copies_preset_config_into_the_new_users_home_and_chowns_it() {
             .await
             .unwrap();
     assert_eq!(noctalia_config, "noctalia config\n");
+    // Noctalia's hook only edits a ghostty config that exists: without this file the terminal keeps its default colours for ever.
+    let ghostty = tokio::fs::read_to_string(target_dir.join("home/tester/.config/ghostty/config"))
+        .await
+        .unwrap();
+    assert!(
+        ghostty.contains("theme = noctalia") && ghostty.contains("config-file = ?themes/noctalia")
+    );
     let bash_profile = tokio::fs::read_to_string(target_dir.join("home/tester/.bash_profile"))
         .await
         .unwrap();
