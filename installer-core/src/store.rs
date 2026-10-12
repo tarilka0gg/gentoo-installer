@@ -84,7 +84,8 @@ pub async fn configure(
 /// Parses the Portage binary-package-index format (`PMS` binpkg-multi-instance `Packages`
 /// file): entries are blank-line-separated stanzas, each with a `CPV: cat/pkg-version` line.
 pub async fn list_binhost_atoms(binhost_url: &str) -> crate::Result<Vec<String>> {
-    let url = crate::kernel::kernel_asset_url(binhost_url, "Packages");
+    // The index is at the top of the store in both layouts (a release asset, or the root of a web directory).
+    let url = format!("{}/Packages", binhost_url.trim_end_matches('/'));
     let body = reqwest::get(&url)
         .await
         .map_err(|e| crate::Error::Other(e.into()))?
