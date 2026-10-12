@@ -309,6 +309,11 @@ spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
 spawn-at-startup "live-installer"
 spawn-at-startup "get-zen" "--fetch"
+// Noctalia's backdrop (the blurred wallpaper) belongs behind the workspaces in the overview
+layer-rule {
+    match namespace="^noctalia-backdrop"
+    place-within-backdrop true
+}
 // Zen opens as a normal tiled, maximized window (not a small floating one in a corner of the screen)
 window-rule {
     match app-id="zen"
