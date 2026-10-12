@@ -165,6 +165,12 @@ def theme(body):
     # the author's own palette is not part of the image
     return re.sub(r'(?m)^community_palette\s*=[^\n]*\n', '', body)
 section('theme', theme)
+# The wallpaper behind the niri overview: without the backdrop the overview is the compositor's plain dark colour.
+def backdrop(body):
+    if re.search(r'(?m)^enabled\s*=', body):
+        return re.sub(r'(?m)^enabled\s*=[^\n]*', 'enabled = true', body, count=1)
+    return 'enabled = true\n' + body
+section('backdrop', backdrop)
 # Icons recoloured to a palette role: a profile tuned for a dark palette says "surface", which on a light wallpaper palette is the
 # colour of the dock itself and the icons vanish. The role of the documented default is readable on any palette.
 if settings_file:
@@ -243,9 +249,10 @@ INSTDESKTOP
     : > "$ROOT/root/.config/niri/noctalia.kdl"
     grep -q '^include "noctalia.kdl"' "$ROOT/root/.config/niri/config.kdl" \
         || printf '\ninclude "noctalia.kdl"\n' >> "$ROOT/root/.config/niri/config.kdl"
-    # Launcher entries nobody needs in a live session (console tools included; the zen-bin package ships its own "Zen"
+    # Launcher entries nobody needs in a live session (Portage Store included: it searches the Portage tree, which the live
+    # medium does not carry; console tools too; the zen-bin package ships its own "Zen"
     # entry next to ours, which is the one that downloads the browser).
-    for d in zen-zen-bin dev.noctalia.Noctalia panel-preferences xfce4-about thunar-bulk-rename thunar-settings btop micro; do
+    for d in zen-zen-bin io.github.tarilka0gg.PortageStore dev.noctalia.Noctalia panel-preferences xfce4-about thunar-bulk-rename thunar-settings btop micro; do
         f="$ROOT/usr/share/applications/$d.desktop"
         [ -f "$f" ] && ! grep -q '^NoDisplay=true' "$f" && sed -i '0,/^\[Desktop Entry\]/s//[Desktop Entry]\nNoDisplay=true/' "$f"
     done
@@ -302,6 +309,12 @@ spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
 spawn-at-startup "live-installer"
 spawn-at-startup "get-zen" "--fetch"
+// Zen opens as a normal tiled, maximized window (not a small floating one in a corner of the screen)
+window-rule {
+    match app-id="zen"
+    open-floating false
+    open-maximized true
+}
 window-rule {
     match app-id="org.gentoo_diy.Installer"
     open-floating true
