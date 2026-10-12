@@ -213,6 +213,19 @@ for _ in $(seq 1 60); do
 done
 RANDWP
     chmod 755 "$ROOT/usr/local/bin/random-wallpaper"
+    # The installer is a GTK program that reads the colours once, at its start. Started with niri it comes up before Noctalia has
+    # rendered the wallpaper palette and stays in the plain Adwaita colours, so wait for this boot's noctalia.css first (newer than
+    # PID 1; a minute at most, then start anyway) and give Noctalia a moment to finish writing.
+    cat > "$ROOT/usr/local/bin/live-installer" <<'LIVEINST'
+#!/bin/sh
+css="${XDG_CONFIG_HOME:-$HOME/.config}/gtk-4.0/noctalia.css"
+for _ in $(seq 1 120); do
+    [ -s "$css" ] && [ "$css" -nt /proc/1 ] && { sleep 1; break; }
+    sleep 0.5
+done
+exec installer-gui "$@"
+LIVEINST
+    chmod 755 "$ROOT/usr/local/bin/live-installer"
     # A launcher entry for the installer: without it the dock/launcher have no icon or name for
     # its window (app id org.gentoo_diy.Installer).
     cat > "$ROOT/usr/share/applications/org.gentoo_diy.Installer.desktop" <<'INSTDESKTOP'
@@ -287,7 +300,7 @@ KEYRING
 spawn-at-startup "pipewire"
 spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
-spawn-at-startup "installer-gui"
+spawn-at-startup "live-installer"
 spawn-at-startup "get-zen" "--fetch"
 window-rule {
     match app-id="org.gentoo_diy.Installer"
