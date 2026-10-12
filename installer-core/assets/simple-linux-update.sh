@@ -31,7 +31,12 @@ done
 . "$CONF"   # BINHOST, COMBO
 : "${BINHOST:?}" "${COMBO:?}"
 BINHOST=${BINHOST%/}
-URL=$BINHOST/kernels/$COMBO
+# A GitHub release has flat assets, any other store keeps the files under kernels/ (same rule as installer-core's kernel_asset_url).
+case $BINHOST in
+    */releases/download/*) KBASE=$BINHOST ;;
+    *) KBASE=$BINHOST/kernels ;;
+esac
+URL=$KBASE/$COMBO
 say() { printf '%s\n' "$*"; }
 die() { printf 'simple-linux-update: %s\n' "$*" >&2; exit 1; }
 

@@ -36,11 +36,13 @@ impl Phase for DeployPhase {
     /// results have to be there.
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
         let stage = ctx.target.join("etc/portage").is_dir();
-        let overlay = ctx
-            .target
-            .join("var/db/repos")
-            .join(&ctx.store.overlay_name)
-            .is_dir();
+        // An overlay is only there when one was asked for.
+        let overlay = ctx.store.overlay_git_url.trim().is_empty()
+            || ctx
+                .target
+                .join("var/db/repos")
+                .join(&ctx.store.overlay_name)
+                .is_dir();
         let kernel = std::fs::read_dir(ctx.target.join("boot"))
             .map(|d| {
                 d.filter_map(|e| e.ok())

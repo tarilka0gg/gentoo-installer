@@ -23,6 +23,10 @@ pub async fn configure(
     target_root: &Path,
     cfg: &StoreConfig,
 ) -> crate::Result<()> {
+    // No overlay (the default): nothing to write or clone.
+    if cfg.overlay_git_url.trim().is_empty() {
+        return Ok(());
+    }
     let repos_conf_dir = target_root.join("etc/portage/repos.conf");
     let binrepos_conf_dir = target_root.join("etc/portage/binrepos.conf");
     tokio::fs::create_dir_all(&repos_conf_dir).await?;
@@ -80,7 +84,7 @@ pub async fn configure(
 /// Parses the Portage binary-package-index format (`PMS` binpkg-multi-instance `Packages`
 /// file): entries are blank-line-separated stanzas, each with a `CPV: cat/pkg-version` line.
 pub async fn list_binhost_atoms(binhost_url: &str) -> crate::Result<Vec<String>> {
-    let url = format!("{}/Packages", binhost_url.trim_end_matches('/'));
+    let url = crate::kernel::kernel_asset_url(binhost_url, "Packages");
     let body = reqwest::get(&url)
         .await
         .map_err(|e| crate::Error::Other(e.into()))?
@@ -112,6 +116,23 @@ fn strip_version_suffix(cpv: &str) -> String {
 mod tests {
     use super::*;
     use crate::command::FakeCommandRunner;
+
+    #[tokio::test]
+    async fn without_an_overlay_url_nothing_is_written_or_cloned() {
+        let target =
+            std::env::temp_dir().join(format!("gentoo-installer-nostore-{}", std::process::id()));
+        std::fs::create_dir_all(&target).unwrap();
+        let cfg = StoreConfig {
+            binhost_url: "http://example.invalid".into(),
+            overlay_git_url: String::new(),
+            overlay_name: "localrepo".into(),
+        };
+        let runner = FakeCommandRunner::new();
+        configure(&runner, &target, &cfg).await.unwrap();
+        assert!(runner.calls().is_empty());
+        assert!(!target.join("etc/portage/repos.conf").exists());
+        std::fs::remove_dir_all(&target).ok();
+    }
 
     #[tokio::test]
     async fn a_second_run_replaces_the_overlay_instead_of_failing_on_the_existing_directory() {

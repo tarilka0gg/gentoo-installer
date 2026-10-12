@@ -29,6 +29,17 @@ pub struct KernelPackage {
     pub degraded_by: usize,
 }
 
+/// The URL of a file of the kernel store. A GitHub release has no directories, its assets are flat
+/// (`<base>/releases/download/<tag>/<file>`); any other store is a web directory with the files under `kernels/`.
+pub fn kernel_asset_url(base: &str, file: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.contains("/releases/download/") {
+        format!("{base}/{file}")
+    } else {
+        format!("{base}/kernels/{file}")
+    }
+}
+
 pub fn resolve(
     base_name: &str,
     profile: &Profile,
@@ -63,10 +74,7 @@ pub async fn deploy(
     tokio::fs::create_dir_all(&boot_dir).await?;
     let vmlinuz_dest = boot_dir.join(format!("vmlinuz-{combo}"));
     http::download_to_file(
-        &format!(
-            "{}/kernels/{combo}.vmlinuz",
-            binhost_url.trim_end_matches('/')
-        ),
+        &kernel_asset_url(binhost_url, &format!("{combo}.vmlinuz")),
         &vmlinuz_dest,
     )
     .await?;
@@ -74,10 +82,7 @@ pub async fn deploy(
     let modules_tarball =
         std::env::temp_dir().join(format!("gentoo-installer-{combo}-modules.tar.xz"));
     http::download_to_file(
-        &format!(
-            "{}/kernels/{combo}-modules.tar.xz",
-            binhost_url.trim_end_matches('/')
-        ),
+        &kernel_asset_url(binhost_url, &format!("{combo}-modules.tar.xz")),
         &modules_tarball,
     )
     .await?;
@@ -100,10 +105,7 @@ pub async fn deploy(
     // every combo, only ones that need an out-of-tree module compiled against them at
     // install time (see `gpu_driver::install`). A missing file here just means this
     // combo doesn't need one; not an install-blocking error.
-    let devel_url = format!(
-        "{}/kernels/{combo}-devel.tar.xz",
-        binhost_url.trim_end_matches('/')
-    );
+    let devel_url = kernel_asset_url(binhost_url, &format!("{combo}-devel.tar.xz"));
     let devel_tarball = std::env::temp_dir().join(format!("gentoo-installer-{combo}-devel.tar.xz"));
     if http::download_to_file(&devel_url, &devel_tarball)
         .await
@@ -134,6 +136,21 @@ pub async fn deploy(
 mod tests {
     use super::*;
     use crate::hardware::{CpuArch, Gpu, Platform};
+
+    #[test]
+    fn a_github_release_is_flat_and_any_other_store_has_a_kernels_directory() {
+        assert_eq!(
+            kernel_asset_url(
+                "https://github.com/o/r/releases/download/kernels/",
+                "a.vmlinuz"
+            ),
+            "https://github.com/o/r/releases/download/kernels/a.vmlinuz"
+        );
+        assert_eq!(
+            kernel_asset_url("http://10.0.2.2:8123/", "a.vmlinuz"),
+            "http://10.0.2.2:8123/kernels/a.vmlinuz"
+        );
+    }
 
     #[test]
     fn exact_match_wins_when_present() {
