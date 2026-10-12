@@ -220,9 +220,11 @@ done
 RANDWP
     chmod 755 "$ROOT/usr/local/bin/random-wallpaper"
     # niri starts every monitor in its "preferred" mode, which is often not the best one (a 120 Hz panel at 60 Hz, say): pick the
-    # largest resolution and, within it, the highest refresh rate of each output.
+    # largest resolution and, within it, the highest refresh rate of each output (only modes of the panel's own aspect ratio, so a
+# stray tall or square mode is never taken; not in a virtual machine, whose "monitor" lists modes far beyond its window).
     cat > "$ROOT/usr/local/bin/live-output-mode" <<'LIVEMODE'
 #!/bin/sh
+grep -qw hypervisor /proc/cpuinfo && exit 0
 exec python3 - <<'PY'
 import json, subprocess
 try:
@@ -233,7 +235,10 @@ for name, o in outs.items():
     modes = o.get("modes") or []
     if not modes:
         continue
-    best = max(modes, key=lambda m: (m["width"] * m["height"], m["refresh_rate"]))
+    pref = next((m for m in modes if m.get("is_preferred")), modes[0])
+    ratio = pref["width"] / pref["height"]
+    same = [m for m in modes if abs(m["width"] / m["height"] - ratio) < 0.01] or modes
+    best = max(same, key=lambda m: (m["width"] * m["height"], m["refresh_rate"]))
     cur = o.get("current_mode")
     if cur is not None and modes[cur] == best:
         continue
