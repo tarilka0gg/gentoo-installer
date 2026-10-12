@@ -77,7 +77,7 @@ step_check() {
             has_step build || fail "$BIN/$b is missing (run the build step)"
         elif ! has_step build; then
             newer=$(find "$REPO/installer-core" "$REPO/installer-cli" "$REPO/installer-gui" "$REPO/Cargo.toml" "$REPO/Cargo.lock" \
-                -type f \( -name '*.rs' -o -name '*.sh' -o -name 'Cargo.*' \) -newer "$BIN/$b" -not -path '*/target/*' | head -n3)
+                -type f \( -name '*.rs' -o -name '*.sh' -o -name 'Cargo.*' \) -newer "$BIN/$b" -not -path '*/target/*' -not -name tests.rs -not -path '*/tests/*' -not -path '*/examples/*' | head -n3)
             [ -z "$newer" ] || fail "$b is older than: $(echo "$newer" | tr '\n' ' ')"
         fi
     done
