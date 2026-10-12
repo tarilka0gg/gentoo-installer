@@ -187,9 +187,9 @@ THEMEPY
     done
     rm -f "$ROOT"/root/.local/state/noctalia/community-palettes/Futuro*
     # GTK look: $THEME_ASSETS holds icons/<theme> and themes/<theme> directories (WhiteSur icons;
-    # optional GTK themes) that are copied in as they are; the settings point GTK 3/4 at them.
+    # optional GTK themes; fonts/<family>: the terminal's Nerd Font) that are copied in as they are; the settings point GTK 3/4 at them.
         if [ -n "${THEME_ASSETS:-}" ] && [ -d "$THEME_ASSETS" ]; then
-        for kind in icons themes; do
+        for kind in icons themes fonts; do
             [ -d "$THEME_ASSETS/$kind" ] || continue
             install -d "$ROOT/usr/share/$kind"
             for t in "$THEME_ASSETS/$kind"/*; do
@@ -448,6 +448,20 @@ end
 HOUSE
     grep -qx /usr/bin/fish "$ROOT/etc/shells" || echo /usr/bin/fish >> "$ROOT/etc/shells"
     chroot "$ROOT" usermod -s /usr/bin/fish root
+    # The tide prompt (pointed segments, dotted connection line, clock on the right), drawn in the terminal's own palette so that it
+    # follows the wallpaper colours; its glyphs come from the Nerd Font in $THEME_ASSETS/fonts (the terminal config below names it).
+    TIDE=$(dirname "$(readlink -f "$0")")/tide
+    if [ -d "$TIDE/functions" ]; then
+        install -d "$ROOT/usr/share/fish/vendor_functions.d"
+        cp "$TIDE"/functions/*.fish "$ROOT/usr/share/fish/vendor_functions.d/"
+        install -Dm644 "$TIDE/tide-live.fish" "$ROOT/etc/fish/conf.d/15-tide.fish"
+        install -d "$ROOT/usr/share/licenses/fish-tide"; cp "$TIDE/LICENSE" "$ROOT/usr/share/licenses/fish-tide/"
+        if [ -d "${THEME_ASSETS:-/nonexistent}/fonts" ] && [ -f "$ROOT/root/.config/ghostty/config" ]; then
+            fam=$(fc-scan --format '%{family[0]}\n' "$THEME_ASSETS"/fonts/*/*.ttf 2>/dev/null | head -n1)
+            [ -n "$fam" ] && printf '\n# The live image'"'"'s prompt needs Nerd Font glyphs\nfont-family = %s\nfont-size = 12\n' "$fam" >> "$ROOT/root/.config/ghostty/config"
+            chroot "$ROOT" fc-cache -f >/dev/null 2>&1 || true
+        fi
+    fi
 
     # Same start-up logic as .bash_profile, in fish syntax (the login shell is now fish).
     install -d "$ROOT/root/.config/fish"
