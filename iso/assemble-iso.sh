@@ -134,12 +134,12 @@ GRUBCFG
 # UEFI: El Torito boots a small FAT image holding Limine and its config; the kernel and initramfs stay on the medium (fslabel() in the
 # config) unless UEFI_COPY_BOOT=1, which copies them in too (~50 MB, for firmware that cannot read the ISO 9660 side).
 EFI=$W/efiboot.img
-need=$(( $(stat -c %s "$ISO/EFI/BOOT/BOOTX64.EFI" | paste -sd+ | bc) / 1048576 + 3 ))
+need=8
 if [ "${UEFI_COPY_BOOT:-0}" = 1 ]; then
     need=$(( $(stat -c %s "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" "$ISO/EFI/BOOT/BOOTX64.EFI" | paste -sd+ | bc) / 1048576 + 12 ))
     [ "$need" -lt 36 ] && need=36
 fi
-rm -f "$EFI"; truncate -s ${need}M "$EFI"; mkfs.vfat $([ "${UEFI_COPY_BOOT:-0}" = 1 ] && echo "-F 32 -s 1" || echo "-F 16") -n EFIBOOT "$EFI" >/dev/null
+rm -f "$EFI"; truncate -s ${need}M "$EFI"; mkfs.vfat $([ "${UEFI_COPY_BOOT:-0}" = 1 ] && echo "-F 32 -s 1" || echo "-F 16 -s 1") -n EFIBOOT "$EFI" >/dev/null
 mmd -i "$EFI" ::/EFI ::/EFI/BOOT
 mcopy -i "$EFI" "$ISO/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "$EFI" "$ISO/limine.conf" ::/limine.conf
