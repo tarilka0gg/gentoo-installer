@@ -97,8 +97,9 @@ fi
 # kernel and initramfs by hash (see secureboot/sign.sh); db.cer goes on the medium for enrolling.
 cp "$ISO/limine.conf" "$ISO/limine-nohash.conf"   # BIOS has no Secure Boot, so its config carries no hashes
 # UEFI Limine finds kernel, initramfs and memtest on the medium's own ISO 9660 filesystem by its label (it has a driver for it), so the
-# 52 MB copy of them inside the FAT image (UEFI_COPY_BOOT=1 brings it back) is not needed. Only the ESP's config says fslabel().
-if [ "${UEFI_COPY_BOOT:-0}" != 1 ]; then sed -i "s#boot():/#fslabel($LABEL):/#" "$ISO/limine.conf"; fi
+# 52 MB copy of them inside the FAT image is not needed. Only the ESP's config says fslabel(). OFF by default (UEFI_COPY_BOOT=0 turns it on):
+# tried in OVMF, Limine from an El Torito CD cannot open fslabel(): "Failed to open kernel". Maybe a USB stick differs; not tested.
+if [ "${UEFI_COPY_BOOT:-1}" != 1 ]; then sed -i "s#boot():/#fslabel($LABEL):/#" "$ISO/limine.conf"; fi
 if [ -n "${SECUREBOOT_KEYS:-}" ]; then
     ROOT=$ISO "$(dirname "$(readlink -f "$0")")/secureboot/sign.sh" "$SECUREBOOT_KEYS" "$ISO/limine.conf" "$ISO/EFI/BOOT/BOOTX64.EFI"
     mkdir -p "$ISO/secureboot"; cp "$SECUREBOOT_KEYS/db.cer" "$ISO/secureboot/simple-linux-db.cer"
@@ -131,22 +132,22 @@ menuentry "Simple Linux - verbose (every kernel and initramfs message)" {
 }
 GRUBCFG
 
-# UEFI: El Torito boots a small FAT image holding Limine and its config; the kernel and initramfs stay on the medium (fslabel() in the
-# config) unless UEFI_COPY_BOOT=1, which copies them in too (~50 MB, for firmware that cannot read the ISO 9660 side).
+# UEFI: El Torito boots a small FAT image holding Limine and its config, and the kernel and initramfs are copied in
+# (UEFI_COPY_BOOT=0 leaves them out: Limine on a CD cannot read them from the ISO 9660 side).
 EFI=$W/efiboot.img
 need=8
-if [ "${UEFI_COPY_BOOT:-0}" = 1 ]; then
+if [ "${UEFI_COPY_BOOT:-1}" = 1 ]; then
     need=$(( $(stat -c %s "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" "$ISO/EFI/BOOT/BOOTX64.EFI" | paste -sd+ | bc) / 1048576 + 12 ))
     [ "$need" -lt 36 ] && need=36
 fi
-rm -f "$EFI"; truncate -s ${need}M "$EFI"; mkfs.vfat $([ "${UEFI_COPY_BOOT:-0}" = 1 ] && echo "-F 32 -s 1" || echo "-F 16 -s 1") -n EFIBOOT "$EFI" >/dev/null
+rm -f "$EFI"; truncate -s ${need}M "$EFI"; mkfs.vfat $([ "${UEFI_COPY_BOOT:-1}" = 1 ] && echo "-F 32 -s 1" || echo "-F 16 -s 1") -n EFIBOOT "$EFI" >/dev/null
 mmd -i "$EFI" ::/EFI ::/EFI/BOOT
 mcopy -i "$EFI" "$ISO/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "$EFI" "$ISO/limine.conf" ::/limine.conf
 # The ESP (UEFI, Secure Boot) keeps the hashed config; the medium itself, which only BIOS Limine reads, gets the plain one.
 [ "${BIOS_CONF_HASHES:-0}" = 1 ] || cp "$ISO/limine-nohash.conf" "$ISO/limine.conf"
 rm -f "$ISO/limine-nohash.conf"
-if [ "${UEFI_COPY_BOOT:-0}" = 1 ]; then
+if [ "${UEFI_COPY_BOOT:-1}" = 1 ]; then
     mmd -i "$EFI" ::/boot; mcopy -i "$EFI" "$ISO/boot/vmlinuz" "$ISO/boot/initramfs.img" ::/boot/
     if [ -n "$MEMTEST" ]; then mmd -i "$EFI" ::/boot/memtest; mcopy -i "$EFI" "$ISO/boot/memtest/"* ::/boot/memtest/; fi
 fi

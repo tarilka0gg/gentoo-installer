@@ -33,7 +33,7 @@ cp -a "$HERE/dracut/76iso-autoscan" "$R/usr/lib/dracut/modules.d/"
 # the firmware loaded ("TSC_DEADLINE disabled ... please update microcode" on the first real test).
 bash "$HERE/prune-microcode.sh" "$R"
 chroot "$R" env LC_ALL=C.UTF-8 dracut --force --no-hostonly --early-microcode --kver "$KVER" \
-    --add "dmsquash-live iso-autoscan" --omit "plymouth nfs iscsi multipath crypt lvm mdraid" --compress zstd /boot/initramfs-live.img
+    --add "dmsquash-live iso-autoscan" --omit "plymouth nfs iscsi multipath crypt lvm mdraid" --compress "xz -9 --check=crc32 --lzma2=dict=1MiB" /boot/initramfs-live.img
 INNER
 unshare --mount --propagation private bash "$W/refresh-inner.sh"
 rm -f "$W/refresh-inner.sh"
