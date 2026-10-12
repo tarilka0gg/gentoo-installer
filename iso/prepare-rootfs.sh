@@ -298,6 +298,28 @@ INSTDESKTOP
         f="$ROOT/usr/share/applications/$d.desktop"
         [ -f "$f" ] && ! grep -q '^NoDisplay=true' "$f" && sed -i '0,/^\[Desktop Entry\]/s//[Desktop Entry]\nNoDisplay=true/' "$f"
     done
+    # Portage Store searches through eix's index, which is built from the Portage tree; the live medium carries no tree. The launcher entry
+    # runs this wrapper: the first time it downloads the tree snapshot the binhost publishes (the one the installer uses, 88 MB), unpacks it
+    # into RAM and builds the index; later starts go straight to the program.
+    cat > "$ROOT/usr/local/bin/live-portage-store" <<'LIVEPS'
+#!/bin/sh
+URL=${PORTAGE_TREE_URL:-https://github.com/tarilka0gg/simple-linux-binhost/releases/download/binhost/tree.tar.zst}
+if [ ! -d /var/db/repos/gentoo/profiles ]; then
+    say() { gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify "Portage Store" 0 "" "$1" "$2" '[]' '{}' 8000 >/dev/null 2>&1; }
+    say "Portage Store" "Downloading the package tree (88 MB), one time per session. It opens when ready."
+    mkdir -p /var/db/repos
+    if curl -fL --retry 5 --retry-delay 3 --retry-all-errors -s "$URL" | zstd -dc | tar -C /var/db/repos -xf -; then
+        say "Portage Store" "Building the search index..."
+        eix-update >/dev/null 2>&1
+    else
+        say "Portage Store" "Could not download the package tree: check the network."
+        rm -rf /var/db/repos/gentoo /var/db/repos/guru
+    fi
+fi
+exec portage-store "$@"
+LIVEPS
+    chmod 755 "$ROOT/usr/local/bin/live-portage-store"
+    sed -i 's/^Exec=portage-store.*/Exec=live-portage-store/' "$ROOT/usr/share/applications/io.github.tarilka0gg.PortageStore.desktop" 2>/dev/null || true
     # Portage Store stays in the launcher (an earlier build of this tree had hidden it, and the tree keeps what it was given).
     sed -i '/^NoDisplay=true/d' "$ROOT/usr/share/applications/io.github.tarilka0gg.PortageStore.desktop" 2>/dev/null || true
     # Noctalia recolours application icons to the wallpaper palette, which only gives a readable
