@@ -229,6 +229,23 @@ if os.path.isdir(fw):
             print("usr/lib/firmware/intel/iwlwifi/" + f)
 FWPY
 
+# Build-time leftovers (cargo-c, cmake, mesa/GTK build helpers, static libraries, introspection/vala/autoconf data, libclc): the live system
+# compiles nothing and the installed system gets its own packages from the binhost. About 80 MB compressed.
+python3 - "$W/$ROOTFS" >> "$W/squashfs-excludes.txt" <<'BUILDPY'
+import os, sys
+root = sys.argv[1]
+for p in ("usr/bin/cargo-capi usr/bin/cargo-ctest usr/bin/cargo-cinstall usr/bin/cargo-cbuild usr/bin/ctest usr/bin/cpack usr/bin/cmake "
+          "usr/bin/ccmake usr/bin/vtn_bindgen2 usr/bin/gtk4-encode-symbolic-svg usr/share/clc usr/share/gir-1.0 usr/share/vala "
+          "usr/share/vala-0.56 usr/share/aclocal usr/share/aclocal-1.18 usr/lib64/cmake").split():
+    if os.path.lexists(os.path.join(root, p)):
+        print(p)
+for top in ("usr/lib", "usr/lib64"):
+    for d, _, files in os.walk(os.path.join(root, top)):
+        for f in files:
+            if f.endswith((".a", ".la")):
+                print(os.path.relpath(os.path.join(d, f), root))
+BUILDPY
+
 # More weight the live system never uses:
 #  * /boot of the rootfs holds the initramfs (50 MB, already compressed) and the microcode images (30 MB) that are also on the medium;
 #    the kernel and initramfs are loaded from there, not from the root image.
