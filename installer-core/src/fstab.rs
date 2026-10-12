@@ -84,10 +84,12 @@ mod tests {
     use crate::partition::{plan, RootFs};
 
     async fn fstab_for(home: Option<&str>, fs: RootFs) -> String {
+        // every call its own directory: the tests run in parallel
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let t = std::env::temp_dir().join(format!(
             "gi-fstab-{}-{}",
             std::process::id(),
-            home.is_some()
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(t.join("etc")).unwrap();
         let runner = FakeCommandRunner::new();
