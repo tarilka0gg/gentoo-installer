@@ -113,6 +113,10 @@ ZENDESKTOP
         # Noctalia state (wallpaper, theme) otherwise, and the image would show someone's own desktop.
         rm -rf "$ROOT/root/.local/state/noctalia"
     fi
+    # A personal profile written for an older Noctalia names the bar/dock margins margin_h and margin_v, which Noctalia 5.2 does not know
+    # (it then draws the bar attached: full width, flush with the screen edge). Its names are margin_ends (shortens the bar at both ends)
+    # and margin_edge (distance from the screen edge); the dock has only the latter.
+    sed -i -E '/^\[bar\.main\]/,/^start/{s/^margin_h( *)=/margin_ends\1=/;s/^margin_v( *)=/margin_edge\1=/}; /^\[dock\]/,/^\[[a-z]/{/^margin_h/d;s/^margin_v( *)=/margin_edge\1=/}' "$ROOT/root/.config/noctalia/config.toml"
     # niri: the colours of the ring, the border and the overview backdrop come from Noctalia's niri template (noctalia.kdl, included at the
     # end), not from the ones a personal config pins; Noctalia is started through hooks/start.sh, which chooses the wallpaper first
     # (no flash of the default theme), and that script replaces the separate random-wallpaper start.
