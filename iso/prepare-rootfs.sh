@@ -209,6 +209,8 @@ THEMEPY
         # Noctalia's gtk3/gtk4 templates write noctalia.css (colours from the wallpaper) here.
         printf '@import url("noctalia.css");\n' > "$ROOT/root/.config/gtk-$v/gtk.css"
     done
+    # GTK 4 starting config of the preset: the import above plus overrides for programs with fixed colours of their own (Portage Store's tiles).
+    [ -f "$WMCONF/apps/gtk-4.0/gtk.css" ] && cp "$WMCONF/apps/gtk-4.0/gtk.css" "$ROOT/root/.config/gtk-4.0/gtk.css"
     # A different wallpaper on every start: wait for Noctalia to listen, then ask for a random one
     # (it picks from ~/Pictures/Wallpapers, sub-folders included).
     cat > "$ROOT/usr/local/bin/random-wallpaper" <<'RANDWP'
