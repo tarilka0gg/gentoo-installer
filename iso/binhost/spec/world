@@ -7,6 +7,7 @@ app-misc/fastfetch
 app-misc/jq
 app-misc/screen
 app-misc/tmux
+app-misc/yazi
 app-office/libreoffice-bin
 app-portage/cpuid2cpuflags
 app-portage/eix
@@ -18,7 +19,9 @@ dev-vcs/git
 games-util/gamemode
 games-util/mangohud
 gnome-base/gvfs
+gui-apps/fuzzel
 gui-apps/noctalia
+gui-apps/qt6ct
 gui-apps/wl-clipboard
 gui-wm/niri
 media-fonts/dejavu

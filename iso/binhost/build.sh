@@ -97,7 +97,11 @@ INNER
 
 cat > "$W/ns.sh" <<NS
 set -e
-mount --bind /proc "$R/proc"; mount --rbind /sys "$R/sys"; mount --rbind /dev "$R/dev"
+mount --bind /proc "$R/proc"; mount --rbind /sys "$R/sys"; mount -t tmpfs -o mode=755,size=4m tmpfs "$R/dev"   # a private /dev: a build that deletes a node must not delete the host's (/dev/null once did)
+mknod -m 666 "$R/dev/null" c 1 3; mknod -m 666 "$R/dev/zero" c 1 5; mknod -m 666 "$R/dev/full" c 1 7
+mknod -m 666 "$R/dev/random" c 1 8; mknod -m 666 "$R/dev/urandom" c 1 9; mknod -m 666 "$R/dev/tty" c 5 0
+mkdir -p "$R/dev/pts" "$R/dev/shm"; mount -t devpts -o newinstance,ptmxmode=0666,mode=620 devpts "$R/dev/pts"; ln -sf pts/ptmx "$R/dev/ptmx"
+mount -t tmpfs tmpfs "$R/dev/shm"; ln -sf /proc/self/fd "$R/dev/fd"; ln -sf /proc/self/fd/0 "$R/dev/stdin"; ln -sf /proc/self/fd/1 "$R/dev/stdout"; ln -sf /proc/self/fd/2 "$R/dev/stderr"
 # Build directories in RAM: fast, and gone afterwards. BUILD_TMPFS=0 keeps them on disk (the 8 GB build server ran out of memory with it).
 [ "${BUILD_TMPFS:-1}" = 0 ] || mount -t tmpfs -o size=6g tmpfs "$R/var/tmp"
 # The host's resolver may be a private one (tailscale on the build server) that fails now and then: the chroot gets public ones.
