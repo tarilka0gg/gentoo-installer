@@ -250,6 +250,18 @@ for name, o in outs.items():
 PY
 LIVEMODE
     chmod 755 "$ROOT/usr/local/bin/live-output-mode"
+    # Zen sets its app id after niri has placed its window, so the window rule above can miss it and Zen opens floating in a corner.
+    # This watches niri's events and puts every floating Zen window into the tiling layout, maximized.
+    cat > "$ROOT/usr/local/bin/live-zen-tile" <<'LIVEZEN'
+#!/bin/sh
+niri msg --json event-stream | while read -r line; do
+    id=$(printf '%s' "$line" | jq -r 'select(.WindowOpenedOrChanged.window.app_id == "zen" and .WindowOpenedOrChanged.window.is_floating == true) | .WindowOpenedOrChanged.window.id' 2>/dev/null)
+    [ -n "$id" ] || continue
+    niri msg action move-window-to-tiling --id "$id"
+    niri msg action maximize-window-to-edges --id "$id" 2>/dev/null || niri msg action maximize-column
+done
+LIVEZEN
+    chmod 755 "$ROOT/usr/local/bin/live-zen-tile"
     # The installer is a GTK program that reads the colours once, at its start. Started with niri it comes up before Noctalia has
     # rendered the wallpaper palette and stays in the plain Adwaita colours, so wait for this boot's noctalia.css first (newer than
     # PID 1; a minute at most, then start anyway) and give Noctalia a moment to finish writing.
@@ -280,10 +292,9 @@ INSTDESKTOP
     : > "$ROOT/root/.config/niri/noctalia.kdl"
     grep -q '^include "noctalia.kdl"' "$ROOT/root/.config/niri/config.kdl" \
         || printf '\ninclude "noctalia.kdl"\n' >> "$ROOT/root/.config/niri/config.kdl"
-    # Launcher entries nobody needs in a live session (Portage Store included: it searches the Portage tree, which the live
-    # medium does not carry; console tools too; the zen-bin package ships its own "Zen"
+    # Launcher entries nobody needs in a live session (console tools; the zen-bin package ships its own "Zen"
     # entry next to ours, which is the one that downloads the browser).
-    for d in zen-zen-bin io.github.tarilka0gg.PortageStore dev.noctalia.Noctalia panel-preferences xfce4-about thunar-bulk-rename thunar-settings btop micro; do
+    for d in zen-zen-bin dev.noctalia.Noctalia panel-preferences xfce4-about thunar-bulk-rename thunar-settings btop micro; do
         f="$ROOT/usr/share/applications/$d.desktop"
         [ -f "$f" ] && ! grep -q '^NoDisplay=true' "$f" && sed -i '0,/^\[Desktop Entry\]/s//[Desktop Entry]\nNoDisplay=true/' "$f"
     done
@@ -339,6 +350,7 @@ spawn-at-startup "pipewire"
 spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
 spawn-at-startup "live-output-mode"
+spawn-at-startup "live-zen-tile"
 spawn-at-startup "live-installer"
 spawn-at-startup "get-zen" "--fetch"
 // Noctalia's backdrop (the blurred wallpaper) belongs behind the workspaces in the overview
