@@ -32,9 +32,9 @@ clean = lambda t: re.sub(r"\x1b\][^\x07]*\x07|\x1b\[[0-9;?>=]*[a-zA-Z]|\x1b[>=]"
 if cmd == "__wait_prompt__":
     buf, end = "", time.time() + wait
     s.send(b"\x03")
-    while time.time() < end and "root@gentoo-live" not in buf:
+    while time.time() < end and "root@simple-linux-live" not in buf:
         s.send(b"\r"); buf += rd(2)
-    print("prompt" if "root@gentoo-live" in buf else "NO PROMPT")
+    print("prompt" if "root@simple-linux-live" in buf else "NO PROMPT")
 elif cmd == "__keys__":
     keys = "".join(sys.argv[4:]).encode().decode("unicode_escape").encode()
     s.send(keys); print(clean(rd(wait)))

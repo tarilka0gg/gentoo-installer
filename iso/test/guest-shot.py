@@ -28,7 +28,7 @@ def rd(t):
 
 clean = lambda t: re.sub(r"\x1b\][^\x07]*\x07|\x1b\[[0-9;?>=]*[a-zA-Z]|\x1b[>=]", "", t).replace("\r", "")
 buf, end = "", time.time() + 240
-while time.time() < end and "root@gentoo-live" not in buf:
+while time.time() < end and "root@simple-linux-live" not in buf:
     s.send(b"\r"); buf += rd(2)
 time.sleep(25)  # let the niri session settle
 def run(cmd, wait=3): s.send(b"\x03"); rd(.3); s.send((cmd + "\r").encode()); return clean(rd(wait))

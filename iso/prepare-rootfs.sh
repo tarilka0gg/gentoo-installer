@@ -219,6 +219,28 @@ for _ in $(seq 1 60); do
 done
 RANDWP
     chmod 755 "$ROOT/usr/local/bin/random-wallpaper"
+    # niri starts every monitor in its "preferred" mode, which is often not the best one (a 120 Hz panel at 60 Hz, say): pick the
+    # largest resolution and, within it, the highest refresh rate of each output.
+    cat > "$ROOT/usr/local/bin/live-output-mode" <<'LIVEMODE'
+#!/bin/sh
+exec python3 - <<'PY'
+import json, subprocess
+try:
+    outs = json.loads(subprocess.run(["niri", "msg", "--json", "outputs"], capture_output=True, text=True, timeout=20).stdout)
+except Exception:
+    raise SystemExit(0)
+for name, o in outs.items():
+    modes = o.get("modes") or []
+    if not modes:
+        continue
+    best = max(modes, key=lambda m: (m["width"] * m["height"], m["refresh_rate"]))
+    cur = o.get("current_mode")
+    if cur is not None and modes[cur] == best:
+        continue
+    subprocess.run(["niri", "msg", "output", name, "mode", "%dx%d@%.3f" % (best["width"], best["height"], best["refresh_rate"] / 1000)])
+PY
+LIVEMODE
+    chmod 755 "$ROOT/usr/local/bin/live-output-mode"
     # The installer is a GTK program that reads the colours once, at its start. Started with niri it comes up before Noctalia has
     # rendered the wallpaper palette and stays in the plain Adwaita colours, so wait for this boot's noctalia.css first (newer than
     # PID 1; a minute at most, then start anyway) and give Noctalia a moment to finish writing.
@@ -307,6 +329,7 @@ KEYRING
 spawn-at-startup "pipewire"
 spawn-at-startup "wireplumber"
 spawn-at-startup "pipewire-pulse"
+spawn-at-startup "live-output-mode"
 spawn-at-startup "live-installer"
 spawn-at-startup "get-zen" "--fetch"
 // Noctalia's backdrop (the blurred wallpaper) belongs behind the workspaces in the overview
@@ -537,8 +560,8 @@ fi
 sed -i 's/^#\?rc_parallel=.*/rc_parallel="YES"/' "$ROOT/etc/rc.conf"
 grep -q '^rc_parallel="YES"' "$ROOT/etc/rc.conf" || echo 'rc_parallel="YES"' >> "$ROOT/etc/rc.conf"
 
-echo gentoo-live > "$ROOT/etc/hostname"
-sed -i 's/^hostname=.*/hostname="gentoo-live"/' "$ROOT/etc/conf.d/hostname"
+echo simple-linux-live > "$ROOT/etc/hostname"
+sed -i 's/^hostname=.*/hostname="simple-linux-live"/' "$ROOT/etc/conf.d/hostname"
 
 # Network: dhcpcd for wired links, iwd for Wi-Fi (the installer's network page talks to iwd).
 chroot "$ROOT" rc-update add iwd default >/dev/null 2>&1 || true

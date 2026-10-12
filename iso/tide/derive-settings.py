@@ -25,6 +25,8 @@ for line in open(sys.argv[1], encoding="utf-8"):
         val = NAMES.get(val.upper(), "white")
     # fish_variables escapes (\xNN, \uNNNN); \x1e separates list elements, \x1d stands for an empty element
     val = re.sub(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})", lambda e: chr(int(e.group(1)[1:], 16)), val)
+    if name == "tide_right_prompt_items":   # no "root@host" in the live session: the prompt is the same as the author's
+        val = "\x1e".join(x for x in val.split("\x1e") if x != "context")
     items = ["" if x == "\x1d" else x for x in val.split("\x1e")] if val else []
     out.append("set -g %s %s" % (name, " ".join("'" + x.replace("\\", "\\\\").replace("'", "\\'") + "'" for x in items)))
 print("\n".join(out))
