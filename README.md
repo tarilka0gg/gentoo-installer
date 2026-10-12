@@ -132,7 +132,7 @@ What works, each exercised in a VM or QEMU rather than only in unit tests:
   unpack from the offset into the tarball read from `/proc`, `>>> Emerging (n of m)`); the GUI's Installing page shows a step list with a spinner, percent and elapsed time and the log.
   `installer-gui --debug-progress` with `GENTOO_INSTALLER_SIMULATE_SLOW=10` previews it without installing.
 
-Needs `GENTOO_STORE_BINHOST_URL` / `GENTOO_STORE_OVERLAY_URL` for real runs (the store has no fixed public URL yet);
+Nothing needs to be set: `StoreEnv` defaults to the public release (`config::DEFAULT_KERNELS_URL`, the `kernels` release of simple-linux-binhost, flat assets; `kernel::kernel_asset_url` keeps the `<url>/kernels/<file>` layout for any other store) and has no overlay. `GENTOO_STORE_BINHOST_URL` / `_OVERLAY_URL` / `GENTOO_WM_CONFIGS_URL` override;
 `GENTOO_INSTALLER_SIMULATE=1` gives a click-through with no disk, network or chroot.
 
 **Not checked:** the graphical wizard end to end after the latest changes (the headless runs use the same phases, not the same screens), Secure Boot of an installed system under OVMF with a
