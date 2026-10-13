@@ -538,6 +538,14 @@ if status is-interactive
     alias nano micro
     alias du dust
     alias ping gping
+    # fastfetch on the first prompt of every terminal, cleared again when the first command is typed (the author's own fish does this)
+    if command -q fastfetch; and not status is-login
+        fastfetch
+        function clear_after_fetch --on-event fish_preexec
+            clear
+            functions --erase clear_after_fetch
+        end
+    end
 end
 HOUSE
     grep -qx /usr/bin/fish "$ROOT/etc/shells" || echo /usr/bin/fish >> "$ROOT/etc/shells"
