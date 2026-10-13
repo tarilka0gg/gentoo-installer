@@ -274,7 +274,15 @@ for _ in $(seq 1 120); do
     [ -s "$css" ] && [ "$css" -nt /proc/1 ] && { sleep 1; break; }
     sleep 0.5
 done
-exec installer-gui "$@"
+# The window rule opens it floating but not in the middle of the screen (niri places it before the output is settled): centre it.
+installer-gui "$@" &
+pid=$!
+for _ in $(seq 1 40); do
+    id=$(niri msg --json windows 2>/dev/null | jq -r '.[] | select(.app_id == "org.gentoo_diy.Installer") | .id' | head -n1)
+    [ -n "$id" ] && { sleep 0.5; niri msg action center-window --id "$id"; break; }
+    sleep 0.5
+done
+wait $pid
 LIVEINST
     chmod 755 "$ROOT/usr/local/bin/live-installer"
     # A launcher entry for the installer: without it the dock/launcher have no icon or name for
