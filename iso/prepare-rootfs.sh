@@ -256,12 +256,19 @@ LIVEMODE
     # This watches niri's events and puts every floating Zen window into the tiling layout, maximized.
     cat > "$ROOT/usr/local/bin/live-zen-tile" <<'LIVEZEN'
 #!/bin/sh
-niri msg --json event-stream | while read -r line; do
-    id=$(printf '%s' "$line" | jq -r 'select(.WindowOpenedOrChanged.window.app_id == "zen" and .WindowOpenedOrChanged.window.is_floating == true) | .WindowOpenedOrChanged.window.id' 2>/dev/null)
-    [ -n "$id" ] || continue
-    niri msg action move-window-to-tiling --id "$id"
-    niri msg action maximize-window-to-edges --id "$id" 2>/dev/null || niri msg action maximize-column
-done
+exec python3 - <<'PY'
+import json, subprocess
+p = subprocess.Popen(["niri", "msg", "--json", "event-stream"], stdout=subprocess.PIPE, text=True)
+for line in p.stdout:
+    try:
+        w = json.loads(line).get("WindowOpenedOrChanged", {}).get("window")
+    except Exception:
+        continue
+    if w and w.get("app_id") == "zen" and w.get("is_floating"):
+        i = str(w["id"])
+        subprocess.run(["niri", "msg", "action", "move-window-to-tiling", "--id", i])
+        subprocess.run(["niri", "msg", "action", "maximize-window-to-edges", "--id", i])
+PY
 LIVEZEN
     chmod 755 "$ROOT/usr/local/bin/live-zen-tile"
     # The installer is a GTK program that reads the colours once, at its start. Started with niri it comes up before Noctalia has
@@ -277,11 +284,20 @@ done
 # The window rule opens it floating but not in the middle of the screen (niri places it before the output is settled): centre it.
 installer-gui "$@" &
 pid=$!
-for _ in $(seq 1 40); do
-    id=$(niri msg --json windows 2>/dev/null | jq -r '.[] | select(.app_id == "org.gentoo_diy.Installer") | .id' | head -n1)
-    [ -n "$id" ] && { sleep 0.5; niri msg action center-window --id "$id"; break; }
-    sleep 0.5
-done
+python3 - <<'PY'
+import json, subprocess, time
+for _ in range(40):
+    try:
+        ws = json.loads(subprocess.run(["niri", "msg", "--json", "windows"], capture_output=True, text=True).stdout)
+    except Exception:
+        ws = []
+    ids = [w["id"] for w in ws if w.get("app_id") == "org.gentoo_diy.Installer"]
+    if ids:
+        time.sleep(0.5)
+        subprocess.run(["niri", "msg", "action", "center-window", "--id", str(ids[0])])
+        break
+    time.sleep(0.5)
+PY
 wait $pid
 LIVEINST
     chmod 755 "$ROOT/usr/local/bin/live-installer"
