@@ -111,9 +111,9 @@ pub const GROUPS: &[Group] = &[
     Group {
         id: "desktop-utils",
         name: "Desktop utilities",
-        description: "wl-clipboard, imv (images), the XDG portals, Adwaita icons, DejaVu fonts, qt6ct (Qt programs take the wallpaper palette) and the fuzzel launcher",
+        description: "wl-clipboard, imv (images), the XDG portals, Adwaita icons, DejaVu fonts, qt6ct (Qt programs take the wallpaper palette), the fuzzel launcher and grim (screenshots; tui-shim uses it)",
         default: true,
-        atoms: &["gui-apps/wl-clipboard", "media-gfx/imv", "sys-apps/xdg-desktop-portal", "sys-apps/xdg-desktop-portal-gtk", "x11-themes/adwaita-icon-theme", "media-fonts/dejavu", "gui-apps/qt6ct", "gui-apps/fuzzel"],
+        atoms: &["gui-apps/wl-clipboard", "media-gfx/imv", "sys-apps/xdg-desktop-portal", "sys-apps/xdg-desktop-portal-gtk", "x11-themes/adwaita-icon-theme", "media-fonts/dejavu", "gui-apps/qt6ct", "gui-apps/fuzzel", "gui-apps/grim"],
         testing: &["x11-themes/adwaita-icon-theme"],
         use_flags: &[],
         services: &[],

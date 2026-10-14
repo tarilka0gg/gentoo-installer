@@ -4,6 +4,7 @@ use super::{Ctx, Phase, PhaseId};
 use crate::event::{Event, EventTx};
 use crate::packages;
 use crate::portage_store;
+use crate::tui_shim;
 use crate::ustan;
 use std::path::Path;
 
@@ -27,7 +28,10 @@ impl Phase for PackagesPhase {
             || portage_store::installed(&ctx.target)
             || !portage_store::available(Path::new("/"))
             || !ustan::target_has_gtk(&ctx.target);
-        Ok(packages::installed(&ctx.target, &ctx.settings.packages) && ustan_done && store_done)
+        let shim_done = tui_shim::installed(&ctx.target)
+            || !tui_shim::available(Path::new("/"))
+            || !tui_shim::target_ready(&ctx.target);
+        Ok(packages::installed(&ctx.target, &ctx.settings.packages) && ustan_done && store_done && shim_done)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
@@ -53,6 +57,13 @@ impl Phase for PackagesPhase {
                     level: crate::event::Level::Info,
                 });
             }
+        }
+        let copied = tui_shim::install_from_live(Path::new("/"), &ctx.target).await?;
+        if !copied.is_empty() {
+            let _ = tx.send(Event::Log {
+                line: format!("tui-shim copied to /usr/local ({})", copied.join(", ")),
+                level: crate::event::Level::Info,
+            });
         }
         let _ = tx.send(Event::PhaseFinished {
             id: self.id(),
