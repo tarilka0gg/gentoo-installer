@@ -333,3 +333,5 @@ Both are invisible with serial-only testing and were only noticed from screensho
 - Nothing runs a real install from the ISO: the store has no kernels to install (see the
   main README), so the TUI has been started but not driven end to end.
 - Secure Boot: images can be signed (see `secureboot/README.md`); an installed system can get its own key (see the main README). Releases carry `SHA256SUMS` and an ssh signature.
+
+`add-tui-shim.sh <rootfs>` emerges [tui-shim](../../tui-shim) (file-picker badge over micro/nvim, launchers for TUI apps) and `grim` into the GUI rootfs from its live ebuild (`tui-shim/packaging/gentoo`), built from a clone of the local checkout because the repository has no public address yet. The installer copies the binary to `/usr/local/bin` of a target that has libadwaita and gtk4-layer-shell; the shims and launchers are set up per user by the fish configuration.
