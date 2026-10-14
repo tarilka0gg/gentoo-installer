@@ -540,6 +540,21 @@ if status is-interactive
     alias ping gping
     # fastfetch on the first prompt of every terminal, cleared again when the first command is typed (the author's own fish does this)
     if command -q fastfetch; and not status is-login
+        # fastfetch measures the terminal when it starts, and a new window is still being sized by the compositor: wait until the width
+        # has stayed the same for three reads (at most 2 s), or the logo and the title come out wrapped and cut off
+        set -l fetch_w 0
+        set -l fetch_same 0
+        for fetch_i in (seq 40)
+            set -l fetch_n (tput cols 2>/dev/null)
+            if test "$fetch_n" = "$fetch_w"
+                set fetch_same (math $fetch_same + 1)
+            else
+                set fetch_same 0
+                set fetch_w $fetch_n
+            end
+            test $fetch_same -ge 3; and break
+            sleep 0.05
+        end
         fastfetch
         function clear_after_fetch --on-event fish_preexec
             clear
