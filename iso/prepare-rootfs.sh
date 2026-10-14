@@ -378,6 +378,17 @@ LIVEPS
     # live ISO it would cover the installer. The marker sits next to state.toml.
     install -d "$ROOT/root/.local/state/noctalia"
     touch "$ROOT/root/.local/state/noctalia/.setup-complete"
+    # The launcher puts the apps used most (and last) first and the rest alphabetically; a fresh image has no history, so the list would
+    # start with btop and "Edit in terminal". Seed it in the order that matters (installer, terminal, files, browser, stores), the
+    # terminal programs last. Noctalia keeps the file up to date from there on.
+    python3 - "$ROOT/root/.local/state/noctalia/recently_used.json" <<'SEED'
+import json, sys
+apps = ["org.gentoo_diy.Installer", "com.mitchellh.ghostty", "thunar", "zen-browser", "io.github.tarilka0gg.PortageStore",
+        "io.github.tarilka0gg.Ustan", "gparted"]
+paths = [f"/usr/share/applications/{a}.desktop" for a in apps]
+paths += [f"/root/.local/share/applications/tui-shim-{a}.desktop" for a in ("micro", "btop", "tmux")]   # made by tui-shim at the first prompt
+json.dump({"Applications": paths}, open(sys.argv[1], "w"), indent=2)
+SEED
     # gnome-keyring asks for a password to create "Default keyring" the first time Noctalia
     # touches the secret service, and that prompt lands on top of the installer. A plain
     # (unencrypted, empty-password) default keyring makes the question moot; nothing secret
