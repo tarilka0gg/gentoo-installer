@@ -11,7 +11,7 @@
 
 use crate::chroot_emerge::{bind_mount_chroot_dirs, unmount_chroot_dirs, write_portage_entry};
 use crate::command::CommandRunner;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Where the packages are published (a release of tarilka0gg/simple-linux-binhost). `GENTOO_BINHOST_URL` overrides it
 /// (a local test server, a mirror); set empty or `0` to not use it at all.
@@ -64,18 +64,9 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
     tokio::fs::create_dir_all(&binrepos).await?;
     tokio::fs::write(binrepos.join("simple-linux.conf"), binrepos_conf(url)).await?;
     // Offline: the stage3's own `[gentoo]` entry names the internet; the local copy of Gentoo's binary host takes over
-    // (the stock file is kept as `gentoo.conf.online` and put back by `restore_online` when the install is done).
+    // (the stock file is kept outside the directory and put back by `restore_online` when the install is done).
     if let Some(local) = crate::offline::local_gentoo_binhost_url() {
-        let gentoo = binrepos.join("gentoo.conf");
-        let keep = binrepos.join("gentoo.conf.online");
-        if gentoo.is_file() && !keep.exists() {
-            tokio::fs::rename(&gentoo, &keep).await?;
-        }
-        tokio::fs::write(
-            &gentoo,
-            format!("[gentoo]\npriority = 1\nsync-uri = {local}\nlocation = /var/cache/binhost/gentoo\nverify-signature = true\n"),
-        )
-        .await?;
+        use_local_gentoo(&binrepos, &local).await?;
     }
     tokio::fs::write(target.join(KEY_PATH), KEY).await?;
     for (dir, body) in [
@@ -117,6 +108,45 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
     result
 }
 
+/// Where the stage3's own binary host entries wait while an offline install uses the local copy.
+fn stock_dir(binrepos: &Path) -> PathBuf {
+    binrepos.parent().unwrap_or(binrepos).join(".offline-stock-binrepos")
+}
+
+/// Points whichever file of `binrepos.conf` defines the stage3's `[gentoo]` binary host (its name depends on the stage3) at `local`;
+/// the stock file waits in `etc/portage/.offline-stock-binrepos/`.
+async fn use_local_gentoo(binrepos: &Path, local: &str) -> crate::Result<()> {
+    // Portage reads every file in `binrepos.conf/`, whatever its name, so the stock copy has to live outside the directory.
+    let stock_dir = stock_dir(binrepos);
+    tokio::fs::create_dir_all(&stock_dir).await?;
+    let mut stock = Vec::new();
+    let mut rd = tokio::fs::read_dir(binrepos).await?;
+    while let Some(e) = rd.next_entry().await? {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name == "simple-linux.conf" {
+            continue;
+        }
+        if tokio::fs::read_to_string(e.path()).await.is_ok_and(|t| t.lines().any(|l| l.trim() == "[gentoo]")) {
+            stock.push(e.path());
+        }
+    }
+    if stock.is_empty() {
+        stock.push(binrepos.join("gentoo.conf"));
+    }
+    for file in stock {
+        let keep = stock_dir.join(file.file_name().unwrap_or_default());
+        if file.is_file() && !keep.exists() {
+            tokio::fs::rename(&file, &keep).await?;
+        }
+        tokio::fs::write(
+            &file,
+            format!("[gentoo]\npriority = 1\nsync-uri = {local}\nlocation = /var/cache/binhost/gentoo\nverify-signature = true\n"),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// After an offline install: the installed system must not point at the live medium's local server, which is gone on the first boot.
 /// Puts the project's public binary host back, and the stage3's own `gentoo.conf`.
 pub async fn restore_online(target: &Path) -> crate::Result<()> {
@@ -124,10 +154,13 @@ pub async fn restore_online(target: &Path) -> crate::Result<()> {
     if binrepos.join("simple-linux.conf").is_file() {
         tokio::fs::write(binrepos.join("simple-linux.conf"), binrepos_conf(DEFAULT_URL)).await?;
     }
-    let keep = binrepos.join("gentoo.conf.online");
-    if keep.is_file() {
-        tokio::fs::rename(&keep, binrepos.join("gentoo.conf")).await?;
+    let stock = stock_dir(&binrepos);
+    if let Ok(mut rd) = tokio::fs::read_dir(&stock).await {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            tokio::fs::rename(e.path(), binrepos.join(e.file_name())).await?;
+        }
     }
+    tokio::fs::remove_dir(&stock).await.ok();
     Ok(())
 }
 
