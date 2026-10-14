@@ -75,8 +75,28 @@ DIST=$COLLECT/distfiles; FW=$(cd "$DIST" && ls linux-firmware-*.tar.xz | head -n
 mkdir -p "$OUT/distfiles"
 cp "$DIST"/grim-*.tar.gz "$OUT/distfiles/"
 mkdir "$tmp/fw"; tar -xf "$DIST/$FW" -C "$tmp/fw"
-( cd "$tmp/fw/$FWVER" && rm -rf qcom nvidia netronome mellanox mrvl qed dpaa2 liquidio cxgb4 bnx2x ti ti-connectivity ueagle-atm \
-    intel/qat intel/ice intel/vpu amdnpu ath11k/IPQ8074 ath11k/WCN6750 ath12k/IPQ5332 ath12k/IPQ5424 ath12k/IPQ9574 )
+CUT="qcom nvidia netronome mellanox mrvl qed dpaa2 liquidio cxgb4 bnx2x ti ti-connectivity ueagle-atm intel/qat intel/ice intel/vpu amdnpu ath11k/IPQ8074 ath11k/WCN6750 ath12k/IPQ5332 ath12k/IPQ5424 ath12k/IPQ9574"
+( cd "$tmp/fw/$FWVER" && rm -rf $CUT )
+# the ebuild installs what WHENCE lists and fails on a listed file that is not there: take the cut files out of the list too
+python3 - "$tmp/fw/$FWVER/WHENCE" $CUT <<'PY'
+import posixpath, sys
+path, cut = sys.argv[1], tuple(c.rstrip("/") + "/" for c in sys.argv[2:])
+out, dropped = [], 0
+for line in open(path, encoding="utf-8", errors="surrogateescape").read().splitlines(keepends=True):
+    kind, _, rest = line.partition(": ")
+    if kind in ("File", "RawFile", "Link"):
+        name = (rest.split(" -> ")[0] if kind == "Link" else rest).strip().strip('"')
+        gone = name.startswith(cut)
+        if kind == "Link" and not gone:   # a link kept in one directory may point into a cut one
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(name), rest.split(" -> ")[1].strip().strip('"')))
+            gone = target.startswith(cut)
+        if gone:
+            dropped += 1
+            continue
+    out.append(line)
+open(path, "w", encoding="utf-8", errors="surrogateescape").write("".join(out))
+print(f"WHENCE: {dropped} entries of the cut directories removed")
+PY
 tar -I 'xz -9e -T0' -C "$tmp/fw" -cf "$OUT/distfiles/$FW" "$FWVER"
 rm -rf "$tmp/fw"
 
