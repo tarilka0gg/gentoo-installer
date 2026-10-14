@@ -73,7 +73,7 @@ PY
 # the Manifest of its ebuild, so the tree snapshot below gets a Manifest line for the cut archive.
 DIST=$COLLECT/distfiles; FW=$(cd "$DIST" && ls linux-firmware-*.tar.xz | head -n1); FWVER=${FW%.tar.xz}
 mkdir -p "$OUT/distfiles"
-cp "$DIST"/grim-*.tar.gz "$OUT/distfiles/"
+cp "$DIST"/grim-*.tar.gz* "$OUT/distfiles/"   # the .sig too: Portage fetches it even without verify-sig
 mkdir "$tmp/fw"; tar -xf "$DIST/$FW" -C "$tmp/fw"
 CUT="qcom nvidia netronome mellanox mrvl qed dpaa2 liquidio cxgb4 bnx2x ti ti-connectivity ueagle-atm intel/qat intel/ice intel/vpu amdnpu ath11k/IPQ8074 ath11k/WCN6750 ath12k/IPQ5332 ath12k/IPQ5424 ath12k/IPQ9574"
 ( cd "$tmp/fw/$FWVER" && rm -rf $CUT )
