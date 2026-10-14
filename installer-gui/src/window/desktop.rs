@@ -206,6 +206,9 @@ pub(super) fn packages_select_page(
         .css_classes(vec!["boxed-list".to_string()])
         .build();
     for group in installer_core::packages::GROUPS {
+        if !installer_core::offline::group_available(group.id) {
+            continue; // not on an offline medium
+        }
         let row = adw::ActionRow::builder()
             .title(group.name)
             .subtitle(group.description)

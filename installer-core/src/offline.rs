@@ -70,6 +70,15 @@ pub fn activate() -> Option<u16> {
     })
 }
 
+/// Software groups whose packages are too big for the medium (LibreOffice alone is 200 MB). Offline they are not offered and an id given
+/// by hand is ignored; the group can be installed on the finished system, with a network.
+pub const NOT_ON_MEDIUM: &[&str] = &["office"];
+
+/// Can this software group be installed from here? Always, except on an offline medium that left it out.
+pub fn group_available(id: &str) -> bool {
+    !(is_active() && NOT_ON_MEDIUM.contains(&id))
+}
+
 /// Is the install running from an offline medium (the server is up)?
 pub fn is_active() -> bool {
     activate().is_some()

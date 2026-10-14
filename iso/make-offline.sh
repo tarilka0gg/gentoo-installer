@@ -10,6 +10,7 @@
 #   COLLECT [~/gentoo-installer-test/offline-collect]   the packages, as above
 #   KERNEL_STORE [newest ~/gentoo-installer-test/release-*/simple-linux-kernel-store.tar]
 #   WM_CONFIGS [sibling simple-linux-configs]           cloned bare into configs.git
+#   OFFLINE_EXCLUDE [app-office/libreoffice-bin/]       path prefixes (space separated) of packages left out; keep in step with offline.rs
 #   GENTOO_INDEX_URL, SL_INDEX_URL, TREE_URL            where the two indexes and the tree snapshot come from
 set -euo pipefail
 OUT=$(readlink -m "${1:?out dir}")
@@ -37,13 +38,17 @@ curl -fsSL -o "$tmp/sl-Packages" "$SL_INDEX_URL"
 python3 - "$COLLECT" "$OUT/binhost" "$tmp" <<'PY'
 import os, sys, shutil
 collect, out, tmp = sys.argv[1:4]
+# left out to keep the image under GitHub's 2 GiB (see offline.rs NOT_ON_MEDIUM)
+EXCLUDE = tuple(os.environ.get('OFFLINE_EXCLUDE', 'app-office/libreoffice-bin/').split())
 def cut(repo, index):
     files = set()
     root = os.path.join(collect, repo)
     for d, _, names in os.walk(root):
         for n in names:
             if n.endswith(".gpkg.tar"):
-                files.add(os.path.relpath(os.path.join(d, n), root))
+                rel = os.path.relpath(os.path.join(d, n), root)
+                if not rel.startswith(EXCLUDE):
+                    files.add(rel)
     blocks = open(index, encoding="utf-8").read().split("\n\n")
     header, entries = blocks[0], [b for b in blocks[1:] if b.strip()]
     kept, used = [], set()

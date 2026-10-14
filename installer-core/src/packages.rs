@@ -298,7 +298,10 @@ pub async fn install(
     target: &Path,
     ids: &[String],
 ) -> crate::Result<()> {
-    let groups = resolve(ids)?;
+    let groups: Vec<_> = resolve(ids)?
+        .into_iter()
+        .filter(|g| crate::offline::group_available(g.id))
+        .collect();
     if groups.is_empty() {
         return Ok(());
     }
