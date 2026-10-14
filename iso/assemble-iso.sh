@@ -20,6 +20,15 @@ if [ -n "${STAGE_TARBALL:-}" ]; then
     [ -e "$STAGE_TARBALL.sha512" ] && cp "$STAGE_TARBALL.sha512" "$ISO/stage/"
 fi
 
+# Optional: an offline payload (make-offline.sh): the packages, kernels, tree snapshot and configs an install downloads, so that it needs no
+# network. On the medium like the stage3 (not in the squashfs, so not in RAM); the installer finds it at /run/initramfs/live/offline
+# (offline.rs serves it to itself on 127.0.0.1). Use it together with STAGE_TARBALL: the stage3 is the other thing an install downloads.
+if [ -n "${OFFLINE_DIR:-}" ]; then
+    [ -f "$OFFLINE_DIR/manifest" ] || { echo "assemble-iso.sh: $OFFLINE_DIR is not an offline payload (no manifest)" >&2; exit 1; }
+    mkdir -p "$ISO/offline"
+    cp -r "$OFFLINE_DIR"/. "$ISO/offline/"
+fi
+
 # The rootfs was built in chroots that borrowed the build host's /etc/resolv.conf. Do not ship it:
 # it names the host's resolver (and, on the author's machine, a private Tailscale network).
 # dhcpcd writes the real one at boot.

@@ -8,6 +8,7 @@
 #   rootfs    refresh-rootfs.sh for live-root-gui (gui) and live-root (minimal)       [root]
 #   assemble  assemble-iso.sh for both images, Secure Boot signed                     [root]
 #   collect   stage3 and kernel files, copied from the previous release
+#   offline   the two offline images (stage3 + the payload from make-offline.sh on the medium); needs `collect` done          [root]
 #   sign      SHA256SUMS + signature (as the signing user), verified, copied into the simple-linux repo, README version bumped
 #
 # `release.sh 0.2.22 check` is safe anywhere. The root steps are heavy; the rootfs step can be done on the build server by
@@ -20,6 +21,7 @@
 # Environment (defaults in brackets):
 #   T [~/gentoo-installer-test]        work area: iso/ (rootfs trees), release-<version>/, limine-ventoy/, theme-assets/
 #   KEYS [~/.config/simple-linux/secureboot]   Secure Boot key set from secureboot/make-keys.sh
+#   OFFLINE_PAYLOAD [$T/offline-payload]   make-offline.sh output, for the offline step
 #   PROFILE [unset]                    make-profile.py output for the GUI image (optional)
 #   WALLPAPERS [<simple-linux repo>/wallpapers]   THEME_ASSETS [$T/theme-assets]   WM_CONFIGS [sibling simple-linux-configs]
 #   SIGN_USER [tarilka0gg]             who holds the release-signing key (root steps drop to this user)
@@ -82,7 +84,7 @@ step_check() {
         fi
     done
     has_step build && { command -v cargo >/dev/null 2>&1 || fail "cargo not found"; }
-    if has_step rootfs || has_step assemble; then
+    if has_step rootfs || has_step assemble || has_step offline; then
         command -v unshare >/dev/null 2>&1 || fail "'unshare' not found"
         [ -f "$KEYS/db.key" ] || fail "Secure Boot keys not found in $KEYS (secureboot/make-keys.sh)"
         [ -d "$W/live-root-gui" ] && [ -d "$W/live-root" ] || fail "$W has no live-root / live-root-gui"
@@ -149,12 +151,28 @@ step_collect() {
     [ "$(id -u)" != 0 ] || chown -R "$SIGN_USER": "$OUT"
 }
 
+step_offline() {
+    need_root offline; mkdir -p "$OUT"
+    local payload=${OFFLINE_PAYLOAD:-$T/offline-payload} stage=$OUT/simple-linux-stage3-amd64-openrc.tar.xz
+    [ -f "$payload/manifest" ] || die "$payload is not an offline payload (run make-offline.sh)"
+    [ -f "$stage" ] || die "$stage is missing (run the collect step first)"
+    for pair in "live-root-gui:simple-linux-gui-offline.iso" "live-root:simple-linux-minimal-offline.iso"; do
+        say "assemble ${pair#*:}"
+        SECUREBOOT_KEYS=$KEYS LIMINE_BIOS_DIR=$LIMINE_DIR LIMINE_TOOL=$LIMINE_DIR/limine ROOTFS=${pair%%:*} \
+            STAGE_TARBALL=$stage OFFLINE_DIR=$payload "$HERE/assemble-iso.sh" "$W" "$OUT/${pair#*:}"
+        local size; size=$(stat -c %s "$OUT/${pair#*:}")
+        [ "$size" -lt $((2 * 1024 * 1024 * 1024)) ] || say "WARNING: ${pair#*:} is $((size / 1048576)) MiB, over GitHub's 2 GiB limit for a release file"
+    done
+    chown -R "$SIGN_USER": "$OUT"
+}
+
 step_sign() {
     say "sign"
     local files=(simple-linux-minimal.iso simple-linux-gui.iso simple-linux-stage3-amd64-openrc.tar.xz)
     local k m
     k=$(cd "$OUT" && ls simple-linux-kernel-*.vmlinuz); m=$(cd "$OUT" && ls simple-linux-kernel-*-modules.tar.xz)
     files+=("$k" "$m" simple-linux-kernel-store.tar)
+    local o; for o in simple-linux-gui-offline.iso simple-linux-minimal-offline.iso; do [ -f "$OUT/$o" ] && files+=("$o"); done
     for f in "${files[@]}"; do [ -f "$OUT/$f" ] || die "$OUT/$f is missing"; done
     (cd "$OUT" && as_user sh "$SL_REPO/signing/sign.sh" "${files[@]}")
     (cd "$OUT" && as_user sh "$SL_REPO/signing/verify.sh" .) || die "the fresh signature does not verify"
@@ -168,7 +186,7 @@ step_check
 for s in "${STEPS[@]}"; do
     case $s in
         check) ;;
-        build|limine|rootfs|assemble|collect|sign) "step_$s" ;;
+        build|limine|rootfs|assemble|collect|offline|sign) "step_$s" ;;
         *) die "unknown step '$s'" ;;
     esac
 done

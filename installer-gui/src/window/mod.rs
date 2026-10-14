@@ -160,7 +160,8 @@ pub fn build(app: &adw::Application) {
     // Screen script §4: skipped silently if already connected — checked once at
     // startup, not re-checked live, since link state genuinely won't change mid-wizard
     // on installer hardware.
-    let target_after_prelude = if network::IwdClient::ethernet_link_up() {
+    // An offline medium needs no network to install, so the step is skipped there too (Wi-Fi is still set up on the installed system).
+    let target_after_prelude = if network::IwdClient::ethernet_link_up() || installer_core::offline::is_active() {
         disk_page.clone()
     } else {
         network_page.clone()

@@ -20,6 +20,7 @@ pub mod keyboard;
 pub mod locale;
 pub mod make_conf;
 pub mod network;
+pub mod offline;
 pub mod packages;
 pub mod partition;
 pub mod phase;

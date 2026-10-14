@@ -58,7 +58,7 @@ impl AppState {
     fn new() -> Self {
         Self {
             step: Step::Network,
-            ethernet_up: network::IwdClient::ethernet_link_up(),
+            ethernet_up: network::IwdClient::ethernet_link_up() || installer_core::offline::is_active(), // offline medium: nothing to download
             disks: Vec::new(),
             profile: None,
             selected_disk: 0,

@@ -23,6 +23,7 @@ pub struct StoreEnv {
 impl StoreEnv {
     /// Never fails any more (the name of the `Result` is kept for the frontends); every value has a default.
     pub fn from_env() -> Result<Self, String> {
+        crate::offline::activate(); // an offline medium fills in the local store, binhost and configs URLs first
         let get = |key: &str, default: &str| {
             std::env::var(key)
                 .ok()

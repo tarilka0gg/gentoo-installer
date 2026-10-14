@@ -31,6 +31,9 @@ impl Phase for FinalizePhase {
         tokio::fs::remove_file(ctx.target.join(super::deploy::STAGE_UNPACKED_MARKER))
             .await
             .ok();
+        if crate::offline::is_active() {
+            crate::binhost::restore_online(&ctx.target).await?;
+        }
         ctx.runner.run_status("sync", &[]).await?;
 
         if let Some(parts) = &ctx.parts {

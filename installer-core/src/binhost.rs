@@ -35,6 +35,7 @@ const KEY_PATH: &str = "etc/portage/simple-linux-binhost.asc";
 
 /// The binhost to use, from `GENTOO_BINHOST_URL` (default [`DEFAULT_URL`]); `None` when it is switched off.
 pub fn url_from_env() -> Option<String> {
+    crate::offline::activate(); // on an offline medium this sets GENTOO_BINHOST_URL to the local copy
     match std::env::var("GENTOO_BINHOST_URL") {
         Ok(v) if v.trim().is_empty() || v.trim() == "0" => None,
         Ok(v) => Some(v.trim().trim_end_matches('/').to_string()),
@@ -62,6 +63,20 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
     let binrepos = portage.join("binrepos.conf");
     tokio::fs::create_dir_all(&binrepos).await?;
     tokio::fs::write(binrepos.join("simple-linux.conf"), binrepos_conf(url)).await?;
+    // Offline: the stage3's own `[gentoo]` entry names the internet; the local copy of Gentoo's binary host takes over
+    // (the stock file is kept as `gentoo.conf.online` and put back by `restore_online` when the install is done).
+    if let Some(local) = crate::offline::local_gentoo_binhost_url() {
+        let gentoo = binrepos.join("gentoo.conf");
+        let keep = binrepos.join("gentoo.conf.online");
+        if gentoo.is_file() && !keep.exists() {
+            tokio::fs::rename(&gentoo, &keep).await?;
+        }
+        tokio::fs::write(
+            &gentoo,
+            format!("[gentoo]\npriority = 1\nsync-uri = {local}\nlocation = /var/cache/binhost/gentoo\nverify-signature = true\n"),
+        )
+        .await?;
+    }
     tokio::fs::write(target.join(KEY_PATH), KEY).await?;
     for (dir, body) in [
         ("package.use", PACKAGE_USE),
@@ -100,6 +115,20 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
     .await;
     unmount_chroot_dirs(runner, target).await;
     result
+}
+
+/// After an offline install: the installed system must not point at the live medium's local server, which is gone on the first boot.
+/// Puts the project's public binary host back, and the stage3's own `gentoo.conf`.
+pub async fn restore_online(target: &Path) -> crate::Result<()> {
+    let binrepos = target.join("etc/portage/binrepos.conf");
+    if binrepos.join("simple-linux.conf").is_file() {
+        tokio::fs::write(binrepos.join("simple-linux.conf"), binrepos_conf(DEFAULT_URL)).await?;
+    }
+    let keep = binrepos.join("gentoo.conf.online");
+    if keep.is_file() {
+        tokio::fs::rename(&keep, binrepos.join("gentoo.conf")).await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
