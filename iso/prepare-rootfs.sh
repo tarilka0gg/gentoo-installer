@@ -555,7 +555,12 @@ if status is-interactive
             test $fetch_same -ge 3; and break
             sleep 0.05
         end
-        fastfetch
+        # the big logo needs a roomy window; in a smaller one use the compact braille snake
+        set -l fetch_logo ~/.config/fastfetch/simple-linux.txt
+        if test (tput cols 2>/dev/null) -lt 100; or test (tput lines 2>/dev/null) -lt 32
+            set fetch_logo ~/.config/fastfetch/simple-linux-small.txt
+        end
+        fastfetch --logo $fetch_logo
         function clear_after_fetch --on-event fish_preexec
             clear
             functions --erase clear_after_fetch
