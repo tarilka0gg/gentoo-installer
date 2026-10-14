@@ -80,9 +80,10 @@ pub fn group_available(id: &str) -> bool {
     !(is_active() && NOT_ON_MEDIUM.contains(&id))
 }
 
-/// The local mirror of source archives, for `GENTOO_MIRRORS` in the target's `make.conf`.
+/// The local mirror of source archives, for `GENTOO_MIRRORS` in the target's `make.conf`. Portage adds `/distfiles/` itself, so this is the
+/// server's root and the archives sit in `distfiles/` below it.
 pub fn local_mirror_url() -> Option<String> {
-    activate().map(|p| format!("http://127.0.0.1:{p}/distfiles"))
+    activate().map(|p| format!("http://127.0.0.1:{p}"))
 }
 
 /// Is the install running from an offline medium (the server is up)?
