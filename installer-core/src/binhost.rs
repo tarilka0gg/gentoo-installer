@@ -68,6 +68,15 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
     if let Some(local) = crate::offline::local_gentoo_binhost_url() {
         use_local_gentoo(&binrepos, &local).await?;
     }
+    // The few packages without a binary (firmware, a screenshot tool) are built from source archives; offline those come from the medium.
+    if let Some(mirror) = crate::offline::local_mirror_url() {
+        let make_conf = portage.join("make.conf");
+        let mut text = tokio::fs::read_to_string(&make_conf).await.unwrap_or_default();
+        if !text.contains(OFFLINE_MIRROR_MARK) {
+            text.push_str(&format!("\n{OFFLINE_MIRROR_MARK}\nGENTOO_MIRRORS=\"{mirror}\"\n"));
+            tokio::fs::write(&make_conf, text).await?;
+        }
+    }
     tokio::fs::write(target.join(KEY_PATH), KEY).await?;
     for (dir, body) in [
         ("package.use", PACKAGE_USE),
@@ -107,6 +116,9 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
     unmount_chroot_dirs(runner, target).await;
     result
 }
+
+/// Marks the `GENTOO_MIRRORS` line an offline install adds to `make.conf` (removed again by `restore_online`).
+const OFFLINE_MIRROR_MARK: &str = "# offline install: source archives from the live medium (removed when the install is done)";
 
 /// Where the stage3's own binary host entries wait while an offline install uses the local copy.
 fn stock_dir(binrepos: &Path) -> PathBuf {
@@ -161,6 +173,16 @@ pub async fn restore_online(target: &Path) -> crate::Result<()> {
         }
     }
     tokio::fs::remove_dir(&stock).await.ok();
+    let make_conf = target.join("etc/portage/make.conf");
+    if let Ok(text) = tokio::fs::read_to_string(&make_conf).await {
+        if text.contains(OFFLINE_MIRROR_MARK) {
+            let kept: Vec<&str> = text
+                .lines()
+                .filter(|l| *l != OFFLINE_MIRROR_MARK && !(l.starts_with("GENTOO_MIRRORS=") && l.contains("127.0.0.1")))
+                .collect();
+            tokio::fs::write(&make_conf, format!("{}\n", kept.join("\n"))).await?;
+        }
+    }
     Ok(())
 }
 

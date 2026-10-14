@@ -8,6 +8,7 @@
 //! | `Packages`, `kernels/` | the kernel store (what `GENTOO_STORE_BINHOST_URL` points at) |
 //! | `binhost/simple-linux/` | the project's binary host as the installer needs it: its `Packages` index cut down to what is here, the `.gpkg.tar` files, `tree.tar.zst` |
 //! | `binhost/gentoo/` | the same for Gentoo's own binary host (the stage3's `[gentoo]` entry is pointed here) |
+//! | `distfiles/` | source archives of the few packages that have no binary (served as a `GENTOO_MIRRORS` mirror, flat layout) |
 //! | `configs.git/` | the desktop configuration, a bare repository (cloned by path: `--depth 1` does not work over dumb HTTP) |
 //! | `manifest` | marks the directory as a payload (and says what is in it) |
 //!
@@ -70,13 +71,18 @@ pub fn activate() -> Option<u16> {
     })
 }
 
-/// Software groups whose packages are too big for the medium (LibreOffice alone is 200 MB). Offline they are not offered and an id given
+/// Software groups whose packages do not fit on the medium (GitHub takes no file over 2 GiB; LibreOffice alone is 200 MB, Zen 105 MB). Offline they are not offered and an id given
 /// by hand is ignored; the group can be installed on the finished system, with a network.
-pub const NOT_ON_MEDIUM: &[&str] = &["office"];
+pub const NOT_ON_MEDIUM: &[&str] = &["browser", "dev", "media", "graphics", "chat", "office", "gaming"];
 
 /// Can this software group be installed from here? Always, except on an offline medium that left it out.
 pub fn group_available(id: &str) -> bool {
     !(is_active() && NOT_ON_MEDIUM.contains(&id))
+}
+
+/// The local mirror of source archives, for `GENTOO_MIRRORS` in the target's `make.conf`.
+pub fn local_mirror_url() -> Option<String> {
+    activate().map(|p| format!("http://127.0.0.1:{p}/distfiles"))
 }
 
 /// Is the install running from an offline medium (the server is up)?

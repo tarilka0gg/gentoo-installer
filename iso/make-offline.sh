@@ -10,7 +10,7 @@
 #   COLLECT [~/gentoo-installer-test/offline-collect]   the packages, as above
 #   KERNEL_STORE [newest ~/gentoo-installer-test/release-*/simple-linux-kernel-store.tar]
 #   WM_CONFIGS [sibling simple-linux-configs]           cloned bare into configs.git
-#   OFFLINE_EXCLUDE [app-office/libreoffice-bin/]       path prefixes (space separated) of packages left out; keep in step with offline.rs
+#   OFFLINE_EXCLUDE [libreoffice podman telegram gimp vlc mpv]   path prefixes (space separated) of packages left out; keep in step with offline.rs
 #   GENTOO_INDEX_URL, SL_INDEX_URL, TREE_URL            where the two indexes and the tree snapshot come from
 set -euo pipefail
 OUT=$(readlink -m "${1:?out dir}")
@@ -39,7 +39,7 @@ python3 - "$COLLECT" "$OUT/binhost" "$tmp" <<'PY'
 import os, sys, shutil
 collect, out, tmp = sys.argv[1:4]
 # left out to keep the image under GitHub's 2 GiB (see offline.rs NOT_ON_MEDIUM)
-EXCLUDE = tuple(os.environ.get('OFFLINE_EXCLUDE', 'app-office/libreoffice-bin/').split())
+EXCLUDE = tuple(os.environ.get('OFFLINE_EXCLUDE', 'app-office/libreoffice-bin/ app-containers/podman/ telegram-desktop-bin- gimp-3 vlc-4 mpv-').split())
 def cut(repo, index):
     files = set()
     root = os.path.join(collect, repo)
@@ -68,8 +68,40 @@ cut("gentoo", os.path.join(tmp, "gentoo-Packages"))
 cut("simple-linux", os.path.join(tmp, "sl-Packages"))
 PY
 
-# the Portage tree the packages were built against (the installer unpacks it from <binhost>/tree.tar.zst)
-curl -fsSL -o "$OUT/binhost/simple-linux/tree.tar.zst" "$TREE_URL"
+# source archives of the packages that have no binary: grim (tiny) and linux-firmware, which is cut down to what real hardware needs (GPU,
+# Wi-Fi, Bluetooth, audio, common network cards): 609 MB become ~130 MB, and the image fits GitHub's 2 GiB. Portage checks every archive against
+# the Manifest of its ebuild, so the tree snapshot below gets a Manifest line for the cut archive.
+DIST=$COLLECT/distfiles; FW=$(cd "$DIST" && ls linux-firmware-*.tar.xz | head -n1); FWVER=${FW%.tar.xz}
+mkdir -p "$OUT/distfiles"
+cp "$DIST"/grim-*.tar.gz "$OUT/distfiles/"
+mkdir "$tmp/fw"; tar -xf "$DIST/$FW" -C "$tmp/fw"
+( cd "$tmp/fw/$FWVER" && rm -rf qcom nvidia netronome mellanox mrvl qed dpaa2 liquidio cxgb4 bnx2x ti ti-connectivity ueagle-atm \
+    intel/qat intel/ice intel/vpu amdnpu ath11k/IPQ8074 ath11k/WCN6750 ath12k/IPQ5332 ath12k/IPQ5424 ath12k/IPQ9574 )
+tar -I 'xz -9e -T0' -C "$tmp/fw" -cf "$OUT/distfiles/$FW" "$FWVER"
+rm -rf "$tmp/fw"
+
+# the Portage tree the packages were built against (the installer unpacks it from <binhost>/tree.tar.zst), with the cut firmware archive's
+# size and checksums in the Manifest
+curl -fsSL -o "$tmp/tree.tar.zst" "$TREE_URL"
+mkdir "$tmp/tree"; tar --zstd -xf "$tmp/tree.tar.zst" -C "$tmp/tree"
+python3 - "$tmp/tree" "$OUT/distfiles/$FW" "$FW" <<'PY'
+import hashlib, sys, os
+tree, archive, name = sys.argv[1:4]
+data = open(archive, "rb").read()
+line = f"DIST {name} {len(data)} BLAKE2B {hashlib.blake2b(data).hexdigest()} SHA512 {hashlib.sha512(data).hexdigest()}\n"
+manifest = os.path.join(tree, "gentoo/sys-kernel/linux-firmware/Manifest")
+lines = open(manifest).read().splitlines(keepends=True)
+out, hit = [], False
+for l in lines:
+    if l.startswith(f"DIST {name} "):
+        out.append(line); hit = True
+    else:
+        out.append(l)
+assert hit, f"no DIST line for {name} in {manifest}"
+open(manifest, "w").write("".join(out))
+PY
+tar -I 'zstd -19 -T0' -C "$tmp/tree" -cf "$OUT/binhost/simple-linux/tree.tar.zst" .
+rm -rf "$tmp/tree" "$tmp/tree.tar.zst"
 
 # the desktop configuration: a bare repository, cloned by path
 git -c safe.directory='*' clone -q --bare "$WM_CONFIGS" "$OUT/configs.git"
