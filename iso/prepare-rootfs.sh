@@ -652,7 +652,8 @@ if [ -z "\${GENTOO_INSTALLER_STAGE3_URL:-}" ] && [ ! -d /run/initramfs/live/stag
     export GENTOO_INSTALLER_STAGE3_URL=$STAGE_URL
 fi
 # The configs the installer puts in the new user's home (compositor, Noctalia, fish with tide): this project's repository.
-[ -n "\${GENTOO_WM_CONFIGS_URL:-}" ] || export GENTOO_WM_CONFIGS_URL=$CONFIGS_URL
+# (not on an offline medium: there the installer points itself at the copy on the medium, see offline.rs)
+[ -n "\${GENTOO_WM_CONFIGS_URL:-}" ] || [ -f /run/initramfs/live/offline/manifest ] || export GENTOO_WM_CONFIGS_URL=$CONFIGS_URL
 SHENV
 if [ -n "$STORE_BINHOST" ] && [ -n "$STORE_OVERLAY" ]; then
     cat >> "$ROOT/etc/profile.d/installer-stage.sh" <<SHSTORE
@@ -665,7 +666,7 @@ cat > "$ROOT/etc/fish/conf.d/20-installer-stage.fish" <<FISHENV
 if not set -q GENTOO_INSTALLER_STAGE3_URL; and not test -d /run/initramfs/live/stage; and not test -d /run/live/medium/stage
     set -gx GENTOO_INSTALLER_STAGE3_URL $STAGE_URL
 end
-set -q GENTOO_WM_CONFIGS_URL; or set -gx GENTOO_WM_CONFIGS_URL $CONFIGS_URL
+set -q GENTOO_WM_CONFIGS_URL; or test -f /run/initramfs/live/offline/manifest; or set -gx GENTOO_WM_CONFIGS_URL $CONFIGS_URL
 FISHENV
 if [ -n "$STORE_BINHOST" ] && [ -n "$STORE_OVERLAY" ]; then
     cat >> "$ROOT/etc/fish/conf.d/20-installer-stage.fish" <<FISHSTORE
