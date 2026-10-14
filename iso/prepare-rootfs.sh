@@ -541,10 +541,12 @@ if status is-interactive
     # fastfetch on the first prompt of every terminal, cleared again when the first command is typed (the author's own fish does this)
     if command -q fastfetch; and not status is-login
         # tui-shim (when installed): micro and nvim get the file-picker badge, TUI apps get launcher entries. No theme files: Noctalia colours micro, btop and yazi itself. Once per user, in the background.
+        if command -q tui-shim
+            contains -- ~/.local/bin $PATH; or set -gx PATH ~/.local/bin $PATH   # the shims (made below) have to come before /usr/bin
+        end
         if command -q tui-shim; and not test -e ~/.config/tui-shim/setup-done
             mkdir -p ~/.config/tui-shim
             tui-shim shims install >/dev/null 2>&1
-            contains -- ~/.local/bin $PATH; or set -gx PATH ~/.local/bin $PATH   # the shims have to come before /usr/bin
             fish -c 'tui-shim sync --no-theme --offline >/dev/null 2>&1; touch ~/.config/tui-shim/setup-done' &
             disown
         end
