@@ -547,7 +547,7 @@ if status is-interactive
         if command -q tui-shim; and not test -e ~/.config/tui-shim/setup-done
             mkdir -p ~/.config/tui-shim
             tui-shim shims install >/dev/null 2>&1
-            fish -c 'tui-shim sync --no-theme --offline >/dev/null 2>&1; touch ~/.config/tui-shim/setup-done' &
+            fish -c 'tui-shim sync --no-theme --offline >/dev/null 2>&1; bash ~/.config/noctalia/hooks/colors.d/30-tui-shim.sh >/dev/null 2>&1; touch ~/.config/tui-shim/setup-done' &
             disown
         end
         # fastfetch measures the terminal when it starts, and a new window is still being sized by the compositor: wait until the width
