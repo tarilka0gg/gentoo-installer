@@ -135,7 +135,13 @@ pub async fn run() -> Result<()> {
         });
 
     let profile = installer_core::hardware::Profile::detect().context("hardware detection")?;
-    let layout = plan_layout(&disk, profile.ram_bytes).await?;
+    let resuming = std::env::args().any(|a| a == "--resume");
+    let layout = match plan_layout(&disk, profile.ram_bytes).await {
+        Ok(layout) => layout,
+        // The free space has been used by the run that is being resumed; its journal has the layout.
+        Err(_) if resuming => partition::plan(&disk, partition::RootFs::Btrfs, profile.ram_bytes),
+        Err(e) => return Err(e),
+    };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut ctx = Ctx::new(
         Arc::new(StreamingCommandRunner::new(tx.clone())),

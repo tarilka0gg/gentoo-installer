@@ -319,41 +319,54 @@ pub async fn run_phase_list(
     use crate::journal::{Journal, PhaseStatus};
 
     let ids: Vec<PhaseId> = phases.iter().map(|p| p.id()).collect();
-    let plan = serde_json::json!({ "disk": ctx.layout.disk, "hostname": ctx.settings.hostname });
+    // The layout is kept whole: a resume must use the partitions this run made, not plan again from a disk that now has them.
+    let plan = serde_json::json!({
+        "disk": ctx.layout.disk,
+        "hostname": ctx.settings.hostname,
+        "layout": ctx.layout,
+    });
 
-    let mut journal = match (mode, journal_path) {
-        (RunMode::Resume, Some(path)) => {
-            let loaded = Journal::load(path).await?.ok_or_else(|| {
-                crate::Error::Other(anyhow::anyhow!(
-                    "nothing to resume: there is no journal at {}",
-                    path.display()
-                ))
-            })?;
-            let same_disk =
-                loaded.plan.get("disk").and_then(|d| d.as_str()) == Some(ctx.layout.disk.as_str());
-            if !same_disk || !loaded.is_resumable() {
+    let mut journal =
+        match (mode, journal_path) {
+            (RunMode::Resume, Some(path)) => {
+                let loaded = Journal::load(path).await?.ok_or_else(|| {
+                    crate::Error::Other(anyhow::anyhow!(
+                        "nothing to resume: there is no journal at {}",
+                        path.display()
+                    ))
+                })?;
+                let same_disk = loaded.plan.get("disk").and_then(|d| d.as_str())
+                    == Some(ctx.layout.disk.as_str());
+                if same_disk {
+                    if let Some(saved) = loaded.plan.get("layout").and_then(|l| {
+                        serde_json::from_value::<partition_mod::Layout>(l.clone()).ok()
+                    }) {
+                        ctx.layout = saved;
+                    }
+                }
+                if !same_disk || !loaded.is_resumable() {
+                    return Err(crate::Error::Other(anyhow::anyhow!(
+                        "the journal does not describe an unfinished install on {}",
+                        ctx.layout.disk
+                    )));
+                }
+                if loaded
+                    .phases
+                    .get(&PhaseId::Partition)
+                    .is_some_and(|r| r.status == PhaseStatus::Done)
+                {
+                    ctx.parts = Some(partition_mod::partitions_for(&ctx.layout));
+                }
+                Some(loaded)
+            }
+            (RunMode::Resume, None) => {
                 return Err(crate::Error::Other(anyhow::anyhow!(
-                    "the journal does not describe an unfinished install on {}",
-                    ctx.layout.disk
+                    "resuming needs a journal path"
                 )));
             }
-            if loaded
-                .phases
-                .get(&PhaseId::Partition)
-                .is_some_and(|r| r.status == PhaseStatus::Done)
-            {
-                ctx.parts = Some(partition_mod::partitions_for(&ctx.layout));
-            }
-            Some(loaded)
-        }
-        (RunMode::Resume, None) => {
-            return Err(crate::Error::Other(anyhow::anyhow!(
-                "resuming needs a journal path"
-            )));
-        }
-        (RunMode::Fresh, Some(_)) => Some(Journal::new(plan, &ids)),
-        (RunMode::Fresh, None) => None,
-    };
+            (RunMode::Fresh, Some(_)) => Some(Journal::new(plan, &ids)),
+            (RunMode::Fresh, None) => None,
+        };
 
     macro_rules! record {
         ($j:ident . $m:ident ( $($a:expr),* )) => {
