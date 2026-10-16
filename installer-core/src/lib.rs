@@ -16,6 +16,7 @@ mod http;
 pub mod install;
 pub mod journal;
 pub mod kernel;
+pub mod kernel_build;
 pub mod keyboard;
 pub mod locale;
 pub mod make_conf;

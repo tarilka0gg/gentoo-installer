@@ -95,6 +95,8 @@ struct WizardState {
     opt_level: Cell<OptLevel>,
     package_mode: Cell<PackageMode>,
     secure_boot: Cell<bool>,
+    /// Build the kernel for this computer from the kernel matrix when the store has none for it.
+    build_kernel: Cell<bool>,
     manual_root_fs: Cell<partition::RootFs>,
     /// `None` means "use the automatic RAM-based size" — set only if the user actually
     /// changes it on the manual-partitioning page.
@@ -129,6 +131,7 @@ impl WizardState {
             opt_level: Cell::new(OptLevel::default()),
             package_mode: Cell::new(PackageMode::default()),
             secure_boot: Cell::new(false),
+            build_kernel: Cell::new(false),
             manual_root_fs: Cell::new(partition::RootFs::Btrfs),
             manual_swap_gib: RefCell::new(None),
             username: RefCell::new(String::new()),

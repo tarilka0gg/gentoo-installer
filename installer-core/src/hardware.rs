@@ -186,6 +186,18 @@ impl Profile {
         )
     }
 
+    /// The kernel matrix's fragments for this hardware, in the order `build-config.sh` applies them after `common/`:
+    /// `cpu/intel-raptorlake`, `gpu/nvidia`, `platform/laptop`, then all the vendor EC/WMI and modem drivers as modules.
+    pub fn fragments(&self) -> Vec<String> {
+        vec![
+            format!("cpu/{}", self.cpu.as_str()),
+            format!("gpu/{}", sanitize_gpu(self.platform, self.gpu).as_str()),
+            format!("platform/{}", self.platform.as_str()),
+            "ec/all".to_string(),
+            "modem/all".to_string(),
+        ]
+    }
+
     /// Degrades from most to least specific: platform first (handheld -> laptop, since
     /// it's the narrowest axis by popularity weight), then cpu to a generic level, then
     /// gpu to none, ending at combos virtually guaranteed to exist in any reasonably

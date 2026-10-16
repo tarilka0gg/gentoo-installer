@@ -82,6 +82,12 @@ pub(super) fn confirm_page_build(
             &format!("Install {} as your desktop.", state.wm.get().display_name()),
             false,
         ));
+        if state.build_kernel.get() {
+            sentences.append(&sentence(
+                "Build the kernel for this computer from the kernel matrix, unless a ready one exists for it (this takes longer).",
+                false,
+            ));
+        }
         if state.opt_level.get() == OptLevel::O3 {
             sentences.append(&sentence("Build with -O3 instead of -O2.", false));
         }
@@ -283,6 +289,7 @@ pub(super) fn confirm_page_build(
                 account,
                 gpu_override: state.gpu.get(),
                 secure_boot: state.secure_boot.get(),
+                build_kernel: state.build_kernel.get(),
                 render: state.render.get(),
                 packages: state.packages.borrow().clone(),
                 stage3: std::env::var("GENTOO_INSTALLER_STAGE3_URL")

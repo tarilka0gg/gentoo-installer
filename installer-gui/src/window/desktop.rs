@@ -487,6 +487,46 @@ pub(super) fn opt_level_select_page(
     content.append(&pkg_body);
     content.append(&pkg_row);
 
+    // Not on an offline image: building needs the kernel sources and the matrix from the network.
+    if !installer_core::offline::is_active() {
+        let kernel_body = gtk::Label::builder()
+            .label(
+                "A ready-made kernel for exactly your hardware is used when there is one, and the closest generic one \
+                 otherwise. Turn this on to build a kernel for your computer from the kernel matrix when there is no \
+                 ready one. It takes 15 to 60 minutes and about 10 GB of disk space; if the build fails, the generic \
+                 kernel stays.",
+            )
+            .css_classes(vec!["dim-label".to_string()])
+            .halign(gtk::Align::Start)
+            .wrap(true)
+            .build();
+        let kernel_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(12)
+            .margin_top(12)
+            .build();
+        let kernel_label = gtk::Label::builder()
+            .label("Build the kernel for this computer")
+            .halign(gtk::Align::Start)
+            .hexpand(true)
+            .build();
+        let kernel_switch = gtk::Switch::builder()
+            .active(state.build_kernel.get())
+            .valign(gtk::Align::Center)
+            .build();
+        {
+            let state = state.clone();
+            kernel_switch.connect_state_set(move |_, active| {
+                state.build_kernel.set(active);
+                glib::Propagation::Proceed
+            });
+        }
+        kernel_row.append(&kernel_label);
+        kernel_row.append(&kernel_switch);
+        content.append(&kernel_body);
+        content.append(&kernel_row);
+    }
+
     // Secure Boot only means something on UEFI.
     if std::path::Path::new("/sys/firmware/efi").is_dir() {
         let sb_body = gtk::Label::builder()

@@ -30,6 +30,8 @@ pub struct InstallOptions {
     pub keyboard_layout: String,
     /// XKB options (`grp:alt_shift_toggle`...); empty for none.
     pub keyboard_options: String,
+    /// Build the kernel for this computer from the kernel matrix when the store has none for exactly this hardware.
+    pub build_kernel: bool,
     /// IANA zone name (e.g. "Europe/Kyiv") — auto-detected default, or an Advanced-setup
     /// manual choice.
     pub timezone: String,
@@ -79,6 +81,7 @@ impl InstallOptions {
             timezone: self.timezone,
             keyboard_layout: self.keyboard_layout,
             keyboard_options: self.keyboard_options,
+            build_kernel: self.build_kernel,
             locales: self.locales,
             hostname: self.hostname,
             account: Some(self.account),
@@ -238,6 +241,7 @@ mod tests {
             kernel_base_name: "k".into(),
             keyboard_layout: "ua".into(),
             keyboard_options: String::new(),
+            build_kernel: false,
             timezone: "Europe/Kyiv".into(),
             hostname: "h".into(),
             locales: vec!["uk_UA.UTF-8".into()],

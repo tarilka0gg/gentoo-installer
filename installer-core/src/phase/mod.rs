@@ -15,6 +15,7 @@ mod desktop;
 mod finalize;
 mod fstab;
 mod gpu;
+mod kernel_build;
 mod locale;
 mod mount;
 mod packages;
@@ -30,6 +31,7 @@ pub use desktop::DesktopPhase;
 pub use finalize::FinalizePhase;
 pub use fstab::FstabPhase;
 pub use gpu::GpuPhase;
+pub use kernel_build::KernelBuildPhase;
 pub use locale::LocalePhase;
 pub use mount::MountPhase;
 pub use packages::PackagesPhase;
@@ -67,6 +69,8 @@ pub enum PhaseId {
     Gpu,
     Desktop,
     Packages,
+    /// Optional: builds the kernel for this computer from the kernel matrix when the store has none for it.
+    KernelBuild,
 }
 
 impl PhaseId {
@@ -74,7 +78,7 @@ impl PhaseId {
     /// it — `doas`, the driver, the desktop, the packages — must see the tuned `MAKEOPTS`, binhost settings and
     /// `VIDEO_CARDS`. The git history of `/etc/portage` is recorded last (`PostHooks`), after those
     /// emerges wrote their `package.use`/`package.accept_keywords`, so it describes the finished system.
-    pub const ORDER: [PhaseId; 15] = [
+    pub const ORDER: [PhaseId; 16] = [
         PhaseId::Preflight,
         PhaseId::Partition,
         PhaseId::Format,
@@ -84,6 +88,7 @@ impl PhaseId {
         PhaseId::Fstab,
         PhaseId::Locale,
         PhaseId::Users,
+        PhaseId::KernelBuild,
         PhaseId::Gpu,
         PhaseId::Desktop,
         PhaseId::Packages,
@@ -138,6 +143,9 @@ pub struct Settings {
     pub keyboard_layout: String,
     /// XKB options, e.g. `grp:alt_shift_toggle` (the key that switches layouts).
     pub keyboard_options: String,
+    /// Build the kernel for this computer from the kernel matrix when the store has none for exactly this hardware
+    /// (otherwise, and by default, the closest ready-made kernel is used). Needs a network.
+    pub build_kernel: bool,
     /// `locale-gen` names, e.g. `uk_UA.UTF-8`. The first one becomes the system `LANG`.
     pub locales: Vec<String>,
     pub hostname: String,
@@ -171,6 +179,7 @@ impl Default for Settings {
             timezone: "UTC".to_string(),
             keyboard_layout: "us".to_string(),
             keyboard_options: String::new(),
+            build_kernel: false,
             locales: vec![crate::locale::DEFAULT_LOCALE.to_string()],
             hostname: "simple-linux".to_string(),
             account: None,
@@ -254,6 +263,7 @@ pub fn all_phases() -> Vec<Box<dyn Phase>> {
         Box::new(FstabPhase),
         Box::new(LocalePhase),
         Box::new(UsersPhase),
+        Box::new(KernelBuildPhase),
         Box::new(GpuPhase),
         Box::new(DesktopPhase),
         Box::new(PackagesPhase),
@@ -520,6 +530,7 @@ mod tests {
             timezone: "Europe/Kyiv".into(),
             keyboard_layout: "ua".into(),
             keyboard_options: String::new(),
+            build_kernel: false,
             locales: vec!["uk_UA.UTF-8".into(), "en_US.UTF-8".into()],
             hostname: "solomiya-pc".into(),
             account: Some(Account {
@@ -917,7 +928,7 @@ mod tests {
             "phases out of install order: {ids:?}"
         );
         assert!(ids.contains(&PhaseId::Locale) && ids.contains(&PhaseId::Users));
-        assert_eq!(ids.len(), 15);
+        assert_eq!(ids.len(), 16);
     }
 
     /// A stand-in phase that counts its runs and reports a fixed `is_satisfied`.

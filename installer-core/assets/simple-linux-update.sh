@@ -46,6 +46,10 @@ remote_sig() {   # a cheap identity of the published build: ETag, else Last-Modi
 
 kernel_status() {   # sets NEW=1 when the store has a build that differs from the installed one
     NEW=0
+    # A kernel built on this computer from the kernel matrix is not one the store has: it is never replaced from there.
+    if [ -f /etc/simple-linux/local-kernel ]; then
+        say "kernel: built on this computer from the kernel matrix; not updated from the store"; return
+    fi
     [ -f "$BOOT/vmlinuz-$COMBO" ] || die "$BOOT/vmlinuz-$COMBO is missing"
     sig=$(remote_sig) || die "cannot reach $URL.vmlinuz"
     if [ -f "$STATE/kernel.sig" ] && [ "$(cat "$STATE/kernel.sig")" = "$sig" ]; then

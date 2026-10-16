@@ -498,6 +498,7 @@ pub fn build_debug_progress(app: &adw::Application) {
         kernel_base_name: "k".into(),
         keyboard_layout: "us".into(),
         keyboard_options: String::new(),
+        build_kernel: false,
         timezone: "UTC".into(),
         hostname: "simple-linux".into(),
         locales: vec!["en_US.UTF-8".into()],
