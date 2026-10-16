@@ -82,8 +82,12 @@ pub(super) fn keyboard_select_page(
         next_button.connect_clicked(move |_| nav.push(&timezone_page));
     }
 
-    let clamp = adw::Clamp::builder()
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(560)
         .build();
     let page = adw::NavigationPage::builder()
@@ -163,8 +167,12 @@ pub(super) fn timezone_select_page(
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
 
-    let clamp = adw::Clamp::builder()
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(560)
         .build();
     let page = adw::NavigationPage::builder()

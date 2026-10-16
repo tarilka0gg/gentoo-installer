@@ -92,7 +92,7 @@ pub(super) fn network_page_build(
         .halign(gtk::Align::Start)
         .build();
     let body = gtk::Label::builder()
-        .label("Gentoo installs everything it needs from this device, so a connection is optional. It's used to check for updates on first start.")
+        .label("The installer has what it needs on this device, so a connection is optional. It's used to check for updates on first start.")
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .wrap(true)

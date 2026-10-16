@@ -47,7 +47,7 @@ pub(super) fn confirm_page_build(
     } else if let Some(d) = &disk {
         sentences.append(&sentence(
             &format!(
-                "Install Gentoo on {} ({}).",
+                "Install Simple Linux on {} ({}).",
                 d.path,
                 disk::format_size(d.size_bytes)
             ),

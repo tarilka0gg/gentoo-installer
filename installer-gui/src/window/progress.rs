@@ -522,7 +522,7 @@ pub fn build_debug_progress(app: &adw::Application) {
 /// guarded so clicking it during UI iteration never reboots the development machine.
 pub(super) fn done_page_build() -> adw::NavigationPage {
     let status = adw::StatusPage::builder()
-        .title("Gentoo is ready")
+        .title("Simple Linux is ready")
         .description("Restart to start using it.")
         .icon_name("emblem-ok-symbolic")
         .build();

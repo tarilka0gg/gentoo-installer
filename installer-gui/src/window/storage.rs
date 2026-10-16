@@ -70,7 +70,7 @@ pub(super) fn disk_select_page(
     page_menus: PageMenus,
 ) -> adw::NavigationPage {
     let heading = gtk::Label::builder()
-        .label("Where should Gentoo go?")
+        .label("Where should Simple Linux go?")
         .css_classes(vec!["hero-title".to_string()])
         .halign(gtk::Align::Start)
         .wrap(true)
@@ -291,7 +291,7 @@ pub(super) fn manual_partition_page_build(
         .halign(gtk::Align::Start)
         .build();
     let body = gtk::Label::builder()
-        .label("Gentoo needs a root partition, and an EFI system partition on this machine.")
+        .label("Simple Linux needs a root partition, and an EFI system partition on this machine.")
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .wrap(true)

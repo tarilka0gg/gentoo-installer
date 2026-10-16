@@ -76,8 +76,12 @@ pub(super) fn wm_select_page(
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
 
-    let clamp = adw::Clamp::builder()
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(560)
         .build();
     let page = adw::NavigationPage::builder()
@@ -168,8 +172,12 @@ pub(super) fn gpu_select_page(
         let nav = nav.clone();
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
-    let clamp = adw::Clamp::builder()
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(560)
         .build();
     let page = adw::NavigationPage::builder()
@@ -195,7 +203,7 @@ pub(super) fn packages_select_page(
         .halign(gtk::Align::Start)
         .build();
     let body = gtk::Label::builder()
-        .label("Installed after the desktop. Prebuilt where Gentoo offers a binary; everything else compiles.")
+        .label("Installed after the desktop. Prebuilt where a binary exists; everything else compiles.")
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .wrap(true)
@@ -324,11 +332,10 @@ pub(super) fn opt_level_select_page(
 
     let pkg_body = gtk::Label::builder()
         .label(
-            "By default, large packages (compilers, graphics libraries, desktop toolkits — \
-             exactly what pulls in the longest build times) come down as prebuilt binaries from \
-             Gentoo's own official package host instead of compiling from source. Overlay-only \
-             packages (niri, Hyprland, Noctalia...) always compile from source regardless — only \
-             the official Gentoo tree has prebuilt binaries.",
+            "By default the packages come down prebuilt, from Gentoo's package host and from this \
+             project's own (niri, Noctalia and the packages built with different options), instead \
+             of compiling from source. Turning this on compiles everything on this computer, which \
+             takes hours.",
         )
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
@@ -428,8 +435,13 @@ pub(super) fn opt_level_select_page(
         next_button.connect_clicked(move |_| nav.push(&next_page));
     }
 
-    let clamp = adw::Clamp::builder()
+    // Secure Boot and the source/binary switch make this page taller than the window on a small screen.
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(560)
         .build();
     let page = adw::NavigationPage::builder()
