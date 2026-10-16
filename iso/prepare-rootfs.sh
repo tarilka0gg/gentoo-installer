@@ -117,6 +117,28 @@ ZENDESKTOP
     # (it then draws the bar attached: full width, flush with the screen edge). Its names are margin_ends (shortens the bar at both ends)
     # and margin_edge (distance from the screen edge); the dock has only the latter.
     sed -i -E '/^\[bar\.main\]/,/^start/{s/^margin_h( *)=/margin_ends\1=/;s/^margin_v( *)=/margin_edge\1=/}; /^\[dock\]/,/^\[[a-z]/{/^margin_h/d;s/^margin_v( *)=/margin_edge\1=/}' "$ROOT/root/.config/noctalia/config.toml"
+    # The hooks of the repo's config.toml (they run hooks/colors.d/*.sh after every palette change: tui-shim's palette and micro's colours,
+    # fastfetch) are registered in the config only when it is the repo's; a personal profile has the lines commented out, and then nothing
+    # follows the wallpaper after the first prompt.
+    python3 - "$ROOT/root/.config/noctalia/config.toml" <<'HOOKSPY'
+import re, sys
+path = sys.argv[1]
+text = open(path).read()
+hooks = {'started': 'bash ~/.config/noctalia/hooks/started.sh', 'colors_changed': 'bash ~/.config/noctalia/hooks/colors-changed.sh'}
+m = re.search(r'(?ms)^\[hooks\]\n(.*?)(?=^\[|\Z)', text)
+if not m:
+    text += '\n[hooks]\n'; m = re.search(r'(?ms)^\[hooks\]\n(.*?)(?=^\[|\Z)', text)
+body = m.group(1)
+for key, cmd in hooks.items():
+    line = '%s = "%s"' % (key, cmd)
+    if re.search(r'(?m)^%s\s*=' % key, body):
+        body = re.sub(r'(?m)^%s\s*=[^\n]*' % key, line, body, count=1)
+    elif re.search(r'(?m)^#\s*%s\s*=' % key, body):
+        body = re.sub(r'(?m)^#\s*%s\s*=[^\n]*' % key, line, body, count=1)
+    else:
+        body = body.rstrip('\n') + '\n' + line + '\n'
+open(path, 'w').write(text[:m.start(1)] + body + text[m.end(1):])
+HOOKSPY
     # niri: the colours of the ring, the border and the overview backdrop come from Noctalia's niri template (noctalia.kdl, included at the
     # end), not from the ones a personal config pins; Noctalia is started through hooks/start.sh, which chooses the wallpaper first
     # (no flash of the default theme), and that script replaces the separate random-wallpaper start.
