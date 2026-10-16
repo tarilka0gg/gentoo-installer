@@ -2,7 +2,7 @@
 //! the same fragments (`common/`, `cpu/`, `gpu/`, `platform/`, `ec/all`, `modem/all`) on top of the same seed the ready-made
 //! kernels of the store are made from. Only used when the person asked for it (Advanced setup, Optimization) and the store has
 //! no kernel for exactly this hardware; otherwise the store's kernel (or its closest, the generic one) stays. It needs a network,
-//! about 10 GB of free space and 15 to 60 minutes. Any failure leaves the store's kernel in place: this never makes an install fail.
+//! about 10 GB of free space and, depending on the machine, 10 to 60 minutes. Any failure leaves the store's kernel in place: this never makes an install fail.
 
 use crate::command::CommandRunner;
 use crate::event::{Event, EventTx, Level};

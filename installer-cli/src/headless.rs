@@ -14,7 +14,7 @@
 //! | `GENTOO_INSTALLER_STAGE3_URL`, `_SHA512` | optional custom stage3 (else the bundled one) |
 //! | `GENTOO_INSTALLER_USTAN=0` | do not copy ustan from the live image into the installed system |
 //! | `GENTOO_INSTALLER_STORE=0` | do not copy portage-store from the live image into the installed system |
-//! | `GENTOO_INSTALLER_KERNEL_BUILD=1` | build the kernel for this computer from the kernel matrix when the store has none for exactly this hardware (needs a network, 15-60 min) |
+//! | `GENTOO_INSTALLER_KERNEL_BUILD=1` | build the kernel for this computer from the kernel matrix when the store has none for exactly this hardware (needs a network, 10-60 min depending on the machine) |
 //! | `GENTOO_INSTALLER_SECUREBOOT=1` | sign the installed bootloader with a key made on this machine (UEFI only); enrol `/boot/secureboot/simple-linux-db.cer` afterwards |
 //! | `GENTOO_INSTALLER_WM` (`none` = no desktop), `_PACKAGES`, `_GPU`, `_OPT_LEVEL`, `_PACKAGE_MODE` | same meaning as in the TUI |
 //!

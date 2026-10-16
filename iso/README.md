@@ -1,6 +1,7 @@
 # Live ISOs (minimal TUI, and GUI)
 
-Boots on BIOS and UEFI, autologins as root and starts `installer-cli`. 506 MB.
+Boots on BIOS and UEFI, autologins as root and starts the installer (`installer-cli` on the minimal image, the GUI on the GUI image). Sizes of 0.2.26: minimal 434 MiB, GUI 637 MiB, and the
+*offline* variants that carry everything an install downloads: minimal 1.6 GiB, GUI 1.8 GiB (see "Offline images" at the end).
 Tested in QEMU (KVM) with SeaBIOS and OVMF: Limine → kernel → dracut (`dmsquash-live`,
 OverlayFS) → OpenRC → the installer's TUI on tty1 and on the serial console.
 
@@ -56,10 +57,18 @@ niri was not run), a real store with real kernels, real hardware.
 
 ## Making a release
 
-`release.sh <version> [step...]` runs the recipe (build, Limine BIOS stages, rootfs refresh, both ISOs with Secure Boot signing, stage3 and kernel files
-from the previous release, signed `SHA256SUMS`). `release.sh 0.2.22 check` is read-only: it refuses a dirty tree, a binary older than the sources
+`release.sh <version> [step...]` runs the recipe: `check` (always first), `build` (cargo), `limine` (BIOS stages), `rootfs` (refresh both root trees), `assemble` (both ISOs, Secure Boot signed), `collect` (stage3 and
+kernel files from the previous release), `offline` (the two offline ISOs from the `make-offline.sh` payload) and `sign` (signed `SHA256SUMS`). Pass `PROFILE=` (the saved desktop profile), or the GUI image lacks its dock and colours. `release.sh 0.2.22 check` is read-only: it refuses a dirty tree, a binary older than the sources
 (the cause of the stale installer in 0.2.14/0.2.15) and missing inputs. The release directory gets a `BUILD-INFO` with the commits and binary hashes. It does
 not commit or publish: the README section and the GitHub release stay manual.
+
+## Testing an install without a screen
+
+The installer can be exercised in QEMU with no display (`-display none -vga std`, an IDE/AHCI disk: the generic kernels have no virtio-blk, so an *installed* system must be booted from
+IDE/SATA). Boot the minimal ISO, press `q` in the text installer for the shell, type the command through the QEMU monitor (`sendkey`, one key per character), and capture the output
+with `... | tee /dev/ttyS0` into a `-serial unix:` socket. In the guest, kill `dhcpcd` and write `nameserver 9.9.9.9` to `/etc/resolv.conf` when the user-mode network's DNS is flaky. Used for the
+free-space install (`GENTOO_INSTALLER_PLACEMENT=free`, a disk with an EFI partition holding fake Windows/Ubuntu loaders: the other systems stayed intact, Limine listed them, the new system booted) and for the
+install-time kernel build (`GENTOO_INSTALLER_KERNEL_BUILD=1`, 7 jobs; it finished well inside the 10 to 60 minute planning figure). Do not leave the `nbd` module loaded on the host: its devices show up as 0 B disks.
 
 ## Testing
 

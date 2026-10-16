@@ -457,7 +457,7 @@ pub(super) fn opt_level_select_page(
     if !installer_core::offline::is_active() {
         let kernel = switch(
             "Build the kernel for this computer",
-            "A ready-made kernel for exactly your hardware is used when there is one, and the closest generic one otherwise. Turn this on to build one from the kernel matrix when there is no ready one: 15 to 60 minutes and about 10 GB of disk space. If the build fails, the generic kernel stays.",
+            "A ready-made kernel for exactly your hardware is used when there is one, and the closest generic one otherwise. Turn this on to build one from the kernel matrix when there is no ready one: 10 to 60 minutes (it depends on the machine) and about 10 GB of disk space. If the build fails, the generic kernel stays.",
             state.build_kernel.get(),
         );
         let state = state.clone();

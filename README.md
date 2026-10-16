@@ -13,16 +13,36 @@ License: [GPL-2.0-or-later](LICENSE).
 
 ## What it does
 
-- **One pipeline.** The TUI, the GUI and `--headless` run the same 15 phases (`installer-core/src/phase/`):
-  preflight, partition, format, mount, deploy, portage config, fstab, locale, users, GPU, desktop, packages,
-  bootloader, post hooks, finalize. A journal (`/run/installer/journal.json`) lets a failed install be
-  **resumed**: destructive phases are skipped on the journal alone, the others only if their result is still on the disk.
+- **One pipeline.** The TUI, the GUI and `--headless` run the same 16 phases (`installer-core/src/phase/`):
+  preflight, partition, format, mount, deploy, portage config, fstab, locale, users, kernel build (optional), GPU, desktop,
+  packages, bootloader, post hooks, finalize. A journal (`/run/installer/journal.json`) lets a failed install be
+  **resumed**: destructive phases are skipped on the journal alone, the others only if their result is still on the disk. The journal also keeps the
+  disk layout the run made, so a resume never plans again from a disk that already has the new partitions.
   Every shell-out goes through a `CommandRunner`, so the logic is unit-tested without root or a disk.
 - **Hardware-matched kernel.** `hardware::Profile::detect()` reads CPU microarchitecture, GPU vendor(s) and
   laptop/desktop, and `kernel::resolve` picks a prebuilt kernel from the store, falling back step by step (platform,
   then CPU, then GPU) down to a generic x86-64 v2/v3 build. Nothing is compiled on the machine, and `emerge` is not
   used for the kernel: deployment is a file copy plus its modules. An unrecognised CPU gets the generic build rather than
   a guess that could use instructions it lacks.
+- **Install next to other systems.** Besides erasing a disk, the disk page can use the free space of a GPT disk and keep what is there
+  (`partition::Placement::FreeSpace`): you choose how many GiB to give, the new swap/root/home partitions are made with `sgdisk` at the
+  lowest unused partition numbers inside the free region, an EFI system partition that is already there is mounted and **never formatted**,
+  and the other systems found on it (`EFI/<vendor>/…efi`: Windows, Ubuntu, …) get chainload entries in `limine.conf`; the installer also
+  registers its own UEFI boot entry (`efibootmgr`) and keeps a previous `BOOTX64.EFI`. The page shows what is on the disk now and
+  offers GParted for making room (shrinking is left to it). Headless: `GENTOO_INSTALLER_PLACEMENT=free` (+ `_FREE_GIB`).
+- **Keyboard and time zone.** Several layouts (up to four) with the key that switches them (Caps Lock by default; real Caps Lock is
+  Shift+Caps Lock); on the live medium the chosen layouts are applied to the running niri at once, and they are written into the installed
+  niri's `xkb {}` and `/etc/X11/xorg.conf.d/00-keyboard.conf` (the console takes the first). The time zone page searches cities, capitals
+  and countries (`zone.tab`), and the zone is found from the connection (one request to ipapi.co, in the background, never on an offline image
+  and never over a zone the person picked).
+- **Graphics.** The page names every card found (vendor and model, integrated or discrete), lets you pick the card the desktop is drawn on
+  when there are several, and folds the driver choice into one expander row.
+- **Optional kernel for this computer.** Advanced → Optimization → "Build the kernel for this computer" (off by default; env
+  `GENTOO_INSTALLER_KERNEL_BUILD=1`). When the store has no kernel for *exactly* this hardware, `kernel_build.rs` fetches Linux 7.1.8 (checksum from
+  kernel.org) and the [kernel-matrix](https://github.com/tarilka0gg/kernel-matrix) (`GENTOO_KERNEL_MATRIX_URL` replaces it), merges the seed and
+  the fragments in `build-config.sh`'s order, and builds on the new system (gcc, then clang if gcc fails); the result replaces the store's kernel
+  and its module tree. A failure keeps the ready-made kernel. `/etc/simple-linux/local-kernel` marks the result and `simple-linux-update` leaves it alone.
+  Checked in a VM (7 jobs): built and booted, and the build took far less than the planning figure of 10 to 60 minutes (it depends on the machine); about 10 GB of disk.
 - **Binary packages.** Software comes prebuilt from Gentoo's binhost and from the project's own
   ([simple-linux-binhost](https://github.com/tarilka0gg/simple-linux-binhost): niri, Noctalia, ghostty, packages whose USE
   the installer changes). A binary is used only if its USE flags match, so what the installer asks for is pinned in
@@ -80,7 +100,7 @@ packaging/                 tarball + Gentoo ebuild for the installer itself
 
 ```
 cargo build --release                 # installer-gui needs GTK4 + libadwaita
-cargo fmt --check && cargo test       # about 180 core tests and 17 CLI tests; CI runs the same
+cargo fmt --check && cargo test       # about 195 core tests and 17 CLI tests; CI runs the same
 ```
 
 A few tests need root, a stage3 or QEMU and are `#[ignore]`d:
@@ -107,15 +127,17 @@ image onto a blank disk, then booting the installed disk. `iso/test/` has the he
 | Variable | Meaning |
 |---|---|
 | `GENTOO_INSTALLER_DISK`, `_CONFIRM_ERASE` | target disk; the confirmation must repeat the path |
-| `_USERNAME`, `_PASSWORD`, `_HOSTNAME` | first account and host name |
-| `_LOCALES`, `_TIMEZONE`, `_KEYBOARD` | comma-separated locales; otherwise guessed from the keyboard |
+| `_USERNAME`, `_PASSWORD`, `_HOSTNAME` | first account and host name (default `simple-linux`) |
+| `_LOCALES`, `_TIMEZONE`, `_KEYBOARD`, `_KEYBOARD_OPTIONS` | comma-separated locales; layouts as `us,ua` and XKB options (`grp:caps_toggle`); otherwise guessed from the keyboard |
+| `_PLACEMENT=free`, `_FREE_GIB` | install into the largest free region of a GPT disk (optionally only that many GiB) and keep what is there |
+| `_KERNEL_BUILD=1` | build the kernel for this computer from the kernel matrix when the store has none for it |
 | `_PACKAGES` | software group ids (`terminal,browser,dev`…); default: the ticked-by-default groups |
 | `_WM` | `niri` (default), `hyprland`, `sway`, `labwc`, `mangowc`, `dwl`, `none` |
 | `_GPU` | `nvidia`, `nouveau`, `amd`, `intel`, `xe`, `none`; detection is the default |
 | `_RENDER`, `_OPT_LEVEL`, `_SECUREBOOT`, `_PACKAGE_MODE` | render GPU, optimisation level, Secure Boot, binary or source packages |
 | `_USTAN=0`, `_STORE=0` | do not copy ustan / Portage Store from the live image |
 | `_STAGE3_URL`, `_STAGE3_SHA512` | custom stage3 |
-| `GENTOO_STORE_BINHOST_URL`, `_OVERLAY_URL`, `GENTOO_BINHOST_URL`, `GENTOO_WM_CONFIGS_URL` | store, project binhost, wm-configs repo; defaults point at the public release |
+| `GENTOO_STORE_BINHOST_URL`, `_OVERLAY_URL`, `GENTOO_BINHOST_URL`, `GENTOO_WM_CONFIGS_URL`, `GENTOO_KERNEL_MATRIX_URL` | store, project binhost, wm-configs repo, kernel-matrix repo; defaults point at the public ones |
 
 (All except the `GENTOO_STORE_*`, `GENTOO_BINHOST_URL` and `GENTOO_WM_CONFIGS_URL` ones start with `GENTOO_INSTALLER`.)
 `--resume` continues the unfinished install this live session remembers.
@@ -165,13 +187,14 @@ boot on BIOS and UEFI, and from Ventoy (grub2 mode and, since 0.2.15, normal mod
 ## Status
 
 Verified in QEMU/KVM, not only in unit tests: full headless installs (default and all software groups, binary only), the installed disk booting to a login with the right user, shell, subvolumes and services, resume after a failed phase, the
-offline GUI image installing with the outside network blocked, both images on BIOS and UEFI, and the GUI wizard on a virtual 3D GPU.
+offline GUI image installing with the outside network blocked, a headless install into the free space of a disk that holds other systems (they stayed intact,
+the Limine menu listed them, the new system booted), an install that built its own kernel from the kernel matrix (booted on it), both images on BIOS and UEFI, and the GUI wizard on a virtual 3D GPU.
 
-**Not verified:** real hardware beyond the author's machines; a picture of the *installed* desktop in a VM (the generic kernels have no virtual-GPU driver); the graphical wizard end to end after the latest changes;
-an end-to-end offline install from the minimal image; the Wi-Fi flow against a real `iwd`; Secure Boot of an installed system under OVMF; LUKS (not implemented).
+**Not verified:** real hardware beyond the author's machines; a picture of the *installed* desktop in a VM (the generic kernels have no virtual-GPU driver); the graphical wizard end to end after the latest changes (the free-space choice and the layouts were only looked at, not driven through an install);
+an end-to-end offline install from the minimal image; the kernel build with clang or for NVIDIA; booting the other systems from the Limine menu; the Wi-Fi flow against a real `iwd`; Secure Boot of an installed system under OVMF; LUKS (not implemented).
 
 **Known gaps:** `CommandRunner` covers shell-outs, not HTTP, so downloads are tested in a VM rather than in `cargo test`; `useradd -p` skips the password-quality check that `chpasswd` would apply; the GUI has no page for the host name and locale list
-(`gentoo` / `en_US.UTF-8` defaults, or the environment); no translated installer UI.
+(`simple-linux` / `en_US.UTF-8` defaults, or the environment); the text installer has no free-space or layout choice (environment only); no translated installer UI.
 
 ## Packaging
 
