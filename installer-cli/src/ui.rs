@@ -488,10 +488,14 @@ fn draw(frame: &mut ratatui::Frame, state: &AppState) {
 
 fn draw_network(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
     if state.ethernet_up {
-        let body = Paragraph::new(
-            "Ethernet link detected — network already up.\n\n[Enter] continue  [q] quit",
-        )
-        .block(Block::default().borders(Borders::ALL).title("Network"));
+        let text = if installer_core::offline::is_active() {
+            // The step is skipped for an offline medium whatever the cable says: nothing is downloaded.
+            "This image carries everything the install needs: no network is required.\n\n[Enter] continue  [q] quit"
+        } else {
+            "Ethernet link detected — network already up.\n\n[Enter] continue  [q] quit"
+        };
+        let body =
+            Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Network"));
         frame.render_widget(body, area);
         return;
     }
