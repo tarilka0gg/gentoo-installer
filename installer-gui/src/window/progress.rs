@@ -499,7 +499,7 @@ pub fn build_debug_progress(app: &adw::Application) {
         keyboard_layout: "us".into(),
         keyboard_options: String::new(),
         timezone: "UTC".into(),
-        hostname: "gentoo".into(),
+        hostname: "simple-linux".into(),
         locales: vec!["en_US.UTF-8".into()],
         gpu_override: None,
         render: Default::default(),

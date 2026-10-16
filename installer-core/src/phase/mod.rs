@@ -172,7 +172,7 @@ impl Default for Settings {
             keyboard_layout: "us".to_string(),
             keyboard_options: String::new(),
             locales: vec![crate::locale::DEFAULT_LOCALE.to_string()],
-            hostname: "gentoo".to_string(),
+            hostname: "simple-linux".to_string(),
             account: None,
             stage3: None,
             desktop: true,

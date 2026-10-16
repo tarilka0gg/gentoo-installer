@@ -382,7 +382,8 @@ fn start_install(state: &mut AppState, mode: RunMode) {
         _ => PackageMode::default(),
     };
 
-    let hostname = std::env::var("GENTOO_INSTALLER_HOSTNAME").unwrap_or_else(|_| "gentoo".into());
+    let hostname =
+        std::env::var("GENTOO_INSTALLER_HOSTNAME").unwrap_or_else(|_| "simple-linux".into());
     let guessed = installer_core::autodetect::guess_here();
     let locales: Vec<String> = match std::env::var("GENTOO_INSTALLER_LOCALES") {
         Ok(v) if !v.trim().is_empty() => v.split(',').map(|l| l.trim().to_string()).collect(),

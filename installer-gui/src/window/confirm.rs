@@ -271,7 +271,7 @@ pub(super) fn confirm_page_build(
                 keyboard_layout: state.keyboard_layout.borrow().clone(),
                 keyboard_options: state.keyboard_options.borrow().clone(),
                 timezone: state.timezone.borrow().clone(),
-                hostname: "gentoo".into(),
+                hostname: "simple-linux".into(),
                 locales: installer_core::autodetect::guess_for_layout(
                     &state.keyboard_layout.borrow(),
                 )

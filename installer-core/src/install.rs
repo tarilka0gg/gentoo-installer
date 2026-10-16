@@ -33,7 +33,7 @@ pub struct InstallOptions {
     /// IANA zone name (e.g. "Europe/Kyiv") — auto-detected default, or an Advanced-setup
     /// manual choice.
     pub timezone: String,
-    /// Machine hostname (RFC 1123, lowercase) — `"gentoo"` unless the frontend asks.
+    /// Machine hostname (RFC 1123, lowercase) — `"simple-linux"` unless the frontend asks.
     pub hostname: String,
     /// `locale.gen` entries; the first becomes `LANG`. `["en_US.UTF-8"]` by default.
     pub locales: Vec<String>,
