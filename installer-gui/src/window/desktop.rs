@@ -402,76 +402,78 @@ pub(super) fn opt_level_select_page(
         .halign(gtk::Align::Start)
         .build();
     let body = gtk::Label::builder()
-        .label("-O3 rarely measurably outperforms -O2 outside numeric-heavy code, and makes builds slower and binaries larger. Leave this off unless you have a specific reason.")
+        .label("The defaults suit almost everyone. Change these only when you have a reason.")
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .wrap(true)
         .build();
 
-    let row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(12)
-        .build();
-    let switch_label = gtk::Label::builder()
-        .label("Use -O3")
-        .halign(gtk::Align::Start)
-        .hexpand(true)
-        .build();
-    let switch = gtk::Switch::builder()
-        .active(state.opt_level.get() == OptLevel::O3)
-        .valign(gtk::Align::Center)
-        .build();
+    // One switch per choice, its explanation under it.
+    let group = adw::PreferencesGroup::new();
+    let switch = |title: &str, subtitle: &str, active: bool| {
+        let row = adw::SwitchRow::builder()
+            .use_markup(false)
+            .title(title)
+            .subtitle(subtitle)
+            .active(active)
+            .build();
+        group.add(&row);
+        row
+    };
+
+    let o3 = switch(
+        "Use -O3",
+        "-O3 rarely measurably outperforms -O2 outside numeric-heavy code, and makes builds slower and binaries larger.",
+        state.opt_level.get() == OptLevel::O3,
+    );
     {
         let state = state.clone();
-        switch.connect_state_set(move |_, active| {
-            state
-                .opt_level
-                .set(if active { OptLevel::O3 } else { OptLevel::O2 });
-            glib::Propagation::Proceed
+        o3.connect_active_notify(move |r| {
+            state.opt_level.set(if r.is_active() {
+                OptLevel::O3
+            } else {
+                OptLevel::O2
+            });
         });
     }
-    row.append(&switch_label);
-    row.append(&switch);
 
-    let pkg_body = gtk::Label::builder()
-        .label(
-            "By default the packages come down prebuilt, from Gentoo's package host and from this \
-             project's own (niri, Noctalia and the packages built with different options), instead \
-             of compiling from source. Turning this on compiles everything on this computer, which \
-             takes hours.",
-        )
-        .css_classes(vec!["dim-label".to_string()])
-        .halign(gtk::Align::Start)
-        .wrap(true)
-        .build();
-
-    let pkg_row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(12)
-        .margin_top(12)
-        .build();
-    let pkg_switch_label = gtk::Label::builder()
-        .label("Build everything from source")
-        .halign(gtk::Align::Start)
-        .hexpand(true)
-        .build();
-    let pkg_switch = gtk::Switch::builder()
-        .active(state.package_mode.get() == PackageMode::Source)
-        .valign(gtk::Align::Center)
-        .build();
+    let source = switch(
+        "Build everything from source",
+        "By default the packages come down prebuilt, from Gentoo's package host and from this project's own (niri, Noctalia and the packages built with different options). Turning this on compiles everything on this computer, which takes hours.",
+        state.package_mode.get() == PackageMode::Source,
+    );
     {
         let state = state.clone();
-        pkg_switch.connect_state_set(move |_, active| {
-            state.package_mode.set(if active {
+        source.connect_active_notify(move |r| {
+            state.package_mode.set(if r.is_active() {
                 PackageMode::Source
             } else {
                 PackageMode::default()
             });
-            glib::Propagation::Proceed
         });
     }
-    pkg_row.append(&pkg_switch_label);
-    pkg_row.append(&pkg_switch);
+
+    // Not on an offline image: building needs the kernel sources and the matrix from the network.
+    if !installer_core::offline::is_active() {
+        let kernel = switch(
+            "Build the kernel for this computer",
+            "A ready-made kernel for exactly your hardware is used when there is one, and the closest generic one otherwise. Turn this on to build one from the kernel matrix when there is no ready one: 15 to 60 minutes and about 10 GB of disk space. If the build fails, the generic kernel stays.",
+            state.build_kernel.get(),
+        );
+        let state = state.clone();
+        kernel.connect_active_notify(move |r| state.build_kernel.set(r.is_active()));
+    }
+
+    // Secure Boot only means something on UEFI.
+    if std::path::Path::new("/sys/firmware/efi").is_dir() {
+        let sb = switch(
+            "Prepare Secure Boot",
+            "Signs the bootloader with a key made on this computer, so only the kernel installed here can start. Afterwards you add the certificate (/boot/secureboot/simple-linux-db.cer) to the firmware's Secure Boot keys and turn Secure Boot on. The key is stored unencrypted on the disk.",
+            state.secure_boot.get(),
+        );
+        let state = state.clone();
+        sb.connect_active_notify(move |r| state.secure_boot.set(r.is_active()));
+    }
 
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -483,88 +485,7 @@ pub(super) fn opt_level_select_page(
         .build();
     content.append(&heading);
     content.append(&body);
-    content.append(&row);
-    content.append(&pkg_body);
-    content.append(&pkg_row);
-
-    // Not on an offline image: building needs the kernel sources and the matrix from the network.
-    if !installer_core::offline::is_active() {
-        let kernel_body = gtk::Label::builder()
-            .label(
-                "A ready-made kernel for exactly your hardware is used when there is one, and the closest generic one \
-                 otherwise. Turn this on to build a kernel for your computer from the kernel matrix when there is no \
-                 ready one. It takes 15 to 60 minutes and about 10 GB of disk space; if the build fails, the generic \
-                 kernel stays.",
-            )
-            .css_classes(vec!["dim-label".to_string()])
-            .halign(gtk::Align::Start)
-            .wrap(true)
-            .build();
-        let kernel_row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(12)
-            .margin_top(12)
-            .build();
-        let kernel_label = gtk::Label::builder()
-            .label("Build the kernel for this computer")
-            .halign(gtk::Align::Start)
-            .hexpand(true)
-            .build();
-        let kernel_switch = gtk::Switch::builder()
-            .active(state.build_kernel.get())
-            .valign(gtk::Align::Center)
-            .build();
-        {
-            let state = state.clone();
-            kernel_switch.connect_state_set(move |_, active| {
-                state.build_kernel.set(active);
-                glib::Propagation::Proceed
-            });
-        }
-        kernel_row.append(&kernel_label);
-        kernel_row.append(&kernel_switch);
-        content.append(&kernel_body);
-        content.append(&kernel_row);
-    }
-
-    // Secure Boot only means something on UEFI.
-    if std::path::Path::new("/sys/firmware/efi").is_dir() {
-        let sb_body = gtk::Label::builder()
-            .label(
-                "Signs the bootloader with a key made on this computer, so only the kernel installed here can start. \
-                 Afterwards you add the certificate (/boot/secureboot/simple-linux-db.cer) to the firmware's Secure Boot \
-                 keys and turn Secure Boot on. The key is stored unencrypted on the disk.",
-            )
-            .css_classes(vec!["dim-label".to_string()])
-            .halign(gtk::Align::Start)
-            .wrap(true)
-            .build();
-        let sb_row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(12)
-            .margin_top(12)
-            .build();
-        let sb_label = gtk::Label::builder()
-            .label("Prepare Secure Boot")
-            .halign(gtk::Align::Start)
-            .hexpand(true)
-            .build();
-        let sb_switch = gtk::Switch::builder()
-            .active(state.secure_boot.get())
-            .valign(gtk::Align::Center)
-            .build();
-        {
-            let state = state.clone();
-            sb_switch.connect_state_set(move |_, active| {
-                state.secure_boot.set(active);
-                glib::Propagation::Proceed
-            });
-        }
-        sb_row.append(&sb_label);
-        sb_row.append(&sb_switch);
-        content.append(&sb_body);
-        content.append(&sb_row);
-    }
+    content.append(&group);
 
     let next_button = gtk::Button::builder()
         .label("Continue")
