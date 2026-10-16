@@ -132,10 +132,10 @@ pub(super) fn gpu_select_page(
             .filter(|g| Some(*g) != detected),
     );
 
-    // One row per driver, all visible: a drop-down's list covers the Continue button below it.
-    let list = gtk::ListBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .css_classes(vec!["boxed-list".to_string()])
+    // The drivers fold into one row: a drop-down's list would cover the Continue button below it, an expander pushes it down.
+    let drivers = adw::ExpanderRow::builder()
+        .title("Driver")
+        .subtitle(choices[0].display_name())
         .build();
     let mut first: Option<gtk::CheckButton> = None;
     for (i, g) in choices.iter().enumerate() {
@@ -151,9 +151,10 @@ pub(super) fn gpu_select_page(
             .activatable_widget(&radio)
             .build();
         row.add_prefix(&radio);
-        list.append(&row);
+        drivers.add_row(&row);
         let state = state.clone();
         let g = *g;
+        let drivers = drivers.clone();
         radio.connect_toggled(move |r| {
             if r.is_active() {
                 // The detected GPU (index 0) leaves the override unset, so a failed detection at install
@@ -163,9 +164,16 @@ pub(super) fn gpu_select_page(
                 } else {
                     Some(g)
                 });
+                drivers.set_subtitle(g.display_name());
+                drivers.set_expanded(false);
             }
         });
     }
+    let list = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .css_classes(vec!["boxed-list".to_string()])
+        .build();
+    list.append(&drivers);
 
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -245,12 +253,6 @@ pub(super) fn gpu_select_page(
         }
         content.append(&render);
     }
-    let driver_label = gtk::Label::builder()
-        .label("Driver")
-        .css_classes(vec!["section-heading".to_string()])
-        .halign(gtk::Align::Start)
-        .build();
-    content.append(&driver_label);
     content.append(&list);
     let next_button = gtk::Button::builder()
         .label("Continue")

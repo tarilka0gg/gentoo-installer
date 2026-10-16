@@ -2,10 +2,10 @@ use super::*;
 
 /// Keys that switch between layouts: label, XKB option.
 const SWITCH_KEYS: &[(&str, &str)] = &[
+    ("Caps Lock", "grp:caps_toggle"),
     ("Alt + Shift", "grp:alt_shift_toggle"),
     ("Ctrl + Shift", "grp:ctrl_shift_toggle"),
     ("Super + Space", "grp:win_space_toggle"),
-    ("Caps Lock", "grp:caps_toggle"),
     ("Alt + Space", "grp:alt_space_toggle"),
 ];
 
@@ -107,6 +107,15 @@ fn keyboard_refresh(ui: &Rc<KeyboardUi>) {
         ui.list.append(&row);
     }
     ui.switch_group.set_visible(chosen.len() > 1);
+    // With Caps Lock as the switch key the real Caps Lock moves to Shift + Caps Lock.
+    let caps = SWITCH_KEYS
+        .get(ui.switch_key.selected() as usize)
+        .is_some_and(|(_, o)| *o == "grp:caps_toggle");
+    ui.switch_group.set_description(if caps {
+        Some("Press Shift + Caps Lock to use it as a regular Caps Lock.")
+    } else {
+        None
+    });
     let layouts = chosen.join(",");
     let options = if chosen.len() > 1 {
         SWITCH_KEYS
@@ -386,16 +395,38 @@ pub(super) fn timezone_select_page(
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .build();
+    // Selecting a row from code (the connection's answer) is not the person's choice.
+    let by_code = Rc::new(Cell::new(false));
     {
         let state = state.clone();
         let zones = zones.clone();
         let chosen_label = chosen_label.clone();
+        let by_code = by_code.clone();
         list.connect_row_selected(move |_, row| {
             if let Some(z) = row.and_then(|r| zones.get(r.index() as usize)) {
                 *state.timezone.borrow_mut() = z.id.clone();
+                if !by_code.get() {
+                    state.timezone_touched.set(true);
+                }
                 chosen_label.set_label(&format!("Selected: {}", z.id));
             }
         });
+    }
+    {
+        let list = list.clone();
+        let zones = zones.clone();
+        let chosen_label = chosen_label.clone();
+        let by_code = by_code.clone();
+        *state.tz_select.borrow_mut() = Some(Rc::new(move |zone: &str| {
+            if let Some(i) = zones.iter().position(|z| z.id == zone) {
+                if let Some(row) = list.row_at_index(i as i32) {
+                    by_code.set(true);
+                    list.select_row(Some(&row));
+                    by_code.set(false);
+                    chosen_label.set_label(&format!("Selected: {zone} (from your connection)"));
+                }
+            }
+        }));
     }
     let list_scroll = gtk::ScrolledWindow::builder()
         .child(&list)

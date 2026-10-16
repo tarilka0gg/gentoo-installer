@@ -75,6 +75,10 @@ struct WizardState {
     /// XKB options, e.g. `grp:alt_shift_toggle`.
     keyboard_options: RefCell<String>,
     timezone: RefCell<String>,
+    /// Set once the person picks a zone themselves: a zone found from the connection later must not replace it.
+    timezone_touched: Cell<bool>,
+    /// Lets the connection's answer select its row on the time zone page.
+    tz_select: RefCell<Option<Rc<dyn Fn(&str)>>>,
     wm: Cell<WmChoice>,
     gpu: Cell<Option<hardware::Gpu>>,
     /// Which graphics card the desktop is drawn on when there are several.
@@ -105,6 +109,8 @@ impl WizardState {
                     .timezone
                     .unwrap_or_else(|| "UTC".to_string()),
             ),
+            timezone_touched: Cell::new(false),
+            tz_select: RefCell::new(None),
             wm: Cell::new(WmChoice::default()),
             gpu: Cell::new(None),
             render: Cell::new(installer_core::gpu::RenderPreference::default()),
@@ -137,6 +143,7 @@ pub fn build(app: &adw::Application) {
 
     let nav = adw::NavigationView::new();
     let state = WizardState::new();
+    detect_timezone_in_background(&state);
 
     let back_button = gtk::Button::from_icon_name("go-previous-symbolic");
     back_button.set_tooltip_text(Some("Back"));
@@ -261,6 +268,41 @@ pub fn build(app: &adw::Application) {
         Ok("optimization") => nav.push(&opt_level_page),
         _ => {}
     }
+}
+
+/// The time zone of this connection, asked for once the network is up (a freshly booted live system may not have it for
+/// a few seconds; tries for about a minute). Used unless the person has chosen a zone: the time zone page follows it too.
+/// Not on an offline image, which is made to need no network.
+fn detect_timezone_in_background(state: &Rc<WizardState>) {
+    if installer_core::offline::is_active() {
+        return;
+    }
+    let (tx, rx) = std_mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for _ in 0..8 {
+            if let Some(zone) = tz::detect_by_ip() {
+                let _ = tx.send(zone);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+    });
+    let state = state.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+        match rx.try_recv() {
+            Err(std_mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Ok(zone) => {
+                if !state.timezone_touched.get() {
+                    *state.timezone.borrow_mut() = zone.clone();
+                    if let Some(select) = state.tz_select.borrow().as_ref() {
+                        select(&zone);
+                    }
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std_mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
 }
 
 /// One shared stylesheet for the whole app — disk-card selection state and the
