@@ -1,358 +1,178 @@
 # Gentoo Installer
 
-Installer for a Gentoo-based distro built on top of a custom Portage store
-(binhost + overlay, see `../portage-store`). Two ISOs, two frontends over one
-shared core:
+The installer and the image build scripts behind [Simple Linux](https://github.com/tarilka0gg/simple-linux),
+a Gentoo-based live system. It installs Gentoo (OpenRC, Limine) onto a disk in about ten minutes, from binary
+packages, with a kernel picked for the machine's hardware.
 
-- **minimal ISO** — no GUI, no WM/DE at all. `installer-cli` (ratatui TUI).
-- **main ISO** — niri + a shell package preinstalled on the target,
-  GTK4 + libadwaita installer (`installer-gui`).
+- **`installer-cli`**: ratatui text installer (and `--headless`), used by the minimal image.
+- **`installer-gui`**: GTK4 + libadwaita wizard, used by the GUI image (niri + Noctalia).
+- **`installer-core`**: everything that actually happens. Both frontends only call into it.
+- **`iso/`**: builds the live images, the offline payload and the release.
 
-Both frontends and `--headless` run the same phase pipeline (`installer-core/src/phase/`), which writes a journal so
-a failed install can be resumed. Everything shells out through a `CommandRunner`, so it is tested without root or a real
-disk. OpenRC only.
+License: [GPL-2.0-or-later](LICENSE).
 
-## Base system
+## What it does
 
-- **Stage3**: official Gentoo `amd64-openrc` autobuild — multilib, non-hardened,
-  OpenRC init. Not building a custom stage3 via catalyst; the distro's identity
-  lives in the overlay/binhost and in the installer itself, not the base tarball.
-  (Deviation from the target spec, which describes unsquashing a single
-  pre-built image — this codebase has no squashfs pipeline; see `phase::deploy`'s
-  doc comment.)
-- **Kernel**: no on-device compilation, and no `emerge` either — deployment is a
-  direct file copy (`kernel::deploy`), not a package install. Precompiled kernel
-  binaries are built ahead of time by `kernel-configs/matrix-build.sh` (real
-  script, `../kernel-releases/`) across a 3-axis matrix — `<cpu>-<gpu>-<platform>`
-  — e.g. `intel-raptorlake-nvidia-laptop`. EC/WMI vendor and modem support are
-  *not* axes: every build always includes all vendor EC/modem drivers as modules
-  (`ec/all` + `modem/all`), since `--skip-modules` means they never affected the
-  bzImage anyway. `server` was also dropped from the platform axis (out of scope
-  for this distro). 378 possible cpu×gpu×platform combinations exist (18 CPU
-  codenames × 7 GPU × 3 platform), 304 are actually built by popularity
-  (`gen-popular-targets.py`'s scoring), so `installer-core::kernel::resolve`
-  degrades through `hardware::Profile::candidates()` (generalize platform → cpu
-  → gpu) rather than requiring an exact match. Detection (`installer-core::hardware`)
-  is real CPU-microarch/GPU/platform sensing — deliberately conservative on CPU:
-  an unrecognized SKU falls back to the generic x86-64-v2/v3 feature-level build
-  rather than guessing a specific codename wrong, since a wrong guess risks a
-  kernel using instructions the CPU doesn't actually support.
-- **Bootloader**: Limine only. No GRUB.
-- **Partitioning**: automatic, no manual step.
-  - ESP: 512 MiB, vfat (required for Limine on UEFI)
-  - swap: always created, sized 1:1 with RAM, clamped to 8–96 GiB
-    (`installer-core::partition::swap_size_gib`) — exists mainly as an
-    overflow buffer for parallel (`-j`) compiles, not for hibernation
-  - root and home: `/` and `/home` are **separate partitions** (so a full home cannot starve the system, nor the reverse; the way a btrfs system
-    runs into ENOSPC). What is left after ESP and swap is cut `root_home_split`: system 20 %, home 80 %; on a disk under 128 GiB system 40 %, home 60 %;
-    the system never gets under 20 GiB, and with under 40 GiB left there is no split (everything in root). btrfs by default: root with subvolumes `@` / `@var` / `@log`,
-    home's own filesystem with `@home`; ext4 (no subvolumes) available as an alternative.
-    No LUKS — considered unnecessary overhead; users who want disk encryption
-    set it up manually.
-- **Network**: iwd over D-Bus, not NetworkManager (too heavy for a live image).
-  Ethernet is autodetected via link state so the wifi step is skippable.
-- **Portage config**: `git init` in the target's `/etc/portage` with a first
-  commit once make.conf/repos/binrepos are written — "what did the installer
-  decide" becomes `git log`, "undo it" becomes `git revert`.
+- **One pipeline.** The TUI, the GUI and `--headless` run the same 15 phases (`installer-core/src/phase/`):
+  preflight, partition, format, mount, deploy, portage config, fstab, locale, users, GPU, desktop, packages,
+  bootloader, post hooks, finalize. A journal (`/run/installer/journal.json`) lets a failed install be
+  **resumed**: destructive phases are skipped on the journal alone, the others only if their result is still on the disk.
+  Every shell-out goes through a `CommandRunner`, so the logic is unit-tested without root or a disk.
+- **Hardware-matched kernel.** `hardware::Profile::detect()` reads CPU microarchitecture, GPU vendor(s) and
+  laptop/desktop, and `kernel::resolve` picks a prebuilt kernel from the store, falling back step by step (platform,
+  then CPU, then GPU) down to a generic x86-64 v2/v3 build. Nothing is compiled on the machine, and `emerge` is not
+  used for the kernel: deployment is a file copy plus its modules. An unrecognised CPU gets the generic build rather than
+  a guess that could use instructions it lacks.
+- **Binary packages.** Software comes prebuilt from Gentoo's binhost and from the project's own
+  ([simple-linux-binhost](https://github.com/tarilka0gg/simple-linux-binhost): niri, Noctalia, ghostty, packages whose USE
+  the installer changes). A binary is used only if its USE flags match, so what the installer asks for is pinned in
+  `installer-core/assets/binhost/` and the binhost is built from the same files. A full install of every software group
+  merged 263 packages in a VM, compiled none, and took about 15 minutes (the default groups: 261 packages, about 10).
+- **Offline install.** The `*-offline.iso` images carry the stage3, kernels, packages, Portage tree, configs and source
+  files on the medium; `offline.rs` serves them on `127.0.0.1` and points every URL at it (see below).
+- **Language and zone** are guessed from the keyboard layout (`ua` gives `uk_UA` + `en_US` and `Europe/Kyiv`).
+- **Every decision is a `git log`.** `/etc/portage` of the target is a git repo with a commit once `make.conf`, repos and
+  binrepos are written.
+- **Desktop**: Noctalia + niri by default; Hyprland, Sway, Labwc, MangoWC and dwl from `simple-linux-configs` presets.
+  Scroll and Triad have no ebuild yet. `GENTOO_INSTALLER_WM=none` installs no desktop.
+- **Extras copied from the live image**: [ustan](https://github.com/tarilka0gg/ustan), Portage Store and
+  [tui-shim](https://github.com/tarilka0gg/tui-shim) (terminal programs as desktop apps).
 
-## Architecture
+## Design choices
+
+- **OpenRC only, no systemd.** Services are enabled through `services.rs` (`rc-update add … default`); the keyboard layout is read from
+  `/etc/conf.d/keymaps`; `XDG_RUNTIME_DIR` is created by an `/etc/local.d` script because there is no elogind.
+- **Stage3**: Gentoo's official `amd64-openrc`, or the project's slimmer one (`iso/make-stage.sh`: fish, eza, dust, gping,
+  micro, no nano). `GENTOO_INSTALLER_STAGE3_URL` (+ `_SHA512`, otherwise `<url>.sha512` is fetched) points the installer at any tarball:
+  `https://`, `file://` or a path. A digest mismatch aborts before anything is unpacked.
+- **Bootloader**: Limine only (BIOS and UEFI). Optional Secure Boot (below).
+- **Partitioning** is automatic: 512 MiB ESP, swap 1:1 with RAM clamped to 8–96 GiB, then `/` and `/home` as **separate
+  partitions** (system 20 % / home 80 %, 40 / 60 under 128 GiB, never under 20 GiB for the system, no split under 40 GiB). btrfs
+  with subvolumes (`@`, `@var`, `@log`, `@home`) by default, ext4 optional. No LUKS yet.
+- **Network**: iwd over D-Bus, not NetworkManager. Ethernet is detected by link state so the Wi-Fi step can be skipped.
+- **Accounts**: root stays locked, the first user is in `wheel` and gets `doas` (`permit :wheel`, no `persist`). Their login shell is fish when the stage has it.
+- **GPU**: every adapter from `lspci` goes into `VIDEO_CARDS`; the compositor renders on the discrete GPU unless
+  `GENTOO_INSTALLER_RENDER=integrated`. The proprietary NVIDIA driver is built on the target against the exact kernel.
+
+## Layout
 
 ```
-installer-core/     lib crate — all real logic, no UI code
-
-  phase/             Phase trait, PhaseId, Ctx, Settings, run_phases — the state machine (15 phases, in order)
-    preflight.rs        disk/firmware/battery/network checks
-    partition.rs        PartitionPhase + FormatPhase (parted, then mkfs)
-    mount.rs             MountPhase
-    deploy.rs            stage3 unpack + kernel match+deploy (~70% of wall-clock)
-    portage_config.rs   hardware-tuned make.conf (written right after Deploy, before any emerge)
-    fstab.rs              FstabPhase
-    locale.rs             LocalePhase: keyboard, time zone, hostname, locale-gen
-    users.rs              UsersPhase: first account + /etc/doas.conf
-    gpu.rs                GpuPhase: on-target Nvidia driver when needed
-    desktop.rs            DesktopPhase: compositor + Noctalia + the user's session files (skipped with WM=none)
-    packages.rs           PackagesPhase: the software groups chosen
-    bootloader.rs        Limine
-    post_hooks.rs        records /etc/portage history
-    finalize.rs          sync + unmount
-  install.rs         InstallOptions -> Settings; run(opts, tx, RunMode::{Fresh,Resume}); the frontends' entry point
-  event.rs           Event enum (PhaseStarted/Progress/Log/PhaseFinished/Failed/Complete)
-  journal.rs         on-disk resume state (/run/installer/journal.json)
-  command.rs         CommandRunner trait + Real/Fake — every shell-out goes through this
-  detect.rs          env/hardware inference for make.conf + confirm screen
-  gpu.rs             every graphics adapter from lspci: VIDEO_CARDS, discrete-first render device
-  autodetect.rs      locales + time zone guessed from the keyboard layout
-
-  Step logic (called by the phases):
-  hardware.rs        CPU/GPU/platform detection -> Profile (3-axis combo)
-  kernel.rs          Profile -> matching build + direct-copy deploy (no emerge)
-  disk.rs            lsblk-backed disk enumeration
-  partition.rs       layout planning + swap sizing + create/format/mount
-  stage3.rs          resolve/download/verify/unpack a stage3 (official, custom URL, or bundled on the medium)
-  bootloader.rs      Limine config generation + install
-  store.rs           writes repos.conf/binrepos.conf, git-clones the overlay
-  fstab.rs           UUID-based /etc/fstab generation
-  locale.rs          locale.gen + locale-gen + LANG, hostname
-  account.rs         useradd (-R target) + doas.conf; timezone.rs / keyboard.rs likewise
-  make_conf.rs       hardware-tuned /etc/portage/make.conf (-march=, MAKEOPTS, ...)
-  gpu_driver.rs       on-target Nvidia driver build against the exact kernel
-  wm.rs              compositor + Noctalia install, preset config from wm-configs, GPU tuning of those configs
-  services.rs        rc-update for dbus, seatd, iwd, ...
-  packages.rs        software groups
-  chroot_emerge.rs   shared chroot/emerge bootstrap (resolv.conf, tree sync, bind mounts)
-  http.rs            tiny shared download helper
-  network.rs         iwd client (zbus) + ethernet link check
-  config.rs          StoreEnv (env-var-sourced store config, shared by frontends)
-
-installer-cli/    ratatui TUI (and `--headless`) — minimal ISO
-installer-gui/    gtk4-rs + libadwaita — main ISO
+installer-core/            library; no UI code
+  phase/                   Phase trait, PhaseId, Ctx, Settings, run_all (state machine) + one file per phase
+  wm/                      compositor install, presets, session files
+  install.rs               InstallOptions -> Settings; run(opts, tx, Fresh|Resume): the frontends' entry point
+  event.rs, journal.rs     event stream, resume state
+  command.rs               CommandRunner (Real / Fake / Streaming)
+  hardware.rs, kernel.rs   detection and kernel match + deploy
+  partition.rs, disk.rs, fstab.rs, bootloader.rs
+  stage3.rs, store.rs, binhost.rs, offline.rs, packages.rs, chroot_emerge.rs
+  make_conf.rs, gpu.rs, gpu_driver.rs, locale.rs, keyboard.rs, timezone.rs, autodetect.rs, account.rs, services.rs
+  network.rs               iwd client (zbus) + link check
+  ustan.rs, portage_store.rs, tui_shim.rs, sltools.rs   things copied from the live image
+  assets/                  binhost USE files, simple-linux-update, …
+installer-cli/             TUI + --headless + Wi-Fi screen (a state machine, unit-tested)
+installer-gui/             GTK4 wizard: welcome, storage, locale, account, desktop, Wi-Fi, confirm, progress
+iso/                       image, offline payload and release scripts (see iso/README.md)
+packaging/                 tarball + Gentoo ebuild for the installer itself
 ```
 
-Both frontends call into `installer-core` only; no step logic lives in them.
+## Building and testing
+
+```
+cargo build --release                 # installer-gui needs GTK4 + libadwaita
+cargo fmt --check && cargo test       # about 180 core tests and 17 CLI tests; CI runs the same
+```
+
+A few tests need root, a stage3 or QEMU and are `#[ignore]`d:
+
+- `installer-core/tests/real_target.rs` runs the locale/user/doas/custom-stage steps with the real command runner against an unpacked stage3 and asks the target's own tools what
+  came out. Run it as root inside `unshare --mount --propagation private`, on btrfs/xfs (each test works on a `cp --reflink` copy, and its cleanup refuses to delete while anything is still mounted under it):
+  ```
+  tar xpf stage3-amd64-openrc-*.tar.xz --xattrs-include='*.*' --numeric-owner -C /path/pristine
+  cargo test -p installer-core --test real_target --no-run
+  sudo GENTOO_INSTALLER_STAGE3=/path/pristine GENTOO_INSTALLER_STAGE3_SYNCED=/path/pristine-synced \
+       unshare --mount --propagation private target/debug/deps/real_target-<hash> --ignored --test-threads=1
+  ```
+- `installer-core/tests/boot_qemu.rs` boots an image.
+
+`GENTOO_INSTALLER_SIMULATE=1` gives a click-through with no disk, network or chroot (`GENTOO_INSTALLER_SIMULATE_SLOW=10` slows it down); `installer-gui --debug-progress` previews the progress page.
+
+Most bugs of the project were found by real runs, not unit tests: a headless install in a VM (output sent to the host) from a minimal
+image onto a blank disk, then booting the installed disk. `iso/test/` has the helpers (QEMU with a virtual 3D GPU, keyboard driver, local store servers).
+
+## Headless install
+
+`installer-cli --headless` runs the whole chain from environment variables and prints the same event stream the GUI shows:
+
+| Variable | Meaning |
+|---|---|
+| `GENTOO_INSTALLER_DISK`, `_CONFIRM_ERASE` | target disk; the confirmation must repeat the path |
+| `_USERNAME`, `_PASSWORD`, `_HOSTNAME` | first account and host name |
+| `_LOCALES`, `_TIMEZONE`, `_KEYBOARD` | comma-separated locales; otherwise guessed from the keyboard |
+| `_PACKAGES` | software group ids (`terminal,browser,dev`…); default: the ticked-by-default groups |
+| `_WM` | `niri` (default), `hyprland`, `sway`, `labwc`, `mangowc`, `dwl`, `none` |
+| `_GPU` | `nvidia`, `nouveau`, `amd`, `intel`, `xe`, `none`; detection is the default |
+| `_RENDER`, `_OPT_LEVEL`, `_SECUREBOOT`, `_PACKAGE_MODE` | render GPU, optimisation level, Secure Boot, binary or source packages |
+| `_USTAN=0`, `_STORE=0` | do not copy ustan / Portage Store from the live image |
+| `_STAGE3_URL`, `_STAGE3_SHA512` | custom stage3 |
+| `GENTOO_STORE_BINHOST_URL`, `_OVERLAY_URL`, `GENTOO_BINHOST_URL`, `GENTOO_WM_CONFIGS_URL` | store, project binhost, wm-configs repo; defaults point at the public release |
+
+(All except the `GENTOO_STORE_*`, `GENTOO_BINHOST_URL` and `GENTOO_WM_CONFIGS_URL` ones start with `GENTOO_INSTALLER`.)
+`--resume` continues the unfinished install this live session remembers.
+
+## Software groups
+
+`installer-core/src/packages.rs`: terminal, browser, CLI tools, development, media, graphics, messaging, office, gaming tools. The defaults are
+terminal, browser and CLI tools. The emerge runs with `--autounmask-write --autounmask-continue`, and every atom was checked on a real
+stage3. Steam and Discord are deliberately not offered (overlay, multilib and licence decisions).
+
+## Binary install details
+
+`PackageMode::Binary` (the default) writes `FEATURES="getbinpkg"`, `EMERGE_DEFAULT_OPTS` and `DONT_MOUNT_BOOT="1"` (the `mount-boot` check of `linux-firmware` aborts in a chroot).
+`binhost::configure` adds the project's host with a higher priority and signature checking on; the key is trusted like `getuto` does it: import,
+`import-ownertrust` **and** `--check-trustdb` (without the last step Portage rejects a validly signed package). In binary mode `make.conf` does not set the machine's `CPU_FLAGS_X86`, and
+`VIDEO_CARDS` is the binhost's set plus what the hardware needs: either would change the USE of `mesa`, `pixman`, … and Portage would compile them.
+
+The Portage tree is the snapshot the packages were built from (`tree.tar.zst`, published beside them), unpacked into `/var/db/repos`; `emerge-webrsync` is the fallback,
+otherwise a newer tree would have versions with no binary. `iso/binhost/` has the builder (`build.sh` in a clean stage3 chroot, `build-variant.sh`, `make-repo.py`, `export-assets.sh`).
+
+## Offline images
+
+`simple-linux-gui-offline.iso` and `simple-linux-minimal-offline.iso` carry a payload (`/run/initramfs/live/offline`, built by `iso/make-offline.sh`): the stage3, the kernel
+store, the binary packages of the default groups (indexes cut per host), the Portage tree, source files, `linux-firmware` and a bare `configs.git`.
+`offline::activate()` starts a small HTTP server on `127.0.0.1` (GET/HEAD/Range) and sets `GENTOO_STORE_BINHOST_URL`, `GENTOO_BINHOST_URL`, `GENTOO_WM_CONFIGS_URL`; `binhost::configure` points Portage's
+`[gentoo]` binrepo and `GENTOO_MIRRORS` at it, and `binhost::restore_online` puts the public URLs back at the end, so the installed system updates normally.
+To fit GitHub's 2 GiB asset limit the payload has no Zen, no optional groups (`NOT_ON_MEDIUM`: browser extras, dev, media, graphics, chat, office, gaming), no non-niri desktops, and a trimmed
+`linux-firmware` (GPU, Wi-Fi, Bluetooth, sound and common Ethernet kept; `emerge -1 sys-kernel/linux-firmware` online restores the rest). The proprietary NVIDIA driver is built on the target and needs a network.
+`GENTOO_OFFLINE_DIR` overrides the payload location.
+
+## After the install
+
+`simple-linux-update` (installed in `/usr/local/sbin`): `check` reports whether the store has a different build of the machine's kernel; `kernel` fetches it, keeps the
+running one as a *previous kernel* boot entry and the newest two module trees; `system` runs `emerge --sync` and `emerge -uDN @world`; no argument does both. A machine with a built-in NVIDIA module is
+refused (`--force` overrides). The store has no version index, so "newer" means "the published file differs".
+
+**Secure Boot** is off by default (Optimization page of the GUI on UEFI; `GENTOO_INSTALLER_SECUREBOOT=1` for TUI and headless). When on, the installer makes an RSA-3072 `db` key for *this machine*
+(`/etc/simple-linux/secureboot`, root only, unencrypted), signs Limine, pins the config and kernel by BLAKE2b like the live images (`iso/secureboot/README.md`), and puts `db.cer` in `/boot/secureboot/` to enrol
+through the firmware menu. The update tool re-signs after a new kernel. Preflight refuses the option when `limine`, `sbsign`, `sbverify`, `b2sum` or `openssl` is missing from the live system.
+
+## Images
+
+`iso/` builds the live images; `iso/release.sh <version> [step…]` runs the whole recipe (build, Limine BIOS stages, rootfs, both ISOs with Secure Boot signing, offline payload and images, stage3 and kernel files, signed
+`SHA256SUMS`). `check` is read-only and refuses a dirty tree, a stale binary or a missing input; pass `PROFILE=` (the saved desktop profile) or the GUI image lacks its dock and colours. It does not commit or publish. The images
+boot on BIOS and UEFI, and from Ventoy (grub2 mode and, since 0.2.15, normal mode). See [iso/README.md](iso/README.md).
 
 ## Status
 
-Workspace builds and passes `cargo fmt --check`, build and tests in CI (GitHub Actions): 173 core and 17 CLI tests, plus
-tests that need root, a stage3 or QEMU and are run by hand (see below).
+Verified in QEMU/KVM, not only in unit tests: full headless installs (default and all software groups, binary only), the installed disk booting to a login with the right user, shell, subvolumes and services, resume after a failed phase, the
+offline GUI image installing with the outside network blocked, both images on BIOS and UEFI, and the GUI wizard on a virtual 3D GPU.
 
-What works, each exercised in a VM or QEMU rather than only in unit tests:
+**Not verified:** real hardware beyond the author's machines; a picture of the *installed* desktop in a VM (the generic kernels have no virtual-GPU driver); the graphical wizard end to end after the latest changes;
+an end-to-end offline install from the minimal image; the Wi-Fi flow against a real `iwd`; Secure Boot of an installed system under OVMF; LUKS (not implemented).
 
-- **One pipeline.** TUI, GUI and `--headless` run the same phases. A failed install can be **resumed** (`r` in the TUI, a
-  button in the GUI, `--resume`): destructive phases are skipped on the journal alone, the others only if their result is
-  still on the disk. The VM test of this found that Deploy could not run twice (fixed: stage-unpacked marker, overlay re-clone).
-- **Hardware.** `Profile::detect()` picks a kernel combo from CPU, GPU and form factor; `make.conf` gets a real `-march=`,
-  `MAKEOPTS`, `CPU_FLAGS_X86` and `VIDEO_CARDS` for **every** adapter (`amdgpu radeonsi`, `intel`, `nvidia`, `virgl` in a VM).
-  The compositor renders on the discrete GPU unless `GENTOO_INSTALLER_RENDER=integrated`: niri's `render-drm-device`,
-  `WLR_DRM_DEVICES`/`AQ_DRM_DEVICES` for the others, and Noctalia's shared GL context off for the proprietary NVIDIA driver.
-- **Language and zone** follow the keyboard layout (`ua` gives `uk_UA` + `en_US` and `Europe/Kyiv`); only unambiguous countries get a zone.
-- **Desktop** (`wm`): Noctalia plus niri (default), Hyprland, Sway, Labwc, MangoWC or dwl, from a wm-configs preset;
-  `GENTOO_INSTALLER_WM=none` installs no desktop.
-- **Kernels** come from a per-hardware store; a full install used `generic-x86-64-v3-none-desktop` from it.
-- **Progress.** `StreamingCommandRunner` sends every line a command prints to the log; `Event::Step` carries what a phase is doing and how far into it (the stage3 download in MB, the
-  unpack from the offset into the tarball read from `/proc`, `>>> Emerging (n of m)`); the GUI's Installing page shows a step list with a spinner, percent and elapsed time and the log.
-  `installer-gui --debug-progress` with `GENTOO_INSTALLER_SIMULATE_SLOW=10` previews it without installing.
-
-Nothing needs to be set: `StoreEnv` defaults to the public release (`config::DEFAULT_KERNELS_URL`, the `kernels` release of simple-linux-binhost, flat assets; `kernel::kernel_asset_url` keeps the `<url>/kernels/<file>` layout for any other store) and has no overlay. `GENTOO_STORE_BINHOST_URL` / `_OVERLAY_URL` / `GENTOO_WM_CONFIGS_URL` override;
-`GENTOO_INSTALLER_SIMULATE=1` gives a click-through with no disk, network or chroot.
-
-**Not checked:** the graphical wizard end to end after the latest changes (the headless runs use the same phases, not the same screens), Secure Boot of an installed system under OVMF with a
-full install, any real hardware.
-
-**Not done:** `Initramfs` is unused (the kernel store ships ready-made initramfs-less builds); a plan-JSON driver;
-preset/edition integration from `portage_store`; the iwd passphrase agent is only exercised against a fake (no Wi-Fi radio in the VM);
-LUKS; a translated installer UI (only locale defaults are guessed); any real hardware.
-
-**Known gap**: `CommandRunner` covers shell-outs, not HTTP — `stage3::download`, `store::list_binhost_atoms` and `kernel::deploy`'s
-fetches are real `reqwest` calls with no fake layer, so Deploy is tested in a VM, not in `cargo test`.
-
-## Binary install
-
-The packages are not compiled on the target. `PackageMode::Binary` (the default) writes `FEATURES="getbinpkg"` and `EMERGE_DEFAULT_OPTS="--jobs=… --load-average=…"` and
-`DONT_MOUNT_BOOT="1"` (the `mount-boot` check of `sys-kernel/linux-firmware` aborts in a chroot, where `/proc/mounts` shows the host's path of `/boot`).
-Two binary hosts are used: Gentoo's own, and the project's ([simple-linux-binhost](https://github.com/tarilka0gg/simple-linux-binhost): niri, Noctalia, ghostty, the
-packages whose USE the installer changes), added by `binhost::configure` with a higher priority and signature checking on. The key is trusted the way `getuto` trusts Gentoo's:
-import, `import-ownertrust`, **and** `--check-trustdb` (without the last step gpg reports a good signature from an untrusted key and Portage rejects the package).
-
-A binary is used only when its USE flags equal the machine's, so what the installer asks for is fixed in `installer-core/assets/binhost/` (`package.use`, `package.accept_keywords`,
-`package.license`) and in the group lists (`packages.rs`); the binhost is built with the same files. In binary mode `make.conf` does **not** set this machine's `CPU_FLAGS_X86`, and
-`VIDEO_CARDS` is the binhost's set plus what the hardware needs (`nvidia`, `virgl` in a VM): either of them changes the USE of `pixman`, `flac`, `mesa`, `libdrm`, ... and Portage compiles them.
-`GENTOO_BINHOST_URL` overrides the host (a mirror, a test server), empty or `0` switches the project's host off.
-
-The Portage tree is the snapshot the packages were built from (`tree.tar.zst`, `gentoo/` and `guru/`, published next to them), unpacked into `/var/db/repos`; `emerge-webrsync` is the fallback.
-Otherwise a newer tree has newer versions with no binary and Portage compiles them. `iso/binhost/` has the builder (`build.sh`, in a clean stage3 chroot; `build-variant.sh` for another
-`VIDEO_CARDS`; `make-repo.py` for the published directory; `export-assets.sh` copies what a build converged on into the installer's assets).
-
-Measured in a VM: a full install of every software group merges 263 packages, none compiled (the only "source" merges are `linux-firmware` and `zen-bin`, which are not published and just
-install fetched files), in about 15 minutes; the default groups 261 and about 10.
-
-## After the install: updates and Secure Boot
-
-`simple-linux-update` (in `/usr/local/sbin`, from `installer-core/assets/`) is installed with the system. `check` reports whether the
-store has a different build of this machine's kernel; `kernel` fetches it, keeps the running one as a **previous kernel** boot
-entry (`vmlinuz.old`), extracts the modules and keeps the newest two module trees; `system` runs `emerge --sync` and
-`emerge -uDN @world`; no argument does both. A machine with a built-in NVIDIA module is refused (`--force` overrides): the module is built
-for one exact kernel and the update would leave the desktop without it. ustan and portage-store are not updated by it: they are
-copied from the live image and have no published releases to fetch. The kernel store has no version index either, so "newer" means
-"the published file differs" (ETag, then a byte comparison). Tested against a real `limine`/`sbsign` and a local HTTP store, not on an installed system yet.
-
-**Secure Boot** is off by default (`secure_boot` in `Settings`; the Optimization page of the graphical installer on UEFI,
-`GENTOO_INSTALLER_SECUREBOOT=1` for the TUI and `--headless`). When on, the installer makes an RSA-3072 `db` key for *this machine*
-(`/etc/simple-linux/secureboot`, root only, **unencrypted**: there is no LUKS), signs Limine, pins the config and the kernel by
-BLAKE2b exactly like the live images (`iso/secureboot/README.md`), and puts `db.cer` in `/boot/secureboot/` to enrol through the
-firmware menu. The unsigned originals stay in `/etc/simple-linux/limine.conf` and `/usr/local/share/simple-linux/BOOTX64.EFI`; the update tool
-re-signs after a new kernel, because an unsigned or unpinned kernel does not boot. Preflight refuses the option when the live system lacks
-`limine`, `sbsign`, `sbverify`, `b2sum` or `openssl`. Not tested under OVMF with a full install yet.
-
-## Images, Ventoy, old CPUs
-
-`iso/` builds the live images (see `iso/README.md`). Published as [Simple Linux](https://github.com/tarilka0gg/simple-linux).
-Things the tests of the images found, now fixed: the installer binaries carried a "needs x86-64-v3" note from the build
-machine's libc and did not start on pre-Haswell CPUs (`iso/strip-isa-note.sh`); the images carry `boot/grub/grub.cfg` so
-**Ventoy** can boot them (grub2 mode; BIOS normal mode does not work); `SECUREBOOT_KEYS=` signs Limine and pins the config,
-kernel and initramfs by hash (`iso/secureboot/`).
+**Known gaps:** `CommandRunner` covers shell-outs, not HTTP, so downloads are tested in a VM rather than in `cargo test`; `useradd -p` skips the password-quality check that `chpasswd` would apply; the GUI has no page for the host name and locale list
+(`gentoo` / `en_US.UTF-8` defaults, or the environment); no translated installer UI.
 
 ## Packaging
 
-`packaging/package.sh` builds `dist/gentoo-installer-<version>-linux-<arch>.tar.gz` (binaries, desktop entries, icon,
-metainfo, `install.sh`); `packaging/gentoo/` has a live ebuild. See `packaging/README.md`.
-
-## Known gaps found while adding `Locale`/`Users`
-
-- ~~**The installed system had no way to become root.**~~ **Fixed and verified on a
-  real stage3.** Root is deliberately left locked (`*` in `/etc/shadow`) and the first
-  user goes in `wheel`, but a stage3 ships neither `sudo` nor `doas`, so the account
-  could never administer the machine. `account::configure_privilege` now writes
-  `/etc/doas.conf` (`permit :wheel`) and `account::install_doas` emerges
-  `app-admin/doas`; both `UsersPhase` and `install.rs` (what the frontends
-  drive) call them. A real-target test has a `wheel` user enter their password on a
-  pty and get a root shell, and checks that a wrong password, and a user outside
-  `wheel`, do not. The rule has no `persist` on purpose: Gentoo builds `doas` with
-  `-persist` by default, where the keyword is accepted and silently ignored, and even
-  with `USE=persist` the password was still asked on every call in the chroot test.
-- **Frontends: hostname and locale are wired, but not asked.** `InstallOptions` now has
-  `hostname` and `locales`, and `install.rs` applies them (`locale::apply_hostname`,
-  then `locale::apply`). The TUI reads `GENTOO_INSTALLER_HOSTNAME` / `GENTOO_INSTALLER_LOCALES`
-  (comma-separated); the GUI has no page for them yet and uses `gentoo` / `en_US.UTF-8`.
-  The phase system (`Settings`) is still not driven by either frontend.
-- **`locale-gen` needs `/proc`.** Found by running the step against a real stage3
-  (it compiles the locales, then aborts on `findmnt: can't read /proc/mounts`,
-  leaving `locale -a` at `C, C.utf8, POSIX`); no `FakeCommandRunner` test could have
-  seen it. `locale::apply` now bind-mounts `/proc`, `/sys`, `/dev` around it and always
-  unmounts.
-- **`useradd -p <hash>` skips the password-quality check** (`pam_passwdqc`) that
-  `chpasswd` enforces, so the installer accepts passwords the installed system would
-  refuse to set. Unchanged; noted because a weak password on an account that can
-  `doas` to root matters more than it used to.
-
-## Testing against a real stage3
-
-`installer-core/tests/real_target.rs` runs the `Locale`/`Users` steps with the real
-command runner against an unpacked stage3 and asks the *target's own tools* what came
-out (`locale -a`, `id -nG`, `getent shadow`, a password-vs-hash check, and a `doas`
-login on a pty). Five tests, `#[ignore]`d — they need root, network for the `doas`
-ones, and stage3 trees on btrfs/xfs (each test works on a `cp --reflink` copy):
-
-```bash
-# 1. a pristine stage3, and a second copy with the Portage tree synced (no doas in either)
-tar xpf stage3-amd64-openrc-*.tar.xz --xattrs-include='*.*' --numeric-owner -C /path/pristine
-cp -a --reflink=always /path/pristine /path/pristine-synced      # then run emerge-webrsync
-                                                                   # in it, in an unshare'd chroot
-# 2. build as your user, run as root
-cargo test -p installer-core --test real_target --no-run
-sudo GENTOO_INSTALLER_STAGE3=/path/pristine GENTOO_INSTALLER_STAGE3_SYNCED=/path/pristine-synced \
-     unshare --mount --propagation private \
-     target/debug/deps/real_target-<hash> --ignored --test-threads=1
-```
-
-About 40 s in total. `unshare` keeps the bind mounts these steps make out of the host's mount table even if
-a test dies half-way, and each copy is deleted by a guard that **refuses to delete while
-anything is still mounted under it** (`remove_dir_all` does not stop at mount points and
-would otherwise recurse into the host's real `/dev`).
-
-## OpenRC only
-
-This distribution has no systemd, and the code must not assume one. An audit of every external call and file path
-found three places that did (all fixed): the GUI's *Restart* ran `systemctl reboot` (now `reboot`); the keyboard
-layout was read from systemd's `/etc/vconsole.conf` (now OpenRC's `/etc/conf.d/keymaps`, the systemd file only as a
-fallback); and — the real gap — nothing ever enabled a service on the installed system. `installer-core/src/services.rs`
-is now the one place that does, with `chroot <target> rc-update add <svc> default` (names validated, safe to repeat,
-tested against a real stage3). It is used for: `dbus` + `seatd` and the user's `seat,video,input,audio,render` groups after a
-compositor install (without a seat manager niri cannot open the GPU), and `dbus` + `iwd` for the new default package group
-*Wi-Fi and firmware* (`iwd`, `linux-firmware`, with the firmware licence accepted in `package.license`), so an installed
-laptop can reach the network without Ethernet. Everything else that touches init is plain files that OpenRC reads:
-`/etc/conf.d/hostname`, `/etc/conf.d/keymaps`, `/etc/env.d/02locale`, `/etc/timezone`.
-
-After a finished install the pipeline runs `sync` and `umount -R` on the target, and the frontends offer a reboot: the TUI
-stays on its Done screen (Enter reboots, but only if no step failed; `q` leaves) and the GUI button runs `reboot`.
-Not run end to end yet: the desktop and Wi-Fi steps on a real target (they need a long compile and the network).
-
-## A full run through the TUI, in a VM
-
-The minimal image was booted in QEMU, the TUI driven with the keyboard exactly as a person would (network → disk → *new*
-account screen → confirm), against a local test store, with the desktop (niri + Noctalia, 157 packages, most of them binary
-from Gentoo's binhost) and the Wi-Fi group. It finished with "Install complete", offered a reboot, and the reboot happened.
-The installed disk then booted by itself; the created user logged in with fish, in `wheel`, `seat`, `video`, `render`,
-`input` and `audio`; `dbus`, `seatd` and `iwd` were in the default runlevel and running; `niri`, `noctalia`, `iwctl` and 686
-firmware entries were present; `doas` asked for the user's password.
-
-The run also found, and the code now fixes (each with a test): the TUI read the wm-configs URL from a variable the store config
-does not use and then hid the resulting error (it only reported errors after a `Done` that a failure never sends); the user's
-login shell is fish on a custom stage and fish ignores `~/.bash_profile`, so niri was never started (a fish snippet is written
-now); and nothing created `XDG_RUNTIME_DIR` (`/run/user/<uid>`), because there is neither systemd nor elogind — an
-`/etc/local.d` script does it at boot, with a fallback under `~/.cache`.
-
-With those files in place the session did start (`niri --session` running, seatd up, the runtime directory owned by the user),
-but on that VM niri found no output: the target's Mesa has `iris`/`radeonsi`/`nouveau`/`swrast` and no driver for the virtual GPU,
-and `make.conf` has no `VIDEO_CARDS` when the hardware is a VM. So **a picture of the installed desktop has not been seen**, on real
-hardware or in the VM. Real GPUs have drivers in that Mesa build, but that is an expectation, not a test.
-
-## Wi-Fi in the TUI
-
-With no Ethernet link the TUI scans through `iwd` (the same `IwdClient` the GUI uses), lists the networks
-strongest first, asks for the passphrase (masked, 8–63 characters, `q` and Esc are plain input while typing),
-and offers rescan and skip. The screen is a pure state machine (`installer-cli/src/wifi.rs`, 9 tests); the real
-`iwd` round trip has not been exercised in a VM (there is no Wi-Fi radio there).
-
-## Headless install and what a real run found
-
-`installer-cli --headless` runs the whole phase chain with no screens, configured from the environment
-(`GENTOO_INSTALLER_DISK`, `_CONFIRM_ERASE` — must repeat the disk path —, `_USERNAME`, `_PASSWORD`, the
-`GENTOO_STORE_*` variables, optionally `_HOSTNAME`/`_LOCALES`/`_TIMEZONE`/`_KEYBOARD`/`_STAGE3_URL`, `_PACKAGES` (comma-separated group ids; default the ticked-by-default groups),
-`GENTOO_WM_CONFIGS_URL`, `GENTOO_BINHOST_URL`, `_SECUREBOOT=1`). Its output is the same event stream the GUI shows: every command and what it prints. A full install in a VM
-this way (installer fetched into the live system, output sent to the host over the network) is how most bugs of this release were found: `mangohud`'s GURU dependencies,
-`linux-firmware` in the chroot, the Qt USE for `vlc`.
-`phase::run_all` is the driver: it skips phases whose `is_satisfied` holds, stops at the first failure
-and reports it. `--resume` continues the unfinished install this live session remembers (journal in `/run/installer`), skipping what is
-already done. `GENTOO_INSTALLER_WM=none` installs no desktop (a console-only system).
-
-Running it for real in a VM (live minimal ISO, blank virtio disk, a local test store with the live
-kernel, bundled stage) found four bugs no unit test could: `git commit` in `/etc/portage` needs an
-identity; `Deploy` counted a bare unpacked stage3 as done, so a retry skipped the kernel; `Fstab`
-counted the stage3's own comment-only `/etc/fstab` as written, so the system booted with no `/home`,
-`/var`, `/boot` or swap; and the kernel `.config` had dropped `FRAMEBUFFER_CONSOLE`. All fixed, each with a test. The resulting system booted by itself
-from the installed disk; see `iso/README.md` for what was and was not covered.
-
-## Custom stage3
-
-The installer normally unpacks Gentoo's latest stage3. `GENTOO_INSTALLER_STAGE3_URL` (TUI and GUI;
-`InstallOptions::stage3` / `Settings::stage3` in code) points it at your own tarball instead: an
-`https://` URL, a `file://` path or a plain absolute path, with `GENTOO_INSTALLER_STAGE3_SHA512`
-checked while it downloads (a mismatch aborts before anything is unpacked). For a URL given without a
-digest the installer fetches `<url>.sha512` (`sha512sum` format) and verifies against that. Without the
-variable the installer looks for a stage3 shipped on the live medium (`/run/initramfs/live/stage`, see
-`iso/README.md`) and only then falls back to Gentoo's latest from the mirror. The Simple Linux live
-images set the variable themselves to the latest release's stage3, so they ship none.
-
-`iso/make-stage.sh` builds one: Gentoo's stage3 + fish, eza, dust, gping and micro (installed from
-binary packages, nothing compiled there), `nano` removed, the house aliases in
-`/etc/fish/conf.d/10-house.fish`, and the Portage tree and caches stripped again. The result is
-240 MB (Gentoo's own is 265 MB). The first user is created with fish as login shell when the stage
-has it, otherwise bash; root stays locked either way.
-
-Tested end to end with the real `tar`/`useradd` (`a_custom_stage_is_fetched_verified_unpacked_and_gives_the_user_fish`
-in `installer-core/tests/real_target.rs`: digest mismatch refused, tarball unpacked, user's shell is
-fish). A full install from the custom stage, downloaded from a GitHub release by the live image, was run in a VM:
-the installed system booted with fish, eza, micro and no nano.
-
-## Choices: desktop, graphics driver, software
-
-Advanced setup (GUI) or environment variables (TUI) choose three things:
-
-- **Graphics driver** — `InstallOptions::gpu_override` (`GENTOO_INSTALLER_GPU=nvidia|nouveau|amd|intel|xe|none`).
-  Detection stays the default; the override picks the kernel build in the store and whether
-  the proprietary NVIDIA module is compiled.
-- **Software** — `installer-core/src/packages.rs` holds the groups (terminal, browser, CLI tools,
-  development, media, graphics, messaging, office, gaming tools). `GENTOO_INSTALLER_PACKAGES=terminal,browser,dev`
-  (unset = the defaults: terminal, browser, CLI tools). The emerge runs with
-  `--autounmask-write --autounmask-continue`: on a bare stage3 nearly every desktop package
-  needs a point USE change, and every atom was checked with `emerge -f` on a real stage3.
-  Steam and Discord are deliberately not offered (overlay/multilib/licence decisions).
-- **Desktop** — niri, Hyprland, Sway, Labwc, MangoWC and dwl (`GENTOO_INSTALLER_WM=…`). dwl's config is a C
-  header: the preset's `config.h` goes to `/etc/portage/savedconfig/gui-wm/dwl` with `USE=savedconfig` and
-  is compiled in. Scroll and Triad from `simple-linux-configs` have no ebuild in `gentoo`, `guru` or the local
-  overlays, so they cannot be installed yet.
-
-## License
-
-[GPL-2.0-or-later](LICENSE), matching Portage, Gentoo and this project's sibling
-[portage-store](https://github.com/tarilka0gg/portage-store).
+`packaging/package.sh` builds `dist/gentoo-installer-<version>-linux-<arch>.tar.gz` (binaries, desktop entries, icon, metainfo, `install.sh`); `packaging/gentoo/` has a live ebuild. See [packaging/README.md](packaging/README.md).
