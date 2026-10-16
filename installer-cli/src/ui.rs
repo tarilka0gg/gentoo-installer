@@ -442,6 +442,7 @@ fn start_install(state: &mut AppState, mode: RunMode) {
             .map(|e| e.kernel_base_name)
             .unwrap_or_else(|| "gentoo-diy-kernel".into()),
         keyboard_layout: installer_core::keyboard::detect_current(),
+        keyboard_options: std::env::var("GENTOO_INSTALLER_KEYBOARD_OPTIONS").unwrap_or_default(),
         timezone: guessed.timezone.clone().unwrap_or_else(|| "UTC".into()),
         hostname,
         locales,

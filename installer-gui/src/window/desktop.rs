@@ -94,7 +94,8 @@ pub(super) fn wm_select_page(
 
 /// Advanced-setup only: which GPU driver/kernel build to use. Detection picks the default
 /// (listed first and marked); the rest are for machines where the hardware can't say what
-/// the user wants (nouveau instead of the proprietary driver, for one).
+/// the user wants (nouveau instead of the proprietary driver, for one). With several adapters (a laptop with
+/// integrated and discrete graphics) the page also says which the desktop is drawn on.
 pub(super) fn gpu_select_page(
     nav: adw::NavigationView,
     state: Rc<WizardState>,
@@ -113,6 +114,13 @@ pub(super) fn gpu_select_page(
         .wrap(true)
         .build();
 
+    let adapters = std::process::Command::new("lspci")
+        .args(["-nn", "-D"])
+        .output()
+        .ok()
+        .map(|o| installer_core::gpu::parse_lspci(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
+
     let mut choices: Vec<hardware::Gpu> = Vec::new();
     if let Some(d) = detected {
         choices.push(d);
@@ -123,30 +131,39 @@ pub(super) fn gpu_select_page(
             .copied()
             .filter(|g| Some(*g) != detected),
     );
-    let labels: Vec<String> = choices
-        .iter()
-        .map(|g| {
-            if Some(*g) == detected {
-                format!("{} — detected", g.display_name())
-            } else {
-                g.display_name().to_string()
-            }
-        })
-        .collect();
-    let model = gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
-    let dropdown = gtk::DropDown::builder().model(&model).selected(0).build();
-    {
+
+    // One row per driver, all visible: a drop-down's list covers the Continue button below it.
+    let list = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .css_classes(vec!["boxed-list".to_string()])
+        .build();
+    let mut first: Option<gtk::CheckButton> = None;
+    for (i, g) in choices.iter().enumerate() {
+        let radio = gtk::CheckButton::new();
+        match &first {
+            None => first = Some(radio.clone()),
+            Some(f) => radio.set_group(Some(f)),
+        }
+        radio.set_active(i == 0);
+        let row = adw::ActionRow::builder()
+            .title(g.display_name())
+            .subtitle(if Some(*g) == detected { "detected" } else { "" })
+            .activatable_widget(&radio)
+            .build();
+        row.add_prefix(&radio);
+        list.append(&row);
         let state = state.clone();
-        let choices = choices.clone();
-        dropdown.connect_selected_notify(move |dd| {
-            // Index 0 is the detected GPU: leave the override unset so a failed detection
-            // at install time still falls through to the normal path.
-            let picked = choices.get(dd.selected() as usize).copied();
-            state.gpu.set(if dd.selected() == 0 && detected.is_some() {
-                None
-            } else {
-                picked
-            });
+        let g = *g;
+        radio.connect_toggled(move |r| {
+            if r.is_active() {
+                // The detected GPU (index 0) leaves the override unset, so a failed detection at install
+                // time still falls through to the normal path.
+                state.gpu.set(if i == 0 && detected.is_some() {
+                    None
+                } else {
+                    Some(g)
+                });
+            }
         });
     }
 
@@ -160,7 +177,81 @@ pub(super) fn gpu_select_page(
         .build();
     content.append(&heading);
     content.append(&body);
-    content.append(&dropdown);
+
+    if !adapters.is_empty() {
+        let found = adw::PreferencesGroup::builder()
+            .title(if adapters.len() > 1 {
+                "Graphics cards found"
+            } else {
+                "Graphics card found"
+            })
+            .build();
+        for a in &adapters {
+            found.add(
+                &adw::ActionRow::builder()
+                    .use_markup(false)
+                    .title(&a.description)
+                    .subtitle(&a.pci_addr)
+                    .build(),
+            );
+        }
+        content.append(&found);
+    }
+    if adapters.len() > 1 {
+        // Which one the desktop is drawn on; drivers for every card found are installed either way.
+        let render = adw::PreferencesGroup::builder()
+            .title("Draw the desktop on")
+            .description("Drivers for all the cards are installed. Games and programs can still use the other one.")
+            .build();
+        let auto = gtk::CheckButton::new();
+        let integrated = gtk::CheckButton::new();
+        integrated.set_group(Some(&auto));
+        auto.set_active(state.render.get() == installer_core::gpu::RenderPreference::Auto);
+        integrated
+            .set_active(state.render.get() == installer_core::gpu::RenderPreference::Integrated);
+        let auto_row = adw::ActionRow::builder()
+            .title("The most capable card")
+            .subtitle("The discrete one: smoother, uses more power")
+            .activatable_widget(&auto)
+            .build();
+        auto_row.add_prefix(&auto);
+        let integrated_row = adw::ActionRow::builder()
+            .title("The integrated card")
+            .subtitle("Saves battery on a laptop; the screen is usually wired to it")
+            .activatable_widget(&integrated)
+            .build();
+        integrated_row.add_prefix(&integrated);
+        render.add(&auto_row);
+        render.add(&integrated_row);
+        {
+            let state = state.clone();
+            auto.connect_toggled(move |r| {
+                if r.is_active() {
+                    state
+                        .render
+                        .set(installer_core::gpu::RenderPreference::Auto);
+                }
+            });
+        }
+        {
+            let state = state.clone();
+            integrated.connect_toggled(move |r| {
+                if r.is_active() {
+                    state
+                        .render
+                        .set(installer_core::gpu::RenderPreference::Integrated);
+                }
+            });
+        }
+        content.append(&render);
+    }
+    let driver_label = gtk::Label::builder()
+        .label("Driver")
+        .css_classes(vec!["section-heading".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
+    content.append(&driver_label);
+    content.append(&list);
     let next_button = gtk::Button::builder()
         .label("Continue")
         .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])

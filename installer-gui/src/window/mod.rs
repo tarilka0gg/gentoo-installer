@@ -70,10 +70,15 @@ struct WizardState {
     profile: RefCell<Option<hardware::Profile>>,
     existing_os: RefCell<Option<String>>,
     advanced: Cell<bool>,
+    /// One XKB layout, or several separated by commas (`us,ua`).
     keyboard_layout: RefCell<String>,
+    /// XKB options, e.g. `grp:alt_shift_toggle`.
+    keyboard_options: RefCell<String>,
     timezone: RefCell<String>,
     wm: Cell<WmChoice>,
     gpu: Cell<Option<hardware::Gpu>>,
+    /// Which graphics card the desktop is drawn on when there are several.
+    render: Cell<installer_core::gpu::RenderPreference>,
     packages: RefCell<Vec<String>>,
     opt_level: Cell<OptLevel>,
     package_mode: Cell<PackageMode>,
@@ -94,6 +99,7 @@ impl WizardState {
             existing_os: RefCell::new(None),
             advanced: Cell::new(false),
             keyboard_layout: RefCell::new(keyboard::detect_current()),
+            keyboard_options: RefCell::new(String::new()),
             timezone: RefCell::new(
                 installer_core::autodetect::guess_here()
                     .timezone
@@ -101,6 +107,7 @@ impl WizardState {
             ),
             wm: Cell::new(WmChoice::default()),
             gpu: Cell::new(None),
+            render: Cell::new(installer_core::gpu::RenderPreference::default()),
             packages: RefCell::new(installer_core::packages::default_ids()),
             opt_level: Cell::new(OptLevel::default()),
             package_mode: Cell::new(PackageMode::default()),
@@ -245,6 +252,15 @@ pub fn build(app: &adw::Application) {
         .build();
 
     window.present();
+    // `GENTOO_INSTALLER_GUI_PAGE=keyboard|timezone|gpu|software|optimization` opens the wizard on that page (for looking at it).
+    match std::env::var("GENTOO_INSTALLER_GUI_PAGE").as_deref() {
+        Ok("keyboard") => nav.push(&keyboard_page),
+        Ok("timezone") => nav.push(&timezone_page),
+        Ok("gpu") => nav.push(&gpu_page),
+        Ok("software") => nav.push(&packages_page),
+        Ok("optimization") => nav.push(&opt_level_page),
+        _ => {}
+    }
 }
 
 /// One shared stylesheet for the whole app — disk-card selection state and the

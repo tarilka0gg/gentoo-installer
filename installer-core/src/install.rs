@@ -28,6 +28,8 @@ pub struct InstallOptions {
     /// XKB layout code (e.g. "us", "ua") — auto-detected default, or an Advanced-setup
     /// manual choice.
     pub keyboard_layout: String,
+    /// XKB options (`grp:alt_shift_toggle`...); empty for none.
+    pub keyboard_options: String,
     /// IANA zone name (e.g. "Europe/Kyiv") — auto-detected default, or an Advanced-setup
     /// manual choice.
     pub timezone: String,
@@ -76,6 +78,7 @@ impl InstallOptions {
         let settings = Settings {
             timezone: self.timezone,
             keyboard_layout: self.keyboard_layout,
+            keyboard_options: self.keyboard_options,
             locales: self.locales,
             hostname: self.hostname,
             account: Some(self.account),
@@ -234,6 +237,7 @@ mod tests {
             },
             kernel_base_name: "k".into(),
             keyboard_layout: "ua".into(),
+            keyboard_options: String::new(),
             timezone: "Europe/Kyiv".into(),
             hostname: "h".into(),
             locales: vec!["uk_UA.UTF-8".into()],

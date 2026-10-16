@@ -133,8 +133,11 @@ pub trait Phase: Send + Sync {
 pub struct Settings {
     /// IANA zone, e.g. `Europe/Kyiv`.
     pub timezone: String,
-    /// XKB layout code, e.g. `us` or `ua`.
+    /// XKB layout code, e.g. `us` or `ua`; several, comma-separated (`us,ua`), for a keyboard that switches between layouts
+    /// (the console takes the first).
     pub keyboard_layout: String,
+    /// XKB options, e.g. `grp:alt_shift_toggle` (the key that switches layouts).
+    pub keyboard_options: String,
     /// `locale-gen` names, e.g. `uk_UA.UTF-8`. The first one becomes the system `LANG`.
     pub locales: Vec<String>,
     pub hostname: String,
@@ -167,6 +170,7 @@ impl Default for Settings {
         Self {
             timezone: "UTC".to_string(),
             keyboard_layout: "us".to_string(),
+            keyboard_options: String::new(),
             locales: vec![crate::locale::DEFAULT_LOCALE.to_string()],
             hostname: "gentoo".to_string(),
             account: None,
@@ -502,6 +506,7 @@ mod tests {
         Settings {
             timezone: "Europe/Kyiv".into(),
             keyboard_layout: "ua".into(),
+            keyboard_options: String::new(),
             locales: vec!["uk_UA.UTF-8".into(), "en_US.UTF-8".into()],
             hostname: "solomiya-pc".into(),
             account: Some(Account {

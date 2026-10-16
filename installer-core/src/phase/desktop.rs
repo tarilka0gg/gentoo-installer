@@ -69,6 +69,14 @@ impl Phase for DesktopPhase {
             &render,
         )
         .await?;
+        // The desktop's own keyboard layouts (niri's `xkb {}` is the US layout otherwise), after its config was written.
+        crate::keyboard::apply_session(
+            &ctx.target,
+            &account.username,
+            &ctx.settings.keyboard_layout,
+            &ctx.settings.keyboard_options,
+        )
+        .await?;
         let _ = tx.send(Event::PhaseFinished {
             id: self.id(),
             duration: std::time::Duration::default(),

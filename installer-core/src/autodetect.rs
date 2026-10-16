@@ -67,6 +67,23 @@ pub fn locales_for_layout(layout: &str) -> Vec<String> {
     }
 }
 
+/// The locales for a comma-separated list of layouts (`us,ua`): the first layout's language first (it becomes `LANG`),
+/// then the others', and `en_US.UTF-8` is always there.
+pub fn locales_for_layouts(layouts: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for layout in layouts.split(',').map(str::trim).filter(|l| !l.is_empty()) {
+        for locale in locales_for_layout(layout) {
+            if !out.contains(&locale) {
+                out.push(locale);
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push(DEFAULT_LOCALE.to_string());
+    }
+    out
+}
+
 /// The one time zone of a country, from `zone.tab`'s text: the only row, or the row described as
 /// "most of …". `None` for countries with several equally good zones (a wrong guess is worse than UTC).
 pub fn zone_for_country(zone_tab: &str, country: &str) -> Option<String> {
@@ -88,11 +105,16 @@ pub fn zone_for_country(zone_tab: &str, country: &str) -> Option<String> {
 /// Guess from the keyboard layout and the zone the live system already runs in. A live zone other than UTC
 /// wins (someone set it on purpose); UTC is what a freshly booted ISO has, which says nothing.
 pub fn guess(layout: &str, live_zone: Option<&str>, zone_tab: &Path) -> Guess {
-    let locales = locales_for_layout(layout);
+    let locales = locales_for_layouts(layout);
     let live = live_zone.filter(|z| !z.is_empty() && *z != "UTC" && *z != "Etc/UTC");
     let timezone = live.map(str::to_string).or_else(|| {
-        let (_, _, country) = entry(layout)?;
-        zone_for_country(&std::fs::read_to_string(zone_tab).ok()?, country)
+        let tab = std::fs::read_to_string(zone_tab).ok()?;
+        // The first layout that names a country with a clear zone (`us,ua` has no zone for `us`, `ua` has one).
+        layout
+            .split(',')
+            .map(str::trim)
+            .filter_map(entry)
+            .find_map(|(_, _, country)| zone_for_country(&tab, country))
     });
     Guess { locales, timezone }
 }

@@ -225,6 +225,7 @@ pub(super) fn confirm_page_build(
                     .map(|e| e.kernel_base_name)
                     .unwrap_or_else(|| "gentoo-diy-kernel".into()),
                 keyboard_layout: state.keyboard_layout.borrow().clone(),
+                keyboard_options: state.keyboard_options.borrow().clone(),
                 timezone: state.timezone.borrow().clone(),
                 hostname: "gentoo".into(),
                 locales: installer_core::autodetect::guess_for_layout(
@@ -234,7 +235,7 @@ pub(super) fn confirm_page_build(
                 account,
                 gpu_override: state.gpu.get(),
                 secure_boot: state.secure_boot.get(),
-                render: Default::default(),
+                render: state.render.get(),
                 packages: state.packages.borrow().clone(),
                 stage3: std::env::var("GENTOO_INSTALLER_STAGE3_URL")
                     .ok()

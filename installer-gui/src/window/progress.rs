@@ -497,6 +497,7 @@ pub fn build_debug_progress(app: &adw::Application) {
         },
         kernel_base_name: "k".into(),
         keyboard_layout: "us".into(),
+        keyboard_options: String::new(),
         timezone: "UTC".into(),
         hostname: "gentoo".into(),
         locales: vec!["en_US.UTF-8".into()],

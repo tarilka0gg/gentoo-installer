@@ -33,7 +33,10 @@ impl Phase for LocalePhase {
         Ok(
             read(ctx, "etc/timezone").as_deref() == Some(&format!("{}\n", s.timezone))
                 && read(ctx, "etc/conf.d/keymaps").as_deref()
-                    == Some(&format!("keymap=\"{}\"\n", s.keyboard_layout))
+                    == Some(&format!(
+                        "keymap=\"{}\"\n",
+                        keyboard::primary(&s.keyboard_layout)
+                    ))
                 && read(ctx, "etc/conf.d/hostname").as_deref()
                     == Some(&format!("hostname=\"{}\"\n", s.hostname))
                 && read(ctx, "etc/env.d/02locale").as_deref()

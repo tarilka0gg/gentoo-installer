@@ -78,6 +78,9 @@ pub async fn run() -> Result<()> {
     if let Ok(v) = std::env::var("GENTOO_INSTALLER_KEYBOARD") {
         settings.keyboard_layout = v;
     }
+    if let Ok(v) = std::env::var("GENTOO_INSTALLER_KEYBOARD_OPTIONS") {
+        settings.keyboard_options = v;
+    }
     settings.desktop = std::env::var("GENTOO_INSTALLER_WM").as_deref() != Ok("none");
     settings.ustan = std::env::var("GENTOO_INSTALLER_USTAN").as_deref() != Ok("0");
     settings.portage_store = std::env::var("GENTOO_INSTALLER_STORE").as_deref() != Ok("0");
