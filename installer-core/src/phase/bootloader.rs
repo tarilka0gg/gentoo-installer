@@ -39,7 +39,13 @@ impl Phase for BootloaderPhase {
             ""
         };
         bootloader::configure(ctx.runner.as_ref(), &ctx.target, &ctx.layout, parts, extra).await?;
-        bootloader::install(ctx.runner.as_ref(), &ctx.target, &ctx.layout.disk).await?;
+        bootloader::install(
+            ctx.runner.as_ref(),
+            &ctx.target,
+            &ctx.layout.disk,
+            &parts.esp,
+        )
+        .await?;
         if let Some(pkg) = &ctx.kernel_pkg {
             sltools::install_update_tool(&ctx.target, &ctx.store.binhost_url, &pkg.combo).await?;
         }

@@ -200,9 +200,9 @@ pub(super) fn keyboard_select_page(
         .build();
     for l in &layouts {
         let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(&l.description)
             .subtitle(&l.code)
-            .use_markup(false)
             .activatable(true)
             .build();
         row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
@@ -357,9 +357,9 @@ pub(super) fn timezone_select_page(
             .collect::<Vec<_>>()
             .join(" · ");
         let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(z.city())
             .subtitle(subtitle)
-            .use_markup(false)
             .activatable(true)
             .build();
         list.append(&row);

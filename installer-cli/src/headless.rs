@@ -135,7 +135,7 @@ pub async fn run() -> Result<()> {
         });
 
     let profile = installer_core::hardware::Profile::detect().context("hardware detection")?;
-    let layout = partition::plan(&disk, partition::RootFs::Btrfs, profile.ram_bytes);
+    let layout = plan_layout(&disk, profile.ram_bytes).await?;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut ctx = Ctx::new(
         Arc::new(StreamingCommandRunner::new(tx.clone())),
@@ -187,4 +187,23 @@ pub fn render_from_env() -> installer_core::gpu::RenderPreference {
         Ok("integrated") => installer_core::gpu::RenderPreference::Integrated,
         _ => installer_core::gpu::RenderPreference::Auto,
     }
+}
+
+/// The disk layout from the environment: the whole disk, or with `GENTOO_INSTALLER_PLACEMENT=free` the largest free region of a GPT disk
+/// that keeps its partitions (`GENTOO_INSTALLER_FREE_GIB=60` takes only that much of it). The same choice the graphical installer offers.
+pub async fn plan_layout(disk: &str, ram_bytes: u64) -> anyhow::Result<partition::Layout> {
+    if std::env::var("GENTOO_INSTALLER_PLACEMENT").as_deref() != Ok("free") {
+        return Ok(partition::plan(disk, partition::RootFs::Btrfs, ram_bytes));
+    }
+    let size = std::env::var("GENTOO_INSTALLER_FREE_GIB")
+        .ok()
+        .and_then(|v| v.trim().parse().ok());
+    Ok(partition::plan_next_to_existing(
+        &installer_core::command::RealCommandRunner,
+        disk,
+        partition::RootFs::Btrfs,
+        partition::swap_size_gib(ram_bytes),
+        size,
+    )
+    .await?)
 }

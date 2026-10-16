@@ -36,9 +36,35 @@ fn default_true() -> bool {
     true
 }
 
+/// Where on the disk the system goes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Placement {
+    /// The whole disk, with a fresh partition table: everything on it is lost. The default.
+    #[default]
+    WholeDisk,
+    /// Into a free region of a disk that keeps its partitions (GPT): nothing outside the region is touched.
+    FreeSpace {
+        /// The region, in MiB from the start of the disk (`end_mib` is the first MiB that is not ours).
+        start_mib: u64,
+        end_mib: u64,
+        /// The EFI system partition that is already on the disk and is shared with the other systems; `None` makes one
+        /// in the region.
+        esp: Option<String>,
+        /// The partition numbers the new partitions get (the lowest unused ones, chosen when the plan is made):
+        /// ESP (unused when `esp` is `Some`), swap, root and home (unused when there is no separate home).
+        esp_n: u32,
+        swap_n: u32,
+        root_n: u32,
+        home_n: u32,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layout {
     pub disk: String,
+    /// Whole disk (the default) or a free region of it.
+    #[serde(default)]
+    pub placement: Placement,
     pub esp_size_mib: u64,
     pub swap_gib: u64,
     pub root_fs: RootFs,
@@ -84,10 +110,98 @@ pub fn plan(disk: &str, root_fs: RootFs, ram_bytes: u64) -> Layout {
 pub fn plan_with_swap(disk: &str, root_fs: RootFs, swap_gib: u64) -> Layout {
     Layout {
         disk: disk.to_string(),
+        placement: Placement::WholeDisk,
         esp_size_mib: ESP_SIZE_MIB,
         swap_gib: swap_gib.clamp(SWAP_MIN_GIB, SWAP_MAX_GIB),
         root_fs,
         separate_home: true,
+    }
+}
+
+/// A layout for `region` of a disk that keeps its partitions: `size_gib` of it (all of it when `None`), from its start. Errors say why
+/// the disk cannot take it: not GPT, or too little room.
+pub fn layout_in_free_space(
+    inspection: &crate::disk::Inspection,
+    disk: &str,
+    root_fs: RootFs,
+    swap_gib: u64,
+    region: crate::disk::FreeRegion,
+    size_gib: Option<u64>,
+) -> crate::Result<Layout> {
+    let fail = |msg: String| Err(crate::Error::Other(anyhow::anyhow!(msg)));
+    if inspection.table != "gpt" {
+        return fail(format!(
+            "{disk} has a {} partition table; installing next to other systems needs GPT (use the whole disk, or convert it first)",
+            if inspection.table.is_empty() { "no" } else { inspection.table.as_str() }
+        ));
+    }
+    let esp = inspection.esp().map(|p| p.device.clone());
+    let wanted = size_gib.map_or(region.size_mib(), |g| (g * 1024).min(region.size_mib()));
+    let need = min_free_mib(esp.is_some());
+    if wanted < need {
+        return fail(format!(
+            "{} MiB of free space is too little: the system needs at least {need} MiB",
+            wanted
+        ));
+    }
+    let existing: Vec<u32> = inspection.partitions.iter().map(|p| p.number).collect();
+    Ok(plan_free_space(
+        disk,
+        root_fs,
+        swap_gib,
+        (region.start_mib, region.start_mib + wanted),
+        &existing,
+        esp,
+    ))
+}
+
+/// [`layout_in_free_space`] for the largest free region of `disk`, read now.
+pub async fn plan_next_to_existing(
+    runner: &dyn CommandRunner,
+    disk: &str,
+    root_fs: RootFs,
+    swap_gib: u64,
+    size_gib: Option<u64>,
+) -> crate::Result<Layout> {
+    let inspection = crate::disk::inspect(runner, disk).await?;
+    let Some(region) = inspection.largest_free() else {
+        return Err(crate::Error::Other(anyhow::anyhow!(
+            "{disk} has no free space"
+        )));
+    };
+    layout_in_free_space(&inspection, disk, root_fs, swap_gib, region, size_gib)
+}
+
+/// The smallest free region the installer offers to install into: ESP (when none is shared) + the minimal swap + a usable root.
+pub fn min_free_mib(esp_exists: bool) -> u64 {
+    (if esp_exists { 0 } else { ESP_SIZE_MIB }) + SWAP_MIN_GIB * 1024 + ROOT_MIN_GIB * 1024 + 2
+}
+
+/// A layout that puts the system in `start_mib..end_mib` of `disk`, next to what is already there. `existing` are the numbers of the
+/// partitions that are on the disk; the new ones take the lowest numbers not in it. `esp` is the shared EFI system partition, when
+/// the disk has one.
+pub fn plan_free_space(
+    disk: &str,
+    root_fs: RootFs,
+    swap_gib: u64,
+    (start_mib, end_mib): (u64, u64),
+    existing: &[u32],
+    esp: Option<String>,
+) -> Layout {
+    let mut free_numbers = (1u32..).filter(|n| !existing.contains(n));
+    let mut next = || free_numbers.next().unwrap_or(1);
+    let (esp_n, swap_n, root_n, home_n) = (next(), next(), next(), next());
+    Layout {
+        placement: Placement::FreeSpace {
+            start_mib,
+            end_mib,
+            esp,
+            esp_n,
+            swap_n,
+            root_n,
+            home_n,
+        },
+        ..plan_with_swap(disk, root_fs, swap_gib)
     }
 }
 
@@ -104,7 +218,7 @@ pub struct Partitions {
 
 /// NVMe/mmcblk devices need a `p` before the partition number (`/dev/nvme0n1p1`),
 /// plain disks don't (`/dev/sda1`).
-fn part_device(disk: &str, index: u32) -> String {
+pub fn part_device(disk: &str, index: u32) -> String {
     let needs_p = disk.ends_with(char::is_numeric);
     if needs_p {
         format!("{disk}p{index}")
@@ -117,6 +231,26 @@ fn part_device(disk: &str, index: u32) -> String {
 /// follow only from the disk and the fixed ESP/swap/root order. A resumed install needs them again and
 /// cannot get them from the partitioning step it is skipping.
 pub fn partitions_for(layout: &Layout) -> Partitions {
+    if let Placement::FreeSpace {
+        esp,
+        esp_n,
+        swap_n,
+        root_n,
+        home_n,
+        ..
+    } = &layout.placement
+    {
+        let home = part_device(&layout.disk, *home_n);
+        let has_home = layout.separate_home && std::path::Path::new(&home).exists();
+        return Partitions {
+            esp: esp
+                .clone()
+                .unwrap_or_else(|| part_device(&layout.disk, *esp_n)),
+            swap: part_device(&layout.disk, *swap_n),
+            root: part_device(&layout.disk, *root_n),
+            home: has_home.then_some(home),
+        };
+    }
     // A fourth partition exists only when the split applied to this disk: a resumed install finds out by the device node.
     let home = part_device(&layout.disk, 4);
     let has_home = layout.separate_home && std::path::Path::new(&home).exists();
@@ -146,6 +280,9 @@ pub async fn create_partitions(
     layout: &Layout,
 ) -> crate::Result<Partitions> {
     let disk = &layout.disk;
+    if let Placement::FreeSpace { .. } = &layout.placement {
+        return create_in_free_space(runner, layout).await;
+    }
     let esp_end_mib = 1 + layout.esp_size_mib; // 1MiB alignment gap at the start
     let swap_end_mib = esp_end_mib + layout.swap_gib * 1024;
 
@@ -228,6 +365,78 @@ pub async fn create_partitions(
     })
 }
 
+/// Makes the partitions inside the free region of [`Placement::FreeSpace`] with `sgdisk`, at the numbers the plan chose, and
+/// touches nothing else on the disk.
+async fn create_in_free_space(
+    runner: &dyn CommandRunner,
+    layout: &Layout,
+) -> crate::Result<Partitions> {
+    let Placement::FreeSpace {
+        start_mib,
+        end_mib,
+        esp,
+        esp_n,
+        swap_n,
+        root_n,
+        home_n,
+    } = &layout.placement
+    else {
+        unreachable!("create_in_free_space is only called for FreeSpace");
+    };
+    let disk = &layout.disk;
+    let esp_mib = if esp.is_some() {
+        0
+    } else {
+        layout.esp_size_mib
+    };
+    let region_mib = end_mib.saturating_sub(*start_mib);
+    let split = if layout.separate_home {
+        // The split works on a disk's bytes with a MiB of alignment gap in front and one behind: the region has the same shape.
+        root_home_split(region_mib * 1024 * 1024, esp_mib, layout.swap_gib)
+    } else {
+        None
+    };
+    // (number, start MiB, size MiB, type code, name)
+    let mut cursor = *start_mib;
+    let mut plan: Vec<(u32, u64, u64, &str, &str)> = Vec::new();
+    if esp.is_none() {
+        plan.push((*esp_n, cursor, layout.esp_size_mib, "ef00", "ESP"));
+        cursor += layout.esp_size_mib;
+    }
+    plan.push((*swap_n, cursor, layout.swap_gib * 1024, "8200", "swap"));
+    cursor += layout.swap_gib * 1024;
+    let tail = end_mib.saturating_sub(1); // leave the last MiB, as the whole-disk layout does
+    match split {
+        Some((root_mib, _)) => {
+            plan.push((*root_n, cursor, root_mib, "8300", "root"));
+            cursor += root_mib;
+            plan.push((*home_n, cursor, tail.saturating_sub(cursor), "8300", "home"));
+        }
+        None => plan.push((*root_n, cursor, tail.saturating_sub(cursor), "8300", "root")),
+    }
+    for (number, start, size, code, name) in &plan {
+        runner
+            .run_status(
+                "sgdisk",
+                &[
+                    "-n",
+                    &format!("{number}:{start}M:+{size}M"),
+                    "-t",
+                    &format!("{number}:{code}"),
+                    "-c",
+                    &format!("{number}:{name}"),
+                    disk,
+                ],
+            )
+            .await?;
+    }
+    runner.run_status("partprobe", &[disk]).await.ok();
+    Ok(Partitions {
+        home: split.map(|_| part_device(disk, *home_n)),
+        ..partitions_for(layout)
+    })
+}
+
 /// Formats each partition per `layout.root_fs`, creating the btrfs subvolume layout if
 /// applicable. Assumes `parts` came from `create_partitions` on the same disk.
 pub async fn format_partitions(
@@ -235,9 +444,13 @@ pub async fn format_partitions(
     layout: &Layout,
     parts: &Partitions,
 ) -> crate::Result<()> {
-    runner
-        .run_status("mkfs.vfat", &["-F32", "-n", "ESP", &parts.esp])
-        .await?;
+    // A shared EFI system partition holds the other systems' boot files: it is mounted, never formatted.
+    let esp_is_shared = matches!(&layout.placement, Placement::FreeSpace { esp: Some(_), .. });
+    if !esp_is_shared {
+        runner
+            .run_status("mkfs.vfat", &["-F32", "-n", "ESP", &parts.esp])
+            .await?;
+    }
     runner
         .run_status("mkswap", &["-L", "swap", &parts.swap])
         .await?;
@@ -403,6 +616,91 @@ mod tests {
     #[test]
     fn part_device_sata_no_infix() {
         assert_eq!(part_device("/dev/sda", 2), "/dev/sda2");
+    }
+
+    #[tokio::test]
+    async fn free_space_gets_new_partitions_at_unused_numbers_and_nothing_else_is_touched() {
+        let runner = FakeCommandRunner::new();
+        // A disk with partitions 1 (the shared ESP), 2 and 3 in use; 200 GiB free at the end.
+        let layout = plan_free_space(
+            "/dev/sda",
+            RootFs::Btrfs,
+            8,
+            (300 * 1024, 500 * 1024),
+            &[1, 2, 3],
+            Some("/dev/sda1".into()),
+        );
+        let parts = create_partitions(&runner, &layout).await.unwrap();
+        assert_eq!(parts.esp, "/dev/sda1", "the shared ESP is reused");
+        assert_eq!(parts.swap, "/dev/sda5");
+        assert_eq!(parts.root, "/dev/sda6");
+        let calls = runner.calls();
+        assert!(
+            calls
+                .iter()
+                .all(|(c, _)| c == "sgdisk" || c == "partprobe" || c == "blockdev"),
+            "no mklabel, no wipe: {calls:?}"
+        );
+        // swap 8 GiB first, then root (20 % of the rest), then home
+        runner.assert_call(
+            0,
+            "sgdisk",
+            &[
+                "-n",
+                "5:307200M:+8192M",
+                "-t",
+                "5:8200",
+                "-c",
+                "5:swap",
+                "/dev/sda",
+            ],
+        );
+        let root = calls
+            .iter()
+            .find(|(_, a)| a.iter().any(|x| x.starts_with("6:3")))
+            .unwrap();
+        assert!(root.1[1].starts_with("6:315392M:+"), "{root:?}");
+        let home = calls
+            .iter()
+            .find(|(_, a)| a.iter().any(|x| x.starts_with("7:")))
+            .unwrap();
+        assert!(home.1[1].starts_with("7:"), "{home:?}");
+    }
+
+    #[tokio::test]
+    async fn a_new_esp_is_made_only_when_none_is_shared() {
+        let runner = FakeCommandRunner::new();
+        let layout = plan_free_space("/dev/vda", RootFs::Btrfs, 8, (1024, 60 * 1024), &[], None);
+        create_partitions(&runner, &layout).await.unwrap();
+        runner.assert_call(
+            0,
+            "sgdisk",
+            &[
+                "-n",
+                "1:1024M:+512M",
+                "-t",
+                "1:ef00",
+                "-c",
+                "1:ESP",
+                "/dev/vda",
+            ],
+        );
+        // a shared one is never formatted
+        let shared = plan_free_space(
+            "/dev/vda",
+            RootFs::Btrfs,
+            8,
+            (1024, 60 * 1024),
+            &[1],
+            Some("/dev/vda1".into()),
+        );
+        let runner = FakeCommandRunner::new();
+        let parts = partitions_for(&shared);
+        format_partitions(&runner, &shared, &parts).await.unwrap();
+        assert!(!runner
+            .calls()
+            .iter()
+            .any(|(c, a)| c == "mkfs.vfat" || a.contains(&"/dev/vda1".to_string())));
     }
 
     #[tokio::test]

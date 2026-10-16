@@ -54,11 +54,18 @@ pub(super) fn confirm_page_build(
             false,
         ));
 
-        let erase_line = match state.existing_os.borrow().as_ref() {
-            Some(os) => format!("Erase everything on this disk, including {os}."),
-            None => "Erase everything on this disk.".to_string(),
-        };
-        sentences.append(&sentence(&erase_line, true));
+        if let Some(size) = state.free_space_gib.get() {
+            sentences.append(&sentence(
+                &format!("Use {size} GiB of free space on this disk. What is on it now is not changed; the other systems are added to the boot menu."),
+                false,
+            ));
+        } else {
+            let erase_line = match state.existing_os.borrow().as_ref() {
+                Some(os) => format!("Erase everything on this disk, including {os}."),
+                None => "Erase everything on this disk.".to_string(),
+            };
+            sentences.append(&sentence(&erase_line, true));
+        }
 
         let username = state.username.borrow().clone();
         if !username.is_empty() {
@@ -101,7 +108,10 @@ pub(super) fn confirm_page_build(
 
     if let Some(d) = &disk {
         content.append(&partition_bar(
-            d.size_bytes,
+            state
+                .free_space_gib
+                .get()
+                .map_or(d.size_bytes, |g| g * 1024 * 1024 * 1024),
             state.swap_gib(),
             state.manual_root_fs.get(),
         ));
@@ -187,8 +197,42 @@ pub(super) fn confirm_page_build(
             };
             btn.set_sensitive(false);
 
-            let layout =
-                partition::plan_with_swap(&disk.path, state.manual_root_fs.get(), state.swap_gib());
+            let layout = match state.free_space_gib.get() {
+                None => partition::plan_with_swap(
+                    &disk.path,
+                    state.manual_root_fs.get(),
+                    state.swap_gib(),
+                ),
+                Some(size) => {
+                    // Next to the other systems: never falls back to erasing the disk.
+                    let planned = state
+                        .inspections
+                        .borrow()
+                        .get(&disk.path)
+                        .and_then(|i| i.largest_free().map(|r| (i.clone(), r)))
+                        .ok_or_else(|| "the free space of this disk is not known".to_string())
+                        .and_then(|(inspection, region)| {
+                            partition::layout_in_free_space(
+                                &inspection,
+                                &disk.path,
+                                state.manual_root_fs.get(),
+                                state.swap_gib(),
+                                region,
+                                Some(size),
+                            )
+                            .map_err(|e| e.to_string())
+                        });
+                    match planned {
+                        Ok(layout) => layout,
+                        Err(e) => {
+                            error_label.set_label(&e);
+                            error_label.set_visible(true);
+                            btn.set_sensitive(true);
+                            return;
+                        }
+                    }
+                }
+            };
             let account = if simulate {
                 Account {
                     username: "gentoo".into(),

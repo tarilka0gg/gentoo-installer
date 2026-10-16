@@ -63,9 +63,13 @@ kernel_status() {   # sets NEW=1 when the store has a build that differs from th
 
 write_conf() {   # $1 = plain limine.conf text on stdin-file; adds the "previous kernel" entry and signs when needed
     src=$1
-    sed -i '/^\/Gentoo (previous kernel)/,$d' "$src"
+    # An entry runs to the next line that starts with "/": the other systems' entries after ours are kept.
+    awk '/^\// { skip = ($0 ~ /\(previous kernel\)$/) } !skip { print }' "$src" > "$src.new" && mv "$src.new" "$src"
     if [ -f "$BOOT/vmlinuz.old" ]; then
-        { printf '\n'; sed -n '/^\/Gentoo/,$p' "$src" | sed 's|^/Gentoo.*|/Gentoo (previous kernel)|; s|kernel_path: boot():/[^#[:space:]]*|kernel_path: boot():/vmlinuz.old|'; } >> "$src"
+        awk '/^\/(Gentoo|Simple Linux)$/ { grab = 1; print $0 " (previous kernel)"; next } grab && /^\// { exit } grab { print }' "$src" \
+            | sed 's|kernel_path: boot():/[^#[:space:]]*|kernel_path: boot():/vmlinuz.old|' > "$src.prev"
+        if [ -s "$src.prev" ]; then { printf '\n'; cat "$src.prev"; } >> "$src"; fi
+        rm -f "$src.prev"
     fi
     if [ -d "$SBDIR" ]; then
         ROOT=$BOOT "$SBSIGN" "$SBDIR" "$src" /usr/local/share/simple-linux/BOOTX64.EFI "$BOOT/EFI/BOOT/BOOTX64.EFI" "$BOOT/limine.conf"

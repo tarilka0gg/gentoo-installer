@@ -35,6 +35,7 @@ mod account;
 mod confirm;
 mod desktop;
 mod locale;
+mod placement;
 mod progress;
 mod storage;
 mod welcome;
@@ -43,6 +44,7 @@ use account::*;
 use confirm::*;
 use desktop::*;
 use locale::*;
+use placement::*;
 pub use progress::build_debug_progress;
 use progress::*;
 use storage::*;
@@ -69,6 +71,12 @@ struct WizardState {
     selected_disk: RefCell<Option<disk::Disk>>,
     profile: RefCell<Option<hardware::Profile>>,
     existing_os: RefCell<Option<String>>,
+    /// What `parted` read of each disk's partition table, by device path.
+    inspections: RefCell<HashMap<String, disk::Inspection>>,
+    /// `Some(n)`: install into `n` GiB of the free space of the selected disk and keep what is there; `None`: erase the disk.
+    free_space_gib: Cell<Option<u64>>,
+    /// The rows of "what is on this disk now", kept to be replaced.
+    existing_rows: RefCell<Vec<adw::ActionRow>>,
     advanced: Cell<bool>,
     /// One XKB layout, or several separated by commas (`us,ua`).
     keyboard_layout: RefCell<String>,
@@ -101,6 +109,9 @@ impl WizardState {
             selected_disk: RefCell::new(None),
             profile: RefCell::new(None),
             existing_os: RefCell::new(None),
+            inspections: RefCell::new(HashMap::new()),
+            free_space_gib: Cell::new(None),
+            existing_rows: RefCell::new(Vec::new()),
             advanced: Cell::new(false),
             keyboard_layout: RefCell::new(keyboard::detect_current()),
             keyboard_options: RefCell::new(String::new()),
@@ -264,6 +275,7 @@ pub fn build(app: &adw::Application) {
         Ok("keyboard") => nav.push(&keyboard_page),
         Ok("timezone") => nav.push(&timezone_page),
         Ok("gpu") => nav.push(&gpu_page),
+        Ok("disk") => nav.push(&disk_page),
         Ok("software") => nav.push(&packages_page),
         Ok("optimization") => nav.push(&opt_level_page),
         _ => {}

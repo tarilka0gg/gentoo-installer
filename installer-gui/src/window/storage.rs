@@ -76,7 +76,9 @@ pub(super) fn disk_select_page(
         .wrap(true)
         .build();
     let body = gtk::Label::builder()
-        .label("Everything on the disk you choose will be erased.")
+        .label(
+            "Choose the disk, and whether it is erased or Simple Linux goes next to what is on it.",
+        )
         .css_classes(vec!["dim-label".to_string()])
         .halign(gtk::Align::Start)
         .wrap(true)
@@ -123,6 +125,8 @@ pub(super) fn disk_select_page(
     .join()
     .unwrap_or_default();
 
+    *state.inspections.borrow_mut() = inspect_disks(disks.iter().map(|d| d.path.clone()).collect());
+    let (placement_widget, placement_update) = placement_group(state.clone());
     *state.existing_os.borrow_mut() = existing_os_found.clone();
     if let Some(os) = &existing_os_found {
         let note = gtk::Label::builder()
@@ -158,15 +162,18 @@ pub(super) fn disk_select_page(
                 if first_button.is_none() {
                     button.set_active(true);
                     *state.selected_disk.borrow_mut() = Some(d.clone());
+                    placement_update(d);
                     next_button.set_sensitive(true);
                     first_button = Some(button.clone());
                 }
 
                 let state = state.clone();
                 let d = d.clone();
+                let placement_update = placement_update.clone();
                 button.connect_toggled(move |b| {
                     if b.is_active() {
                         *state.selected_disk.borrow_mut() = Some(d.clone());
+                        placement_update(&d);
                     }
                 });
             }
@@ -216,6 +223,7 @@ pub(super) fn disk_select_page(
     content.append(&body);
     content.append(&profile_label);
     content.append(&cards_box);
+    content.append(&placement_widget);
     content.append(&next_button);
 
     let clamp = adw::Clamp::builder()
