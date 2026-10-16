@@ -38,7 +38,11 @@ pub async fn list(runner: &dyn CommandRunner) -> crate::Result<Vec<Disk>> {
         .into_iter()
         // zram/loop show up as type "disk" too but aren't real install targets.
         .filter(|d| {
-            d.device_type == "disk" && !d.name.starts_with("zram") && !d.name.starts_with("loop")
+            d.device_type == "disk"
+                && !d.name.starts_with("zram")
+                && !d.name.starts_with("loop")
+                // an empty card reader or an unused network block device: nothing to install on
+                && d.size.unwrap_or(0) > 0
         })
         .map(|d| Disk {
             path: format!("/dev/{}", d.name),

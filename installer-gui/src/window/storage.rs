@@ -226,8 +226,12 @@ pub(super) fn disk_select_page(
     content.append(&placement_widget);
     content.append(&next_button);
 
-    let clamp = adw::Clamp::builder()
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(700)
         .build();
 
@@ -392,8 +396,12 @@ pub(super) fn manual_partition_page_build(
         });
     }
 
-    let clamp = adw::Clamp::builder()
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(560)
         .build();
     let page = adw::NavigationPage::builder()

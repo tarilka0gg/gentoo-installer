@@ -174,7 +174,7 @@ pub(super) fn placement_group(state: Rc<WizardState>) -> (gtk::Box, Rc<dyn Fn(&d
                 (
                     false,
                     if inspection.table.is_empty() || inspection.table == "unknown" {
-                        "This disk has no partitions: use the whole disk.".to_string()
+                        "No partition table could be read (the disk is empty, or this is not run as root): use the whole disk.".to_string()
                     } else {
                         format!(
                             "This disk has a {} partition table; installing next to other systems needs GPT.",

@@ -205,8 +205,12 @@ pub(super) fn network_page_build(
         glib::ControlFlow::Continue
     });
 
-    let clamp = adw::Clamp::builder()
+    let scroll = gtk::ScrolledWindow::builder()
         .child(&content)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    let clamp = adw::Clamp::builder()
+        .child(&scroll)
         .maximum_size(560)
         .build();
     let page = adw::NavigationPage::builder()
