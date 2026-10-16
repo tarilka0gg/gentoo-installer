@@ -195,13 +195,23 @@ pub(super) fn gpu_select_page(
             })
             .build();
         for a in &adapters {
-            found.add(
-                &adw::ActionRow::builder()
-                    .use_markup(false)
-                    .title(&a.description)
-                    .subtitle(&a.pci_addr)
-                    .build(),
-            );
+            let row = adw::ActionRow::builder()
+                .use_markup(false)
+                .title(a.display_name())
+                .subtitle(format!(
+                    "{} · {}",
+                    if a.is_discrete(&adapters) {
+                        "Discrete card"
+                    } else {
+                        "Integrated graphics"
+                    },
+                    a.pci_addr
+                ))
+                .build();
+            let icon = gtk::Image::from_icon_name("video-display-symbolic");
+            icon.set_pixel_size(20);
+            row.add_prefix(&icon);
+            found.add(&row);
         }
         content.append(&found);
     }

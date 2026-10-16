@@ -79,6 +79,59 @@ impl GpuDevice {
         }
     }
 
+    /// What a person calls the card: `Intel Raptor Lake-S UHD Graphics`, `NVIDIA GeForce RTX 4070 Max-Q / Mobile`,
+    /// `AMD Radeon RX 6600M`, made out of lspci's `VGA compatible controller [0300]: NVIDIA Corporation AD106M
+    /// [GeForce RTX 4070 Max-Q / Mobile] [10de:2820] (rev a1)`.
+    pub fn display_name(&self) -> String {
+        let text = self
+            .description
+            .split_once("]: ")
+            .map_or(self.description.as_str(), |(_, rest)| rest);
+        // Drop "(rev xx)" and the `[vendor:device]` ids.
+        let text = text.split(" (rev").next().unwrap_or(text);
+        let mut name = String::new();
+        let mut bracketed: Vec<&str> = Vec::new();
+        let mut rest = text;
+        while let Some(open) = rest.find('[') {
+            name.push_str(&rest[..open]);
+            let Some(close) = rest[open..].find(']') else {
+                rest = &rest[open..];
+                break;
+            };
+            let inside = &rest[open + 1..open + close];
+            let is_id = inside.len() == 9 && inside.as_bytes().get(4) == Some(&b':');
+            if !is_id {
+                bracketed.push(inside);
+            }
+            rest = &rest[open + close + 1..];
+        }
+        name.push_str(rest);
+        let name = name.trim();
+        let vendor = match self.vendor {
+            Vendor::Nvidia => "NVIDIA",
+            Vendor::Intel | Vendor::IntelArc => "Intel",
+            Vendor::Amd => "AMD",
+            _ => "",
+        };
+        // The marketing name is the bracket that is not the vendor tag (`[AMD/ATI]`); without one the chip name after the vendor.
+        let model = bracketed
+            .iter()
+            .find(|b| !b.contains("AMD/ATI"))
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| {
+                name.trim_start_matches("Advanced Micro Devices, Inc.")
+                    .trim_start_matches("NVIDIA Corporation")
+                    .trim_start_matches("Intel Corporation")
+                    .trim()
+                    .to_string()
+            });
+        match (vendor.is_empty(), model.is_empty()) {
+            (true, _) => name.to_string(),
+            (false, true) => vendor.to_string(),
+            (false, false) => format!("{vendor} {model}"),
+        }
+    }
+
     /// `/dev/dri/by-path/pci-<addr>-render`: stable across boots, unlike `renderD128`/`renderD129`.
     pub fn render_node(&self) -> String {
         format!("/dev/dri/by-path/pci-{}-render", self.pci_addr)
@@ -216,6 +269,40 @@ impl RenderPlan {
             card_node: chosen.filter(|_| physical > 1).map(GpuDevice::card_node),
             proprietary_nvidia: renders_on_proprietary_nvidia(chosen, nouveau),
         }
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    fn dev(vendor: Vendor, description: &str) -> GpuDevice {
+        GpuDevice {
+            vendor,
+            pci_addr: "0000:00:02.0".into(),
+            device_id: "0000".into(),
+            description: description.into(),
+        }
+    }
+
+    #[test]
+    fn cards_get_names_a_person_would_say() {
+        assert_eq!(
+            dev(Vendor::Intel, "VGA compatible controller [0300]: Intel Corporation Raptor Lake-S UHD Graphics [8086:a78b] (rev 04)").display_name(),
+            "Intel Raptor Lake-S UHD Graphics"
+        );
+        assert_eq!(
+            dev(Vendor::Nvidia, "VGA compatible controller [0300]: NVIDIA Corporation AD106M [GeForce RTX 4070 Max-Q / Mobile] [10de:2820] (rev a1)").display_name(),
+            "NVIDIA GeForce RTX 4070 Max-Q / Mobile"
+        );
+        assert_eq!(
+            dev(Vendor::Amd, "Display controller [0380]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 23 [Radeon RX 6600/6600 XT/6600M] [1002:73ff] (rev c1)").display_name(),
+            "AMD Radeon RX 6600/6600 XT/6600M"
+        );
+        assert_eq!(
+            dev(Vendor::Virtio, "VGA compatible controller [0300]: Red Hat, Inc. Virtio 1.0 GPU [1af4:1050] (rev 01)").display_name(),
+            "Red Hat, Inc. Virtio 1.0 GPU"
+        );
     }
 }
 
