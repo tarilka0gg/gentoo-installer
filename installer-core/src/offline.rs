@@ -73,7 +73,9 @@ pub fn activate() -> Option<u16> {
 
 /// Software groups whose packages do not fit on the medium (GitHub takes no file over 2 GiB; LibreOffice alone is 200 MB, Zen 105 MB). Offline they are not offered and an id given
 /// by hand is ignored; the group can be installed on the finished system, with a network.
-pub const NOT_ON_MEDIUM: &[&str] = &["browser", "dev", "media", "graphics", "chat", "office", "gaming"];
+pub const NOT_ON_MEDIUM: &[&str] = &[
+    "browser", "dev", "media", "graphics", "chat", "office", "gaming",
+];
 
 /// Can this software group be installed from here? Always, except on an offline medium that left it out.
 pub fn group_available(id: &str) -> bool {
@@ -112,7 +114,12 @@ fn resolve(root: &Path, request_path: &str) -> Option<PathBuf> {
 
 /// `bytes=a-b`, `bytes=a-` or `bytes=-n` against a file of `len` bytes: the inclusive range, `None` when not satisfiable.
 fn byte_range(header: &str, len: u64) -> Option<(u64, u64)> {
-    let spec = header.trim().strip_prefix("bytes=")?.split(',').next()?.trim();
+    let spec = header
+        .trim()
+        .strip_prefix("bytes=")?
+        .split(',')
+        .next()?
+        .trim();
     let (a, b) = spec.split_once('-')?;
     if len == 0 {
         return None;
@@ -122,7 +129,11 @@ fn byte_range(header: &str, len: u64) -> Option<(u64, u64)> {
         (len.saturating_sub(n), len - 1)
     } else {
         let start: u64 = a.parse().ok()?;
-        let end = if b.is_empty() { len - 1 } else { b.parse::<u64>().ok()?.min(len - 1) };
+        let end = if b.is_empty() {
+            len - 1
+        } else {
+            b.parse::<u64>().ok()?.min(len - 1)
+        };
         (start, end)
     };
     (start <= end && start < len).then_some((start, end))
@@ -149,11 +160,15 @@ fn serve(mut stream: TcpStream, root: &Path) -> std::io::Result<()> {
     }
     let head_only = method == "HEAD";
     if method != "GET" && !head_only {
-        return stream.write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return stream.write_all(
+            b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
     }
     let file = resolve(root, target).filter(|p| p.is_file());
     let Some(path) = file else {
-        return stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return stream.write_all(
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
     };
     let mut f = std::fs::File::open(&path)?;
     let len = f.metadata()?.len();
@@ -190,7 +205,10 @@ mod tests {
     #[test]
     fn requests_cannot_leave_the_root() {
         let root = Path::new("/srv/offline");
-        assert_eq!(resolve(root, "/binhost/Packages"), Some(root.join("binhost/Packages")));
+        assert_eq!(
+            resolve(root, "/binhost/Packages"),
+            Some(root.join("binhost/Packages"))
+        );
         assert_eq!(resolve(root, "/a/b?x=1"), Some(root.join("a/b")));
         assert!(resolve(root, "/../etc/passwd").is_none());
         assert!(resolve(root, "/a/../../b").is_none());
@@ -210,7 +228,8 @@ mod tests {
 
     #[test]
     fn serves_files_with_ranges_and_refuses_the_rest() {
-        let d = std::env::temp_dir().join(format!("gentoo-installer-offline-{}", std::process::id()));
+        let d =
+            std::env::temp_dir().join(format!("gentoo-installer-offline-{}", std::process::id()));
         std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(d.join("sub")).unwrap();
         std::fs::write(d.join("sub/f"), b"0123456789").unwrap();
@@ -230,9 +249,17 @@ mod tests {
             out
         };
         let full = get("GET /sub/f HTTP/1.1\r\nHost: x\r\n\r\n");
-        assert!(full.starts_with("HTTP/1.1 200") && full.ends_with("0123456789"), "{full}");
+        assert!(
+            full.starts_with("HTTP/1.1 200") && full.ends_with("0123456789"),
+            "{full}"
+        );
         let part = get("GET /sub/f HTTP/1.1\r\nRange: bytes=3-5\r\n\r\n");
-        assert!(part.starts_with("HTTP/1.1 206") && part.ends_with("345") && part.contains("bytes 3-5/10"), "{part}");
+        assert!(
+            part.starts_with("HTTP/1.1 206")
+                && part.ends_with("345")
+                && part.contains("bytes 3-5/10"),
+            "{part}"
+        );
         assert!(get("GET /nope HTTP/1.1\r\n\r\n").starts_with("HTTP/1.1 404"));
         assert!(get("GET /../x HTTP/1.1\r\n\r\n").starts_with("HTTP/1.1 404"));
         std::fs::remove_dir_all(&d).ok();

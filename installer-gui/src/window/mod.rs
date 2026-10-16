@@ -161,11 +161,12 @@ pub fn build(app: &adw::Application) {
     // startup, not re-checked live, since link state genuinely won't change mid-wizard
     // on installer hardware.
     // An offline medium needs no network to install, so the step is skipped there too (Wi-Fi is still set up on the installed system).
-    let target_after_prelude = if network::IwdClient::ethernet_link_up() || installer_core::offline::is_active() {
-        disk_page.clone()
-    } else {
-        network_page.clone()
-    };
+    let target_after_prelude =
+        if network::IwdClient::ethernet_link_up() || installer_core::offline::is_active() {
+            disk_page.clone()
+        } else {
+            network_page.clone()
+        };
     let opt_level_page =
         opt_level_select_page(nav.clone(), state.clone(), target_after_prelude.clone());
     let packages_page = packages_select_page(

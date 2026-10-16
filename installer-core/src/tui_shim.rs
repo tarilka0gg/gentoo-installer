@@ -21,7 +21,11 @@ pub fn installed(target: &Path) -> bool {
 
 /// The picker links libadwaita and gtk4-layer-shell; without them the copied binary would not start.
 pub fn target_ready(target: &Path) -> bool {
-    let has = |lib: &str| ["usr/lib64", "usr/lib"].iter().any(|d| target.join(d).join(lib).exists());
+    let has = |lib: &str| {
+        ["usr/lib64", "usr/lib"]
+            .iter()
+            .any(|d| target.join(d).join(lib).exists())
+    };
     has("libadwaita-1.so.0") && has("libgtk4-layer-shell.so.0")
 }
 
@@ -42,7 +46,10 @@ mod tests {
     use super::*;
 
     fn tree(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("gentoo-installer-tuishim-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!(
+            "gentoo-installer-tuishim-{tag}-{}",
+            std::process::id()
+        ));
         std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -63,12 +70,21 @@ mod tests {
         put(&live, BIN, 0o755);
         assert!(install_from_live(&live, &target).await.unwrap().is_empty());
         put(&target, "usr/lib64/libadwaita-1.so.0", 0o755);
-        assert!(install_from_live(&live, &target).await.unwrap().is_empty(), "layer-shell still missing");
+        assert!(
+            install_from_live(&live, &target).await.unwrap().is_empty(),
+            "layer-shell still missing"
+        );
         put(&target, "usr/lib64/libgtk4-layer-shell.so.0", 0o755);
-        assert_eq!(install_from_live(&live, &target).await.unwrap(), ["bin/tui-shim"]);
+        assert_eq!(
+            install_from_live(&live, &target).await.unwrap(),
+            ["bin/tui-shim"]
+        );
         install_from_live(&live, &target).await.unwrap(); // a second run is harmless
         assert!(installed(&target));
-        let mode = std::fs::metadata(target.join("usr/local/bin/tui-shim")).unwrap().permissions().mode();
+        let mode = std::fs::metadata(target.join("usr/local/bin/tui-shim"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o111, 0o111);
     }
 

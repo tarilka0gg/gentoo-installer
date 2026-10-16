@@ -31,7 +31,10 @@ impl Phase for PackagesPhase {
         let shim_done = tui_shim::installed(&ctx.target)
             || !tui_shim::available(Path::new("/"))
             || !tui_shim::target_ready(&ctx.target);
-        Ok(packages::installed(&ctx.target, &ctx.settings.packages) && ustan_done && store_done && shim_done)
+        Ok(packages::installed(&ctx.target, &ctx.settings.packages)
+            && ustan_done
+            && store_done
+            && shim_done)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {

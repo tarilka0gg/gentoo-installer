@@ -71,9 +71,13 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
     // The few packages without a binary (firmware, a screenshot tool) are built from source archives; offline those come from the medium.
     if let Some(mirror) = crate::offline::local_mirror_url() {
         let make_conf = portage.join("make.conf");
-        let mut text = tokio::fs::read_to_string(&make_conf).await.unwrap_or_default();
+        let mut text = tokio::fs::read_to_string(&make_conf)
+            .await
+            .unwrap_or_default();
         if !text.contains(OFFLINE_MIRROR_MARK) {
-            text.push_str(&format!("\n{OFFLINE_MIRROR_MARK}\nGENTOO_MIRRORS=\"{mirror}\"\n"));
+            text.push_str(&format!(
+                "\n{OFFLINE_MIRROR_MARK}\nGENTOO_MIRRORS=\"{mirror}\"\n"
+            ));
             tokio::fs::write(&make_conf, text).await?;
         }
     }
@@ -118,11 +122,15 @@ pub async fn configure(runner: &dyn CommandRunner, target: &Path, url: &str) -> 
 }
 
 /// Marks the `GENTOO_MIRRORS` line an offline install adds to `make.conf` (removed again by `restore_online`).
-const OFFLINE_MIRROR_MARK: &str = "# offline install: source archives from the live medium (removed when the install is done)";
+const OFFLINE_MIRROR_MARK: &str =
+    "# offline install: source archives from the live medium (removed when the install is done)";
 
 /// Where the stage3's own binary host entries wait while an offline install uses the local copy.
 fn stock_dir(binrepos: &Path) -> PathBuf {
-    binrepos.parent().unwrap_or(binrepos).join(".offline-stock-binrepos")
+    binrepos
+        .parent()
+        .unwrap_or(binrepos)
+        .join(".offline-stock-binrepos")
 }
 
 /// Points whichever file of `binrepos.conf` defines the stage3's `[gentoo]` binary host (its name depends on the stage3) at `local`;
@@ -138,7 +146,10 @@ async fn use_local_gentoo(binrepos: &Path, local: &str) -> crate::Result<()> {
         if name == "simple-linux.conf" {
             continue;
         }
-        if tokio::fs::read_to_string(e.path()).await.is_ok_and(|t| t.lines().any(|l| l.trim() == "[gentoo]")) {
+        if tokio::fs::read_to_string(e.path())
+            .await
+            .is_ok_and(|t| t.lines().any(|l| l.trim() == "[gentoo]"))
+        {
             stock.push(e.path());
         }
     }
@@ -164,7 +175,11 @@ async fn use_local_gentoo(binrepos: &Path, local: &str) -> crate::Result<()> {
 pub async fn restore_online(target: &Path) -> crate::Result<()> {
     let binrepos = target.join("etc/portage/binrepos.conf");
     if binrepos.join("simple-linux.conf").is_file() {
-        tokio::fs::write(binrepos.join("simple-linux.conf"), binrepos_conf(DEFAULT_URL)).await?;
+        tokio::fs::write(
+            binrepos.join("simple-linux.conf"),
+            binrepos_conf(DEFAULT_URL),
+        )
+        .await?;
     }
     let stock = stock_dir(&binrepos);
     if let Ok(mut rd) = tokio::fs::read_dir(&stock).await {
@@ -178,7 +193,10 @@ pub async fn restore_online(target: &Path) -> crate::Result<()> {
         if text.contains(OFFLINE_MIRROR_MARK) {
             let kept: Vec<&str> = text
                 .lines()
-                .filter(|l| *l != OFFLINE_MIRROR_MARK && !(l.starts_with("GENTOO_MIRRORS=") && l.contains("127.0.0.1")))
+                .filter(|l| {
+                    *l != OFFLINE_MIRROR_MARK
+                        && !(l.starts_with("GENTOO_MIRRORS=") && l.contains("127.0.0.1"))
+                })
                 .collect();
             tokio::fs::write(&make_conf, format!("{}\n", kept.join("\n"))).await?;
         }
