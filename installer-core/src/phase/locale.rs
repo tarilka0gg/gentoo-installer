@@ -55,6 +55,7 @@ impl Phase for LocalePhase {
         keyboard::apply(&ctx.target, &s.keyboard_layout).await?;
         timezone::apply(&ctx.target, &s.timezone).await?;
         locale::apply_hostname(&ctx.target, &s.hostname).await?;
+        locale::apply_os_release(&ctx.target).await?;
         locale::apply(ctx.runner.as_ref(), &ctx.target, &s.locales).await?;
 
         let _ = tx.send(Event::PhaseFinished {

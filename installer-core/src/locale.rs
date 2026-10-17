@@ -145,10 +145,44 @@ pub async fn apply_hostname(target: &Path, name: &str) -> crate::Result<()> {
     Ok(())
 }
 
+/// The text of the installed system's `/etc/os-release`: it names itself Simple Linux (what Noctalia's System panel, fastfetch and
+/// `hostnamectl`-style tools show). `ID` stays `gentoo`, because tools that look at it (Portage helpers, scripts) mean the package base.
+pub const OS_RELEASE: &str = "NAME='Simple Linux'\nPRETTY_NAME='Simple Linux'\nID='gentoo'\nID_LIKE='gentoo'\n\
+HOME_URL='https://github.com/tarilka0gg/simple-linux'\nBUG_REPORT_URL='https://github.com/tarilka0gg/simple-linux/issues'\nANSI_COLOR='1;36'\n";
+
+/// Replaces the stage3's `/etc/os-release` (a symlink to baselayout's `/usr/lib/os-release`) with a real file. Portage treats `/etc` as
+/// config-protected, so a later baselayout upgrade leaves it alone and puts its own copy next to it as `._cfg*`.
+pub async fn apply_os_release(target: &Path) -> crate::Result<()> {
+    let path = target.join("etc/os-release");
+    tokio::fs::create_dir_all(target.join("etc")).await?;
+    if tokio::fs::symlink_metadata(&path).await.is_ok() {
+        tokio::fs::remove_file(&path).await?;
+    }
+    tokio::fs::write(&path, OS_RELEASE).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::command::FakeCommandRunner;
+
+    #[tokio::test]
+    async fn os_release_replaces_the_symlink_with_a_simple_linux_file() {
+        let dir = temp_target("osrelease");
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::create_dir_all(dir.join("usr/lib")).unwrap();
+        std::fs::write(dir.join("usr/lib/os-release"), "NAME='Gentoo'\n").unwrap();
+        std::os::unix::fs::symlink("../usr/lib/os-release", dir.join("etc/os-release")).unwrap();
+
+        apply_os_release(&dir).await.unwrap();
+
+        assert!(!std::fs::symlink_metadata(dir.join("etc/os-release")).unwrap().file_type().is_symlink());
+        let text = std::fs::read_to_string(dir.join("etc/os-release")).unwrap();
+        assert!(text.contains("PRETTY_NAME='Simple Linux'") && text.contains("ID='gentoo'"));
+        // the package's own file is untouched
+        assert_eq!(std::fs::read_to_string(dir.join("usr/lib/os-release")).unwrap(), "NAME='Gentoo'\n");
+    }
 
     fn temp_target(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(

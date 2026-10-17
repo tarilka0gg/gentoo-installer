@@ -704,6 +704,17 @@ grep -q '^rc_parallel="YES"' "$ROOT/etc/rc.conf" || echo 'rc_parallel="YES"' >> 
 
 echo simple-linux-live > "$ROOT/etc/hostname"
 sed -i 's/^hostname=.*/hostname="simple-linux-live"/' "$ROOT/etc/conf.d/hostname"
+# The system says what it is (Noctalia's System panel, fastfetch): a real /etc/os-release in place of baselayout's symlink. ID stays gentoo.
+rm -f "$ROOT/etc/os-release"
+cat > "$ROOT/etc/os-release" <<'OSREL'
+NAME='Simple Linux'
+PRETTY_NAME='Simple Linux'
+ID='gentoo'
+ID_LIKE='gentoo'
+HOME_URL='https://github.com/tarilka0gg/simple-linux'
+BUG_REPORT_URL='https://github.com/tarilka0gg/simple-linux/issues'
+ANSI_COLOR='1;36'
+OSREL
 
 # Network: dhcpcd for wired links, iwd for Wi-Fi (the installer's network page talks to iwd).
 chroot "$ROOT" rc-update add iwd default >/dev/null 2>&1 || true
