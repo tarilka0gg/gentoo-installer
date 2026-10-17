@@ -7,15 +7,15 @@
 # /var/cache/binhost/{gentoo,simple-linux} of each installed disk under $COLLECT/{gentoo,simple-linux} (cp -rn merges them).
 #
 # Environment (defaults in brackets):
-#   COLLECT [~/gentoo-installer-test/offline-collect]   the packages, as above
-#   KERNEL_STORE [newest ~/gentoo-installer-test/release-*/simple-linux-kernel-store.tar]
+#   COLLECT [~/Documents/work/gentoo-installer-test/offline-collect]   the packages, as above
+#   KERNEL_STORE [newest ~/Documents/work/gentoo-installer-test/release-*/simple-linux-kernel-store.tar]
 #   WM_CONFIGS [sibling simple-linux-configs]           cloned bare into configs.git
 #   OFFLINE_EXCLUDE [libreoffice podman telegram gimp vlc mpv]   path prefixes (space separated) of packages left out; keep in step with offline.rs
 #   GENTOO_INDEX_URL, SL_INDEX_URL, TREE_URL            where the two indexes and the tree snapshot come from
 set -euo pipefail
 OUT=$(readlink -m "${1:?out dir}")
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-T=${T:-$HOME/gentoo-installer-test}
+T=${T:-$HOME/Documents/work/gentoo-installer-test}
 COLLECT=${COLLECT:-$T/offline-collect}
 KERNEL_STORE=${KERNEL_STORE:-$(ls -1 "$T"/release-*/simple-linux-kernel-store.tar | sort -V | tail -n1)}
 WM_CONFIGS=${WM_CONFIGS:-$(cd "$HERE/../.." && pwd)/simple-linux-configs}

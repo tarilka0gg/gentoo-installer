@@ -19,7 +19,7 @@
 # and BUILD-INFO in the release directory records the commit and the binary hashes that went into the images.
 #
 # Environment (defaults in brackets):
-#   T [~/gentoo-installer-test]        work area: iso/ (rootfs trees), release-<version>/, limine-ventoy/, theme-assets/
+#   T [~/Documents/work/gentoo-installer-test]        work area: iso/ (rootfs trees), release-<version>/, limine-ventoy/, theme-assets/
 #   KEYS [~/.config/simple-linux/secureboot]   Secure Boot key set from secureboot/make-keys.sh
 #   OFFLINE_PAYLOAD [$T/offline-payload]   make-offline.sh output, for the offline step
 #   PROFILE [unset]                    make-profile.py output for the GUI image (optional)

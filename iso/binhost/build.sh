@@ -8,7 +8,7 @@
 # <world-file>. Packages come from Gentoo's binhost where they match and are compiled only where they do not. What was compiled
 # ends up, GPG-signed, in <work-dir>/root/var/cache/binpkgs with a Packages index.
 #
-# Inputs, all under $T (default ~/gentoo-installer-test/binhost):
+# Inputs, all under $T (default ~/Documents/work/gentoo-installer-test/binhost):
 #   stage3.tar.xz      the project's stage3 (release asset simple-linux-stage3-amd64-openrc.tar.xz)
 #   tree-*.tar.zst     the Portage tree + GURU snapshot (gentoo/ and guru/); the same snapshot on every machine
 # Outputs: <work-dir>/out/{binpkgs/, binhost-signing.asc (public key), build.log}
@@ -21,7 +21,7 @@ W=$(mkdir -p "${1:?work dir}" && readlink -f "$1"); WORLD=$(readlink -f "${2:?wo
 JOBS=$(nproc); UNPACK_ONLY=
 while [ $# -gt 0 ]; do case $1 in --jobs) JOBS=$2; shift 2 ;; --unpack-only) UNPACK_ONLY=1; shift ;; *) echo "build.sh: unknown $1" >&2; exit 2 ;; esac; done
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-T=${T:-$HOME/gentoo-installer-test/binhost}
+T=${T:-$HOME/Documents/work/gentoo-installer-test/binhost}
 STAGE3=${STAGE3:-$T/stage3.tar.xz}
 TREE=$(ls -1 "$T"/tree-*.tar.zst 2>/dev/null | sort | tail -n1 || true)
 [ "$(id -u)" = 0 ] || { echo "build.sh: run as root" >&2; exit 1; }

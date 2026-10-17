@@ -2,7 +2,7 @@
 //! loopback-file-backed disk instead of real hardware — the spec's own recommended
 //! `--dry-run`-against-a-loopback-file methodology (§10). Not part of the app; a
 //! throwaway example for verifying the pipeline end-to-end against the local test store
-//! set up in ~/gentoo-installer-test/.
+//! set up in ~/Documents/work/gentoo-installer-test/.
 //!
 //! Usage: cargo run --example real_install_test -p installer-cli -- /dev/loopN
 
@@ -29,7 +29,7 @@ async fn main() {
         target: "/mnt/gentoo-installer-test".into(),
         store: store::StoreConfig {
             binhost_url: "http://127.0.0.1:8123".into(),
-            overlay_git_url: "file:///home/tarilka0gg/gentoo-installer-test/test-overlay".into(),
+            overlay_git_url: "file:///home/tarilka0gg/Documents/work/gentoo-installer-test/test-overlay".into(),
             overlay_name: "localrepo".into(),
         },
         kernel_base_name: "gentoo-diy-kernel".into(),
