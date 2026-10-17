@@ -268,6 +268,34 @@ for top in ("usr/lib", "usr/lib64"):
                 print(os.path.relpath(os.path.join(d, f), root))
 BUILDPY
 
+# The compiler and the linker, GRUB, and firmware for hardware that no PC with a screen has. About 65 MB compressed. The live system compiles
+# nothing (the installer chroots into the *target*, which brings its own gcc and binutils for the kernel build), the boot loader is Limine (the
+# ISO's grub.cfg is only a text file for Ventoy), and the firmware dropped here is for SDIO/SoC boards, server NICs and HBAs, TV and capture
+# cards, ISA/PCMCIA-era devices and serial adapters. libgcc_s and libstdc++ stay, nearly everything links them.
+python3 - "$W/$ROOTFS" >> "$W/squashfs-excludes.txt" <<'LEANPY'
+import glob, os, sys
+root = sys.argv[1]
+fw = """ti-connectivity cypress cnm amlogic s5p-mfc* rcar_gen4_pcie.bin r8a779x* ixp4xx wfx rsi rsi_91x.fw libertas mwl8k mwlwifi atmel ath6k
+ueagle-atm moxa keyspan keyspan_pda edgeport whiteheat* ti_3410.fw ti_5052.fw mts_*.fw kaweth ositech yamaha sb16 dsp56k cis matrox r128
+advansys adaptec isci tsse_firmware.bin aeonsemi 3com tehuti cavium hfi1* phanfw.bin myri10ge* vxge ct2fw* ctfw* cbfw* cxgb3 slicoss sxg
+ql2*_fw.bin qlogic dvb* sms1xxx* isdbt* cmmb* tdmb* as102* tlg2300_firmware.bin v4l-cx* go7007 f2255usb.bin cpia2 av7110 s2250* dabusb
+usbdux* lbtf_usb.bin wil6210* agere_* rp2.fw atusb ene-ub6250 vntwusb.fw brcm/brcmfmac*-sdio* brcm/*.txt""".split()
+gcc = "usr/lib/gcc/x86_64-pc-linux-gnu/*"
+tools = ("addr2line ar as c++filt elfedit gprof ld ld.bfd nm objcopy objdump ranlib readelf size strings strip "
+         "gcc gcc-* g++* c++* cc cpp* gcov* gfortran* lto-dump").split()
+paths = ["usr/x86_64-pc-linux-gnu", "usr/lib64/binutils", "boot/grub", "etc/grub.d", "usr/share/grub", "usr/share/grub-themes*",
+         "usr/sbin/grub-*", "usr/bin/grub-*", "usr/lib/grub",
+         gcc + "/include", gcc + "/finclude", gcc + "/install-tools", gcc + "/plugin", gcc + "/*.o", gcc + "/libcc1.so*",
+         gcc + "/libasan*", gcc + "/libtsan*", gcc + "/liblsan*", gcc + "/libubsan*", gcc + "/libhwasan*", gcc + "/libgfortran*",
+         gcc + "/libquadmath*", gcc + "/libitm*", gcc + "/liblto*",
+         "usr/lib64/libbfd*", "usr/lib64/libopcodes*", "usr/lib64/libctf*", "usr/lib64/libsframe*", "usr/lib64/libgprofng*"]
+paths += ["usr/bin/" + t for t in tools] + ["usr/bin/x86_64-pc-linux-gnu-" + t for t in tools]
+paths += ["usr/lib/firmware/" + f for f in fw]
+for pat in paths:
+    for p in sorted(glob.glob(os.path.join(root, pat))):
+        print(os.path.relpath(p, root))
+LEANPY
+
 # More weight the live system never uses:
 #  * /boot of the rootfs holds the initramfs (50 MB, already compressed) and the microcode images (30 MB) that are also on the medium;
 #    the kernel and initramfs are loaded from there, not from the root image.
