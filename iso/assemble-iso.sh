@@ -296,6 +296,12 @@ for pat in paths:
         print(os.path.relpath(p, root))
 LEANPY
 
+# Whole packages the live system has no use for (build tools, a mail client, documentation tools), Perl, and single files: slim-excludes.py.
+# --check refuses the build if a program that stays still needs a library that is dropped.
+SLIMPY=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/slim-excludes.py
+python3 "$SLIMPY" "$W/$ROOTFS" --check || { echo "assemble-iso.sh: slim-excludes.py would drop a library that is still needed" >&2; exit 1; }
+python3 "$SLIMPY" "$W/$ROOTFS" >> "$W/squashfs-excludes.txt"
+
 # More weight the live system never uses:
 #  * /boot of the rootfs holds the initramfs (50 MB, already compressed) and the microcode images (30 MB) that are also on the medium;
 #    the kernel and initramfs are loaded from there, not from the root image.
