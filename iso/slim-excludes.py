@@ -6,7 +6,8 @@ assemble-iso.sh). The live system compiles nothing, has no man pages, no mail cl
 
   * every file of the packages in DROP_PACKAGES (read from the package database, /var/db/pkg/*/*/CONTENTS),
   * Perl itself and every script in usr/bin, usr/sbin, usr/libexec whose shebang is perl,
-  * single files of packages that stay (fish's developer tools, the MAC-address vendor lists of hwdata).
+  * single files of packages that stay (fish's developer tools, the MAC-address vendor lists of hwdata, Portage's saved
+    build environments in /var/db/pkg).
 
 --check lists every program or library that stays and still needs a library that would be dropped, and exits 1 if there is any:
 a cut that breaks a dependency must not ship. Run it after changing the lists.
@@ -21,11 +22,13 @@ sys-devel/bison sys-devel/flex sys-devel/m4 dev-util/re2c dev-lang/nasm dev-lang
 dev-util/mesa_clc dev-util/spirv-llvm-translator
 sys-apps/texinfo app-doc/info-manual sys-apps/man-db sys-apps/groff app-text/mandoc dev-libs/opensp
 llvm-core/lld llvm-core/lld-toolchain-symlinks
+llvm-core/llvm llvm-core/clang llvm-runtimes/compiler-rt llvm-runtimes/compiler-rt-sanitizers
 """.split()
 
 SINGLE_FILES = """
 usr/bin/fish_indent usr/bin/fish_key_reader
 usr/share/hwdata/oui.txt usr/share/hwdata/iab.txt
+usr/share/noctalia/assets/noctalia-wallpaper.png
 """.split()
 
 PERL_PATHS = ["usr/bin/perl*", "usr/lib64/perl5", "usr/lib64/libperl.so*", "usr/lib/perl5", "usr/share/perl5", "usr/share/perl",
@@ -67,6 +70,8 @@ def excludes(root):
     for atom in DROP_PACKAGES:
         out.update(package_files(root, atom))
     out.update(SINGLE_FILES)
+    # Portage's saved build environments (12 MiB, already bzip2-compressed so the ISO pays all of it): only `emerge -C` reads them.
+    out.update(os.path.relpath(p, root) for p in glob.glob(os.path.join(root, "var/db/pkg/*/*/environment.bz2")))
     for pat in PERL_PATHS:
         out.update(os.path.relpath(p, root) for p in glob.glob(os.path.join(root, pat)))
     out.update(perl_scripts(root))
