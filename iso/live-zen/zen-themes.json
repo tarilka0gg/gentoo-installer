@@ -29,22 +29,6 @@
     "updatedAt": "2025-01-26",
     "enabled": true
   },
-  "5941aefd-67b0-453d-9b62-9071a31cbb0d": {
-    "id": "5941aefd-67b0-453d-9b62-9071a31cbb0d",
-    "name": "Smaller Compact Mode",
-    "description": "Reduce the height of the compact sidebar.",
-    "style": "https://raw.githubusercontent.com/zen-browser/theme-store/main/themes/5941aefd-67b0-453d-9b62-9071a31cbb0d/chrome.css",
-    "readme": "https://raw.githubusercontent.com/zen-browser/theme-store/main/themes/5941aefd-67b0-453d-9b62-9071a31cbb0d/readme.md",
-    "image": "https://raw.githubusercontent.com/zen-browser/theme-store/main/themes/5941aefd-67b0-453d-9b62-9071a31cbb0d/image.png",
-    "author": "n7itro",
-    "version": "1.0.5",
-    "tags": [
-      "tabs"
-    ],
-    "createdAt": "2024-08-31",
-    "updatedAt": "2025-10-29",
-    "enabled": true
-  },
   "e122b5d9-d385-4bf8-9971-e137809097d0": {
     "id": "e122b5d9-d385-4bf8-9971-e137809097d0",
     "name": "No Top Sites",
