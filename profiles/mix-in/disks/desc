@@ -1,0 +1,2 @@
+Disk and rescue tools
+GParted, parted, btrfs/xfs/f2fs/exfat/ntfs/FAT tools, LVM, mdadm, cryptsetup, ddrescue, testdisk, smartmontools, nvme-cli

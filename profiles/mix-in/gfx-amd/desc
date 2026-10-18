@@ -1,0 +1,2 @@
+AMD graphics
+AMD Radeon, GCN and newer: amdgpu kernel driver, radeonsi OpenGL, radv Vulkan.

@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "installer-core",
+    "slp-profiles",
+    "slp",
     "installer-cli",
     "installer-gui",
 ]
@@ -13,6 +15,7 @@ license = "GPL-2.0-or-later"
 
 [workspace.dependencies]
 installer-core = { path = "installer-core" }
+slp-profiles = { path = "slp-profiles" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

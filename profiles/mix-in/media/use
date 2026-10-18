@@ -1,0 +1,4 @@
+dev-qt/* opengl
+dev-qt/qt5compat qml
+kde-frameworks/sonnet qml
+media-libs/vulkan-loader X

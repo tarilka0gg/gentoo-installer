@@ -1,0 +1,10 @@
+dev-vcs/git
+sys-process/btop
+app-misc/fastfetch
+app-shells/fish
+~app-editors/micro
+app-misc/tmux
+app-misc/screen
+sys-process/lsof
+dev-debug/strace
+app-misc/jq

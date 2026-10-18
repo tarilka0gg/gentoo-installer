@@ -1,0 +1,326 @@
+[
+  {
+    "atoms": [
+      "net-wireless/iwd",
+      "sys-kernel/linux-firmware"
+    ],
+    "default": true,
+    "description": "iwd (Wi-Fi from the command line and Noctalia) and linux-firmware (Wi-Fi/GPU/Bluetooth blobs)",
+    "guru": false,
+    "id": "wifi",
+    "licenses": [
+      "sys-kernel/linux-firmware linux-fw-redistributable no-source-code"
+    ],
+    "name": "Wi-Fi and firmware",
+    "services": [
+      "dbus",
+      "iwd"
+    ],
+    "testing": [],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "x11-terms/ghostty"
+    ],
+    "default": true,
+    "description": "ghostty, the terminal every WM preset binds to Mod+Return",
+    "guru": false,
+    "id": "terminal",
+    "licenses": [],
+    "name": "Terminal",
+    "services": [],
+    "testing": [],
+    "use_flags": [
+      "x11-terms/ghostty wayland"
+    ]
+  },
+  {
+    "atoms": [
+      "www-client/zen-bin"
+    ],
+    "default": true,
+    "description": "Zen Browser (prebuilt binary from GURU; the same browser as in the live image)",
+    "guru": true,
+    "id": "browser",
+    "licenses": [],
+    "name": "Web browser",
+    "services": [],
+    "testing": [
+      "www-client/zen-bin"
+    ],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "dev-vcs/git",
+      "sys-process/btop",
+      "app-misc/fastfetch",
+      "app-shells/fish",
+      "app-editors/micro",
+      "app-misc/tmux",
+      "app-misc/screen",
+      "sys-process/lsof",
+      "dev-debug/strace",
+      "app-misc/jq"
+    ],
+    "default": true,
+    "description": "git, btop, fastfetch, fish, micro, tmux, screen, lsof, strace",
+    "guru": false,
+    "id": "tools",
+    "licenses": [],
+    "name": "Command-line tools",
+    "services": [],
+    "testing": [
+      "app-editors/micro"
+    ],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "xfce-base/thunar",
+      "x11-themes/adw-gtk3",
+      "xfce-base/tumbler",
+      "gnome-base/gvfs",
+      "app-misc/yazi"
+    ],
+    "default": true,
+    "description": "Thunar with thumbnails and gvfs (mounting drives and network places), and the adw-gtk3 theme that lets GTK 3 programs follow the wallpaper palette",
+    "guru": true,
+    "id": "files",
+    "licenses": [],
+    "name": "Files",
+    "services": [],
+    "testing": [
+      "xfce-base/thunar",
+      "gnome-base/gvfs"
+    ],
+    "use_flags": [
+      "gnome-base/gvfs udisks",
+      "x11-libs/gtk+ X",
+      "x11-libs/cairo X",
+      "xfce-base/libxfce4ui wayland",
+      "xfce-base/libxfce4windowing wayland",
+      "xfce-base/xfce4-panel wayland"
+    ]
+  },
+  {
+    "atoms": [
+      "media-video/pipewire",
+      "media-video/wireplumber"
+    ],
+    "default": true,
+    "description": "PipeWire with WirePlumber, ALSA and the sound server",
+    "guru": false,
+    "id": "audio",
+    "licenses": [],
+    "name": "Audio",
+    "services": [],
+    "testing": [],
+    "use_flags": [
+      "media-video/pipewire sound-server pipewire-alsa"
+    ]
+  },
+  {
+    "atoms": [
+      "gui-apps/wl-clipboard",
+      "media-gfx/imv",
+      "sys-apps/xdg-desktop-portal",
+      "sys-apps/xdg-desktop-portal-gtk",
+      "x11-themes/adwaita-icon-theme",
+      "media-fonts/dejavu",
+      "gui-apps/qt6ct",
+      "gui-apps/fuzzel",
+      "gui-apps/grim"
+    ],
+    "default": true,
+    "description": "wl-clipboard, imv (images), the XDG portals, Adwaita icons, DejaVu fonts, qt6ct (Qt programs take the wallpaper palette), the fuzzel launcher and grim (screenshots; tui-shim uses it)",
+    "guru": true,
+    "id": "desktop-utils",
+    "licenses": [],
+    "name": "Desktop utilities",
+    "services": [],
+    "testing": [
+      "x11-themes/adwaita-icon-theme"
+    ],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "sys-block/gparted",
+      "sys-block/parted",
+      "sys-fs/btrfs-progs",
+      "sys-fs/dosfstools",
+      "sys-fs/exfatprogs",
+      "sys-fs/f2fs-tools",
+      "sys-fs/xfsprogs",
+      "sys-fs/ntfs3g",
+      "sys-fs/cryptsetup",
+      "sys-fs/mdadm",
+      "sys-fs/lvm2",
+      "sys-fs/ddrescue",
+      "app-admin/testdisk",
+      "sys-apps/smartmontools",
+      "sys-apps/nvme-cli",
+      "sys-apps/hdparm",
+      "sys-apps/gptfdisk"
+    ],
+    "default": true,
+    "description": "GParted, parted, btrfs/xfs/f2fs/exfat/ntfs/FAT tools, LVM, mdadm, cryptsetup, ddrescue, testdisk, smartmontools, nvme-cli",
+    "guru": false,
+    "id": "disks",
+    "licenses": [],
+    "name": "Disk and rescue tools",
+    "services": [],
+    "testing": [],
+    "use_flags": [
+      "sys-fs/lvm2 lvm",
+      "dev-cpp/gtkmm X",
+      "dev-cpp/cairomm X",
+      "x11-libs/gtk+ X",
+      "x11-libs/cairo X"
+    ]
+  },
+  {
+    "atoms": [
+      "sys-apps/pciutils",
+      "sys-apps/usbutils",
+      "sys-apps/dmidecode",
+      "sys-apps/ethtool",
+      "net-analyzer/nmap",
+      "net-analyzer/tcpdump",
+      "net-analyzer/traceroute",
+      "net-wireless/iw",
+      "net-wireless/wpa_supplicant"
+    ],
+    "default": true,
+    "description": "pciutils, usbutils, dmidecode, ethtool, nmap, tcpdump, traceroute, iw, wpa_supplicant",
+    "guru": false,
+    "id": "hardware",
+    "licenses": [],
+    "name": "Hardware and network tools",
+    "services": [],
+    "testing": [],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "app-portage/eix",
+      "app-portage/gentoolkit",
+      "app-portage/cpuid2cpuflags"
+    ],
+    "default": true,
+    "description": "eix, gentoolkit (equery), cpuid2cpuflags",
+    "guru": false,
+    "id": "gentoo-tools",
+    "licenses": [],
+    "name": "Gentoo tools",
+    "services": [],
+    "testing": [],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "app-editors/neovim",
+      "dev-lang/rust-bin",
+      "app-containers/podman"
+    ],
+    "default": false,
+    "description": "neovim, Rust (rust-bin), podman",
+    "guru": false,
+    "id": "dev",
+    "licenses": [],
+    "name": "Development",
+    "services": [],
+    "testing": [],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "media-video/mpv",
+      "media-video/vlc"
+    ],
+    "default": false,
+    "description": "mpv and VLC",
+    "guru": false,
+    "id": "media",
+    "licenses": [],
+    "name": "Media",
+    "services": [],
+    "testing": [],
+    "use_flags": [
+      "dev-qt/* opengl",
+      "dev-qt/qt5compat qml",
+      "kde-frameworks/sonnet qml",
+      "media-libs/vulkan-loader X"
+    ]
+  },
+  {
+    "atoms": [
+      "media-gfx/gimp"
+    ],
+    "default": false,
+    "description": "GIMP",
+    "guru": false,
+    "id": "graphics",
+    "licenses": [],
+    "name": "Graphics",
+    "services": [],
+    "testing": [],
+    "use_flags": [
+      "app-text/poppler cairo",
+      "media-libs/gegl cairo lcms"
+    ]
+  },
+  {
+    "atoms": [
+      "net-im/telegram-desktop-bin"
+    ],
+    "default": false,
+    "description": "Telegram Desktop (prebuilt)",
+    "guru": false,
+    "id": "chat",
+    "licenses": [],
+    "name": "Messaging",
+    "services": [],
+    "testing": [
+      "net-im/telegram-desktop-bin"
+    ],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "app-office/libreoffice-bin"
+    ],
+    "default": false,
+    "description": "LibreOffice (prebuilt)",
+    "guru": false,
+    "id": "office",
+    "licenses": [],
+    "name": "Office",
+    "services": [],
+    "testing": [],
+    "use_flags": []
+  },
+  {
+    "atoms": [
+      "games-util/gamemode",
+      "games-util/mangohud"
+    ],
+    "default": false,
+    "description": "GameMode and MangoHud",
+    "guru": true,
+    "id": "gaming",
+    "licenses": [],
+    "name": "Gaming tools",
+    "services": [],
+    "testing": [
+      "games-util/gamemode",
+      "games-util/mangohud"
+    ],
+    "use_flags": [
+      "games-util/gamemode elogind",
+      "sys-apps/dbus elogind"
+    ]
+  }
+]

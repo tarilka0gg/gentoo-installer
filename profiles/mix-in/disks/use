@@ -1,0 +1,5 @@
+sys-fs/lvm2 lvm
+dev-cpp/gtkmm X
+dev-cpp/cairomm X
+x11-libs/gtk+ X
+x11-libs/cairo X

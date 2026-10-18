@@ -1,0 +1,6 @@
+gnome-base/gvfs udisks
+x11-libs/gtk+ X
+x11-libs/cairo X
+xfce-base/libxfce4ui wayland
+xfce-base/libxfce4windowing wayland
+xfce-base/xfce4-panel wayland

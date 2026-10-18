@@ -1,0 +1,17 @@
+sys-block/gparted
+sys-block/parted
+sys-fs/btrfs-progs
+sys-fs/dosfstools
+sys-fs/exfatprogs
+sys-fs/f2fs-tools
+sys-fs/xfsprogs
+sys-fs/ntfs3g
+sys-fs/cryptsetup
+sys-fs/mdadm
+sys-fs/lvm2
+sys-fs/ddrescue
+app-admin/testdisk
+sys-apps/smartmontools
+sys-apps/nvme-cli
+sys-apps/hdparm
+sys-apps/gptfdisk

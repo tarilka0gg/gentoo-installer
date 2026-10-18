@@ -1,0 +1,2 @@
+Virtual machine graphics
+Virtual GPUs: virtio (virgl), VMware and QXL, so that a VM shows a desktop.

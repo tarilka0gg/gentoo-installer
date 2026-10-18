@@ -1,0 +1,3 @@
+media-libs/mesa -llvm
+dev-vcs/git -perl -python -gpg -nls
+net-analyzer/tcpdump -smi

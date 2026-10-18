@@ -1,0 +1,8 @@
+www-client/zen-bin ~amd64
+app-editors/micro ~amd64
+xfce-base/thunar ~amd64
+gnome-base/gvfs ~amd64
+x11-themes/adwaita-icon-theme ~amd64
+net-im/telegram-desktop-bin ~amd64
+games-util/gamemode ~amd64
+games-util/mangohud ~amd64

@@ -1,0 +1,2 @@
+x11-drivers/nvidia-drivers -tools
+>=media-libs/libglvnd-1.7.0 X

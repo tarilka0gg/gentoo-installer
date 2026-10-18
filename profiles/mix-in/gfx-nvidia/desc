@@ -1,0 +1,2 @@
+NVIDIA proprietary driver
+The NVIDIA driver (x11-drivers/nvidia-drivers): needs a prepared kernel source tree and the NVIDIA licences.

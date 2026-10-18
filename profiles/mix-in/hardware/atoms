@@ -1,0 +1,9 @@
+sys-apps/pciutils
+sys-apps/usbutils
+sys-apps/dmidecode
+sys-apps/ethtool
+net-analyzer/nmap
+net-analyzer/tcpdump
+net-analyzer/traceroute
+net-wireless/iw
+net-wireless/wpa_supplicant

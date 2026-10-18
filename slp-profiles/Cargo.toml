@@ -1,0 +1,12 @@
+[package]
+name = "slp-profiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Simple Linux profiles: flavors and mix-ins, compiled in from the profiles/ directory"
+build = "build.rs"
+
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true

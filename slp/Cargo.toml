@@ -1,0 +1,13 @@
+[package]
+name = "slp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Simple Linux profiles: choose a flavor and mix-ins, like Funtoo's epro"
+
+[[bin]]
+name = "slp"
+path = "src/main.rs"
+
+[dependencies]
+slp-profiles.workspace = true
