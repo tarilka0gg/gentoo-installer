@@ -1,0 +1,3 @@
+games-util/steam-launcher | Steam | The game store and launcher; it brings its own runtime and installs games in your home folder.
+sys-libs/libudev-compat | libudev-compat | The 32-bit udev library that Steam and the games it runs load.
+games-util/game-device-udev-rules | game-device-udev-rules | udev rules that give games access to controllers and joysticks.

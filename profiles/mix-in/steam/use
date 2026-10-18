@@ -1,0 +1,7 @@
+media-libs/mesa abi_x86_32
+x11-libs/libdrm abi_x86_32
+media-libs/vulkan-loader abi_x86_32
+virtual/opengl abi_x86_32
+sys-apps/dbus elogind
+sys-libs/libudev-compat abi_x86_32
+games-util/game-device-udev-rules elogind

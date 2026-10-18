@@ -73,7 +73,7 @@ pub(super) async fn emerge_wm_packages(
 /// clone`, no chroot needed for the clone itself) — generalized here since this module
 /// needs it for up to two overlays (GURU always, plus a WM-specific one), not just the
 /// distro's own.
-pub(super) async fn ensure_overlay(
+pub(crate) async fn ensure_overlay(
     runner: &dyn CommandRunner,
     target: &Path,
     name: &str,

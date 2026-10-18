@@ -270,9 +270,16 @@ fn install(ctx: &mut Ctx) -> Result<(), String> {
     }
     let sel = load(ctx)?;
     let eff = save_and_apply(ctx, &sel)?;
+    if eff.overlays.iter().any(|o| o == "steam-overlay") {
+        add_steam_overlay()?;
+    }
     let _ = writeln!(ctx.out, "Installing @slp ({} packages)...", eff.atoms.len());
+    // 32-bit libraries (Steam) change the USE flags of packages that are already installed: rebuild just those
+    let changed_use = eff.use_lines.iter().any(|l| l.split_whitespace().any(|w| w == "abi_x86_32"));
     let status = std::process::Command::new("emerge")
-        .args(["--noreplace", "--autounmask-write", "--autounmask-continue", "@slp"])
+        .args(["--noreplace", "--autounmask-write", "--autounmask-continue"])
+        .args(changed_use.then_some("--changed-use"))
+        .arg("@slp")
         .status()
         .map_err(|e| format!("could not run emerge: {e}"))?;
     if !status.success() {
@@ -283,6 +290,30 @@ fn install(ctx: &mut Ctx) -> Result<(), String> {
     }
     let _ = writeln!(ctx.out, "Done.");
     Ok(())
+}
+
+/// Steam's packages come from the `steam-overlay`: registers it and clones it once.
+fn add_steam_overlay() -> Result<(), String> {
+    let conf = Path::new("/etc/portage/repos.conf");
+    let dir = Path::new("/var/db/repos/steam-overlay");
+    let text = "[steam-overlay]\nlocation = /var/db/repos/steam-overlay\nsync-type = git\nsync-uri = https://github.com/anyc/steam-overlay.git\nauto-sync = yes\n";
+    if conf.is_dir() {
+        std::fs::write(conf.join("steam-overlay.conf"), text).map_err(|e| format!("writing repos.conf: {e}"))?;
+    } else {
+        let old = std::fs::read_to_string(conf).unwrap_or_default();
+        if !old.contains("[steam-overlay]") {
+            std::fs::write(conf, format!("{old}\n{text}")).map_err(|e| format!("writing repos.conf: {e}"))?;
+        }
+    }
+    if dir.exists() {
+        return Ok(());
+    }
+    let status = std::process::Command::new("git")
+        .args(["clone", "--depth", "1", "https://github.com/anyc/steam-overlay.git"])
+        .arg(dir)
+        .status()
+        .map_err(|e| format!("could not run git: {e}"))?;
+    if status.success() { Ok(()) } else { Err("could not clone the steam-overlay".to_string()) }
 }
 
 #[cfg(test)]

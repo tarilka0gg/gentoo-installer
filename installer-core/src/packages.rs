@@ -4,9 +4,9 @@
 //! code here. Each atom was checked to exist in the synced `gentoo`/`guru` trees; the ones whose only keyword is `~amd64` get an
 //! accept-keywords line, everything else resolves on a stock `amd64` profile.
 //!
-//! Deliberately absent: Steam (needs the `steam-overlay`, a multilib profile and licence
-//! acceptance — more than an unattended step should decide for the user) and Discord
-//! (proprietary licence).
+//! Steam is a group of its own (`steam`): ticking it is the user's acceptance of Valve's licence, the group's `licenses` line writes it
+//! to `package.license`, and the `steam-overlay` is cloned for it. Discord is deliberately absent (proprietary licence). Programs Portage
+//! does not have (PineconeMC, the Craft apps) come from the profiles' own overlay, `slp-local` (`profiles/overlay/`).
 
 use crate::chroot_emerge::{
     bind_mount_chroot_dirs, ensure_network_resolves, ensure_portage_tree, unmount_chroot_dirs,
@@ -197,6 +197,14 @@ pub fn installed(target: &Path, ids: &[String]) -> bool {
     })
 }
 
+/// Does the choice rebuild installed packages with other USE flags (32-bit libraries)?
+pub fn needs_changed_use(effective: &slp_profiles::Effective) -> bool {
+    effective.use_lines.iter().any(|l| l.split_whitespace().any(|w| w == "abi_x86_32"))
+}
+
+const STEAM_OVERLAY: &str = "steam-overlay";
+const STEAM_OVERLAY_URL: &str = "https://github.com/anyc/steam-overlay.git";
+
 /// Emerges every atom of the chosen groups in one transaction (`--noreplace`, so a re-run
 /// is a no-op), inside the usual chroot bootstrap. Nothing runs for an empty selection.
 ///
@@ -238,6 +246,10 @@ pub async fn install(
         // Everything GURU ships is `~amd64` only, and so are the dependencies of its packages (mangohud wants imgui and implot, both
         // GURU): naming each atom misses them, and emerge stops with "masked by: ~amd64 keyword" before it builds anything
         // (autounmask does not lift this one). The overlay is cloned by the desktop step in every install, hence the wildcard.
+        // Steam's overlay is cloned from git (its ebuilds change often); the `slp-local` one is part of the profiles and `render` writes it.
+        if effective.overlays.iter().any(|o| o == STEAM_OVERLAY) {
+            crate::wm::ensure_overlay(runner, target, STEAM_OVERLAY, STEAM_OVERLAY_URL).await?;
+        }
         slp_profiles::render(target, &selection, &effective, RenderOptions { guru_wildcard: true }).map_err(io)?;
         let mut recorded = chosen.iter().map(|g| g.id.to_string()).collect::<Vec<_>>();
         let repo = Repo::bundled();
@@ -261,6 +273,11 @@ pub async fn install(
             "--autounmask-write",
             "--autounmask-continue",
         ];
+        // A group that needs 32-bit libraries (Steam) changes the USE flags of packages the stage3 already has (util-linux, fontconfig,
+        // expat...): `--noreplace` alone would keep them and stop on a slot conflict, `--changed-use` rebuilds just those.
+        if crate::packages::needs_changed_use(&effective) {
+            argv.insert(argv.iter().position(|a| *a == "--noreplace").unwrap_or(0) + 1, "--changed-use");
+        }
         argv.extend(effective.atoms.iter().map(String::as_str));
         runner.run_status("chroot", &argv).await?;
         // Services only after the packages that ship their init scripts are really there.
@@ -340,13 +357,13 @@ mod tests {
                 n += 1;
             }
         }
-        assert!(n >= 69, "{n} packages described");
+        assert!(n >= 80, "{n} packages described");
     }
 
     #[test]
     fn groups_that_need_a_desktop_are_marked() {
         let needs: Vec<&str> = GROUPS.iter().filter(|g| g.needs_desktop).map(|g| g.id).collect();
-        assert_eq!(needs, ["terminal", "browser", "files", "audio", "desktop-utils", "media", "graphics", "chat", "office", "gaming"]);
+        assert_eq!(needs, ["terminal", "browser", "files", "audio", "desktop-utils", "media", "graphics", "chat", "office", "gaming", "steam", "minecraft", "creative", "craft-office"]);
     }
 
     #[test]
@@ -415,6 +432,23 @@ mod tests {
             uses.contains("games-util/gamemode elogind") && !uses.contains("ghostty"),
             "{uses}"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn steam_and_the_craft_apps_bring_their_overlays_and_rebuild_for_32_bit() {
+        let dir = temp_target("overlays");
+        let runner = FakeCommandRunner::new();
+        install(&runner, &dir, DEFAULT_FLAVOR, &["steam".into(), "creative".into()], &[]).await.unwrap();
+        let calls = runner.calls();
+        // Steam's overlay is cloned (a fresh target has none); the Craft ebuilds are written from the profiles
+        assert!(calls.iter().any(|(c, a)| c == "git" && a.iter().any(|x| x.contains("anyc/steam-overlay"))), "{calls:?}");
+        assert!(dir.join("var/db/repos/slp-local/media-gfx/photocraft-bin/Manifest").is_file());
+        let emerge = calls.iter().find(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("env")).unwrap();
+        assert!(emerge.1.iter().any(|a| a == "--changed-use"), "{:?}", emerge.1);
+        assert!(emerge.1.iter().any(|a| a == "games-util/steam-launcher") && emerge.1.iter().any(|a| a == "media-gfx/photocraft-bin"));
+        let licence = std::fs::read_to_string(dir.join("etc/portage/package.license/slp")).unwrap();
+        assert!(licence.contains("games-util/steam-launcher ValveSteamLicense"), "{licence}");
         std::fs::remove_dir_all(&dir).ok();
     }
 

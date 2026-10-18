@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person"><email>216761460+tarilka0gg@users.noreply.github.com</email><name>tarilka0gg</name></maintainer>
+	<upstream><remote-id type="github">ElyPrismLauncher/Launcher</remote-id></upstream>
+</pkgmetadata>

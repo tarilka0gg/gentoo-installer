@@ -13,6 +13,9 @@ use std::sync::OnceLock;
 
 include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
 
+/// The name of the overlay with the ebuilds of `profiles/overlay/`.
+pub const LOCAL_OVERLAY: &str = "slp-local";
+
 /// The marker the files written by [`render`] start with.
 pub const MANAGED: &str = "# Written by slp (Simple Linux profiles); change the profile with `slp`, not this file.";
 
@@ -53,6 +56,9 @@ pub struct Info {
     pub group: Option<String>,
     /// A package of this profile comes from the GURU overlay.
     pub guru: bool,
+    /// Overlays besides GURU a package of this profile comes from: `steam-overlay` (`needs steam`, cloned from git) and `slp-local`
+    /// (`needs local`, the ebuilds in `profiles/overlay/`, written by [`render`]).
+    pub overlays: Vec<String>,
     pub needs_desktop: bool,
     /// A graphics card (`gfx-*`): offered with the graphics, not as software to tick.
     pub graphics: bool,
@@ -119,6 +125,8 @@ pub struct Effective {
     /// words to what the file already sets instead of replacing it.
     pub make_conf: Vec<(String, String, bool)>,
     pub guru: bool,
+    /// The other overlays the chosen profiles need (see [`Info::overlays`]), without duplicates.
+    pub overlays: Vec<String>,
     pub desktop: bool,
     pub rebuild: Vec<String>,
 }
@@ -134,6 +142,8 @@ pub struct Repo {
     layers: BTreeMap<String, Raw>,
     /// Screenshots by `mix-in/<id>/<package name>`.
     images: BTreeMap<String, Vec<u8>>,
+    /// The files of the `slp-local` overlay (`overlay/` of the data), by path inside the overlay.
+    overlay: BTreeMap<String, String>,
     flavor_order: Vec<String>,
     mix_in_order: Vec<String>,
 }
@@ -175,12 +185,20 @@ impl Repo {
         self.images.get(&format!("{mix_in}/{name}")).map(Vec::as_slice)
     }
 
+    /// The files of the `slp-local` overlay: ebuilds for programs Portage does not have, with their `Manifest`s. Path inside the overlay.
+    pub fn overlay_files(&self) -> &BTreeMap<String, String> {
+        &self.overlay
+    }
+
     /// From `(path relative to profiles/, contents)` pairs.
     pub fn from_files(files: impl IntoIterator<Item = (String, String)>) -> Repo {
         let mut repo = Repo::default();
         for (path, content) in files {
             let parts: Vec<&str> = path.split('/').collect();
             match parts.as_slice() {
+                ["overlay", rest @ ..] if !rest.is_empty() => {
+                    repo.overlay.insert(rest.join("/"), content);
+                }
                 ["flavor", "index"] => repo.flavor_order = lines(&content),
                 ["mix-in", "index"] => repo.mix_in_order = lines(&content),
                 [kind @ ("flavor" | "mix-in"), name, file] => {
@@ -323,6 +341,14 @@ impl Repo {
             description: desc.iter().skip(1).cloned().collect::<Vec<_>>().join(" "),
             group: self.file(&full, "group").into_iter().next(),
             guru: needs.iter().any(|n| n == "guru"),
+            overlays: needs
+                .iter()
+                .filter_map(|n| match n.as_str() {
+                    "steam" => Some("steam-overlay".to_string()),
+                    "local" => Some(LOCAL_OVERLAY.to_string()),
+                    _ => None,
+                })
+                .collect(),
             needs_desktop: needs.iter().any(|n| n == "desktop"),
             graphics: raw.files.contains_key("graphics"),
             desktop,
@@ -453,6 +479,11 @@ impl Repo {
                 }
             }
             eff.guru |= info.guru;
+            for o in &info.overlays {
+                if !eff.overlays.contains(o) {
+                    eff.overlays.push(o.clone());
+                }
+            }
             if let Some(d) = info.desktop {
                 eff.desktop = d;
             }
@@ -640,7 +671,14 @@ pub fn render(root: &Path, sel: &Selection, eff: &Effective, opts: RenderOptions
     if (eff.guru || opts.guru_wildcard) && !eff.layers.is_empty() && !eff.atoms.is_empty() {
         keywords.push_str("*/*::guru ~amd64\n");
     }
+    // Everything of these overlays is `~amd64` (the Craft programs are built for it only; Steam's dependencies follow it).
+    for o in &eff.overlays {
+        keywords.push_str(&format!("*/*::{o} ~amd64\n"));
+    }
     let mut written = Vec::new();
+    if eff.overlays.iter().any(|o| o == LOCAL_OVERLAY) {
+        written.extend(write_local_overlay(root, bundled_overlay())?);
+    }
     for (rel, body) in [
         ("package.use/slp", join(&eff.use_lines)),
         ("package.accept_keywords/slp", keywords),
@@ -655,6 +693,37 @@ pub fn render(root: &Path, sel: &Selection, eff: &Effective, opts: RenderOptions
         if changed {
             written.push(path);
         }
+    }
+    Ok(written)
+}
+
+fn bundled_overlay() -> &'static BTreeMap<String, String> {
+    Repo::bundled().overlay_files()
+}
+
+/// Writes the `slp-local` overlay (`files`: path inside the overlay, contents) to `var/db/repos/slp-local` under `root` and registers it in
+/// `etc/portage/repos.conf`. Files that are the same are left alone; an ebuild of an older version stays (Portage picks the newest).
+pub fn write_local_overlay(root: &Path, files: &BTreeMap<String, String>) -> std::io::Result<Vec<PathBuf>> {
+    let repo = root.join("var/db/repos").join(LOCAL_OVERLAY);
+    let mut written = Vec::new();
+    for (rel, body) in files {
+        let path = repo.join(rel);
+        if std::fs::read_to_string(&path).is_ok_and(|old| &old == body) {
+            continue;
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&path, body)?;
+        written.push(path);
+    }
+    let conf = root.join("etc/portage/repos.conf");
+    ensure_config_dir(&conf)?;
+    let conf_file = conf.join(format!("{LOCAL_OVERLAY}.conf"));
+    let text = format!("[{LOCAL_OVERLAY}]\nlocation = /var/db/repos/{LOCAL_OVERLAY}\nauto-sync = no\n");
+    if std::fs::read_to_string(&conf_file).ok().as_deref() != Some(text.as_str()) {
+        std::fs::write(&conf_file, text)?;
+        written.push(conf_file);
     }
     Ok(written)
 }

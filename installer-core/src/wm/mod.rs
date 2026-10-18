@@ -35,6 +35,7 @@ mod session;
 mod tests;
 
 use packages::*;
+pub(crate) use packages::ensure_overlay;
 use preset::*;
 use session::*;
 

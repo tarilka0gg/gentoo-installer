@@ -1,0 +1,3 @@
+~games-util/game-device-udev-rules
+~sys-libs/libudev-compat
+games-util/steam-launcher

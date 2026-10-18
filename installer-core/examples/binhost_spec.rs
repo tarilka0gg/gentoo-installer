@@ -10,7 +10,14 @@ fn main() {
     let dir = std::path::PathBuf::from(std::env::args().nth(1).expect("output directory"));
     // `all` as the second argument: every group, not just the ticked-by-default ones (the GUI offers them all)
     let ids: Vec<String> = if std::env::args().nth(2).as_deref() == Some("all") {
-        packages::GROUPS.iter().map(|g| g.id.to_string()).collect()
+        // not the groups from other overlays (Steam, PineconeMC, the Craft apps): there is nothing to prebuild for them, the binhost
+        // build has no such overlay
+        let repo = Repo::bundled();
+        packages::GROUPS
+            .iter()
+            .filter(|g| repo.info(slp_profiles::Kind::MixIn, g.id).is_some_and(|i| i.overlays.is_empty()))
+            .map(|g| g.id.to_string())
+            .collect()
     } else {
         packages::default_ids()
     };

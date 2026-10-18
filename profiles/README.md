@@ -33,13 +33,20 @@ Every file of a profile directory is optional. Lines starting with `#` and empty
 | `licenses` | `package.license` lines |
 | `services` | OpenRC services to switch on after the packages are installed, in order |
 | `make-conf` | `KEY="value"` lines for `/etc/portage/make.conf`; `KEY+="value"` adds words to what the other profiles set (the graphics mix-ins add to `VIDEO_CARDS`) |
-| `needs` | `guru` (the package comes from the GURU overlay), `desktop` (only makes sense with a desktop) |
+| `needs` | `guru` (the package comes from the GURU overlay), `steam` (from Steam's overlay, cloned from git), `local` (from the overlay `profiles/overlay/`), `desktop` (only makes sense with a desktop) |
 | `group` | mix-ins with the same group exclude each other |
 | `graphics` | an empty marker: a graphics card, not software to tick on the Software page |
 | `desktop` | flavors only: `yes` or `no`, whether the system gets a desktop |
 | `defaults` | flavors only: the mix-ins ticked by default (inherited and added to) |
 | `hidden` | flavors only: not offered by the installer (`live` is the ISO's own) |
 | `rebuild` | the packages to rebuild when the flavor's USE flags change (used by `iso/slim-rootfs.sh`) |
+
+## The overlay
+
+`profiles/overlay/` is a Portage overlay (`slp-local`) with the ebuilds of programs Portage does not have: ready-made binaries of PineconeMC
+and the Craft apps, taken from their GitHub releases (`-bin` ebuilds, with `Manifest`s that pin the archives by checksum). A mix-in that
+says `needs local` makes `render` write it to `/var/db/repos/slp-local` and register it. To update a program: change the version in the
+ebuild's file name, run `ebuild <file> manifest`, and check with `ebuild <file> clean install`.
 
 ## Rules
 
