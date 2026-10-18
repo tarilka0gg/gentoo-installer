@@ -81,12 +81,17 @@ fi
 
 # A new profile every time Zen starts, made from /usr/share/live-zen: user.js (less RAM and CPU, less tracking, no first-run pages, the
 # author's compact-mode layout), zen-themes.json (the list of Zen mods; Zen downloads them itself) and, in Zen's own folder, policies.json
-# (DuckDuckGo, uBlock Origin, SponsorBlock, CanvasBlocker, LocalCDN installed from addons.mozilla.org, DNS over HTTPS, HTTPS-only).
+# (DuckDuckGo, uBlock Origin, SponsorBlock, CanvasBlocker, LocalCDN installed from addons.mozilla.org, DNS over HTTPS, HTTPS-only) and an
+# autoconfig (mozilla.cfg) that closes the welcome pages the extensions open when they are installed.
 # While Zen is running the profile is left alone, so a second launch opens another window in the same browser.
 T=${ZEN_LIVE_TEMPLATE:-/usr/share/live-zen}
 P=${ZEN_LIVE_PROFILE:-$HOME/.zen-live}
 if [ -f "$T/policies.json" ] && [ -d "$D/zen" ]; then
     mkdir -p "$D/zen/distribution"; cp -f "$T/policies.json" "$D/zen/distribution/policies.json"
+fi
+# autoconfig: closes the welcome pages the extensions open when they are installed (see mozilla.cfg)
+if [ -f "$T/mozilla.cfg" ] && [ -d "$D/zen" ]; then
+    mkdir -p "$D/zen/defaults/pref"; cp -f "$T/mozilla.cfg" "$D/zen/mozilla.cfg"; cp -f "$T/autoconfig.js" "$D/zen/defaults/pref/autoconfig.js"
 fi
 running=
 if [ -L "$P/lock" ]; then
@@ -102,7 +107,7 @@ exec "$BIN" --profile "$P" "$@"
 GETZEN
     chmod 755 "$ROOT/usr/local/bin/get-zen"
     install -d "$ROOT/usr/share/live-zen"
-    install -m 644 "$(dirname "$(readlink -f "$0")")"/live-zen/{user.js,policies.json,zen-themes.json} "$ROOT/usr/share/live-zen/"
+    install -m 644 "$(dirname "$(readlink -f "$0")")"/live-zen/{user.js,policies.json,zen-themes.json,mozilla.cfg,autoconfig.js} "$ROOT/usr/share/live-zen/"
     cat > "$ROOT/usr/share/applications/zen-browser.desktop" <<'ZENDESKTOP'
 [Desktop Entry]
 Type=Application
