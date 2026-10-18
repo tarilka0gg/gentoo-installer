@@ -7,6 +7,7 @@ packages, with a kernel picked for the machine's hardware.
 - **`installer-cli`**: ratatui text installer (and `--headless`), used by the minimal image.
 - **`installer-gui`**: GTK4 + libadwaita wizard, used by the GUI image (niri + Noctalia).
 - **`installer-core`**: everything that actually happens. Both frontends only call into it.
+- **`profiles/`, `slp-profiles/`, `slp/`**: the flavors and software groups as data, the library that reads them and the `slp` command.
 - **`iso/`**: builds the live images, the offline payload and the release.
 
 License: [GPL-2.0-or-later](LICENSE).
@@ -142,11 +143,22 @@ image onto a blank disk, then booting the installed disk. `iso/test/` has the he
 (All except the `GENTOO_STORE_*`, `GENTOO_BINHOST_URL` and `GENTOO_WM_CONFIGS_URL` ones start with `GENTOO_INSTALLER`.)
 `--resume` continues the unfinished install this live session remembers.
 
-## Software groups
+## Flavors, software groups and `slp`
 
-`installer-core/src/packages.rs`: terminal, browser, CLI tools, development, media, graphics, messaging, office, gaming tools. The defaults are
-terminal, browser and CLI tools. The emerge runs with `--autounmask-write --autounmask-continue`, and every atom was checked on a real
-stage3. Steam and Discord are deliberately not offered (overlay, multilib and licence decisions).
+What gets installed is data, in `profiles/` ([format](profiles/README.md)), compiled into the installer by the `slp-profiles` crate. A system is
+one **flavor** (`minimal`, `desktop`, `workstation`; `live` is the ISO's own) plus **mix-ins**, the software groups of the Software page: Wi-Fi,
+terminal, browser, CLI tools, files, audio, desktop utilities, disk and hardware tools, Gentoo tools, development, media, graphics, messaging,
+office, gaming tools, **Steam**, **Minecraft** (PineconeMC), **Creative Craft apps** and **Craft office apps**; the graphics cards are `gfx-*`
+mix-ins. Each group says which packages, USE flags, licences and services it needs, has a sentence for every package and, for some, a
+screenshot, all shown on the Software page. The emerge runs with `--autounmask-write --autounmask-continue` (plus `--changed-use` when a
+group needs 32-bit libraries, i.e. Steam), and every atom was checked on a real stage3.
+
+Programs Portage does not have come from the profiles' own overlay `slp-local` (`profiles/overlay/`: PineconeMC and the Craft apps, as `-bin`
+ebuilds of their GitHub releases, pinned by checksum); Steam comes from the `steam-overlay`, cloned during the install. Groups from these
+overlays are not on the offline images and not in the binhost. Discord is not offered (proprietary licence).
+
+The same data drives the **`slp`** command on an installed system (`slp show | list | info | flavor | mix-in | apply | install | rebuild`, like
+Funtoo's `epro`); the choice is kept in `/etc/slp/state`.
 
 ## Binary install details
 
