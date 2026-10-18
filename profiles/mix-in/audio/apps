@@ -1,0 +1,2 @@
+media-video/pipewire | PipeWire | The sound server: carries the audio and video streams of every program.
+media-video/wireplumber | WirePlumber | Decides which sound device each program uses, and remembers it.

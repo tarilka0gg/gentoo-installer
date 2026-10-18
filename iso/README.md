@@ -352,3 +352,14 @@ Both are invisible with serial-only testing and were only noticed from screensho
 At run time `installer-core/src/offline.rs` finds `/run/initramfs/live/offline`, serves it on `127.0.0.1` from a thread and sets `GENTOO_STORE_BINHOST_URL`, `GENTOO_BINHOST_URL` and `GENTOO_WM_CONFIGS_URL` (a `file://` path: `git clone --depth 1` does not work over dumb HTTP) unless they are set; `binhost::configure` points the stage3's `[gentoo]` entry and `GENTOO_MIRRORS` at it (the stage3's own entry is kept in `etc/portage/.offline-stock-binrepos/`, because Portage reads every file in `binrepos.conf/`), and the finalize phase puts the public addresses back. The wizard's network step is skipped.
 
 What is left off the medium to stay under GitHub's 2 GiB: the groups in `offline::NOT_ON_MEDIUM` (and their packages, `OFFLINE_EXCLUDE` in `make-offline.sh`), and most of `linux-firmware` (the archive is cut to ~130 MB, `WHENCE` and the tree's Manifest are edited to match). Test with a VM whose network is `restrict=on` (plus a `guestfwd` for the log), and `GENTOO_INSTALLER_GPU=none`: a virtio GPU makes the installer ask for a `video_cards_virgl` Mesa that has no binary.
+
+## SSH into a live session (opt-in)
+
+The live system has no root password, so sshd never starts by itself. `/etc/init.d/simple-ssh` (made by `prepare-rootfs.sh`, in the default
+runlevel) starts it only when it finds a public key, and then for that key only (`PermitRootLogin prohibit-password`, passwords off):
+
+* a disk or USB stick whose file system label is `SIMPLE_SSH` and that holds a file `authorized_keys`, or
+* `ssh/authorized_keys` on the live medium itself (for an image you build for your own use; the released images have none).
+
+Without a key, boot prints `no SSH key given ... sshd stays off` and nothing listens. Useful for remote help and for driving a test machine or
+a VM (`-nic user,hostfwd=tcp::2222-:22` and a small ext4 image labelled `SIMPLE_SSH` as a second disk).

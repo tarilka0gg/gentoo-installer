@@ -756,5 +756,59 @@ OSREL
 chroot "$ROOT" rc-update add iwd default >/dev/null 2>&1 || true
 chroot "$ROOT" rc-update add dhcpcd default >/dev/null 2>&1 || true
 
+# SSH into the live session, only when a key is given. Nothing listens on a normal boot (the live root has no password, so a plain
+# sshd would let anybody on the network in). A disk or USB stick labelled SIMPLE_SSH with a file `authorized_keys`, or `ssh/authorized_keys`
+# on the live medium itself, turns it on, for that key only: no passwords. Handy for remote help and for driving a test machine.
+cat > "$ROOT/etc/init.d/simple-ssh" <<'SIMPLESSH'
+#!/sbin/openrc-run
+description="Starts sshd on the live system, for the keys of a volume labelled SIMPLE_SSH (or of the medium's ssh/authorized_keys); otherwise it stays off"
+
+depend() {
+    after dhcpcd iwd localmount
+    before local
+}
+
+start() {
+    keys=/run/simple-ssh.keys
+    : > "$keys"
+    if [ -f /run/initramfs/live/ssh/authorized_keys ]; then
+        cat /run/initramfs/live/ssh/authorized_keys >> "$keys"
+    fi
+    for dev in $(blkid -t LABEL=SIMPLE_SSH -o device 2>/dev/null); do
+        mkdir -p /run/simple-ssh.mnt
+        if mount -o ro "$dev" /run/simple-ssh.mnt 2>/dev/null; then
+            [ -f /run/simple-ssh.mnt/authorized_keys ] && cat /run/simple-ssh.mnt/authorized_keys >> "$keys"
+            umount /run/simple-ssh.mnt
+        fi
+    done
+    if ! grep -qE '^(ssh-|ecdsa-|sk-)' "$keys"; then
+        rm -f "$keys"
+        einfo "no SSH key given (label a disk SIMPLE_SSH, with authorized_keys): sshd stays off"
+        return 0
+    fi
+    install -d -m 700 /root/.ssh
+    cat "$keys" >> /root/.ssh/authorized_keys
+    chmod 600 /root/.ssh/authorized_keys
+    rm -f "$keys"
+    ssh-keygen -A >/dev/null 2>&1
+    install -d /etc/ssh/sshd_config.d
+    cat > /etc/ssh/sshd_config.d/00-simple-ssh.conf <<'CONF'
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+CONF
+    ebegin "Starting sshd for the given key"
+    /etc/init.d/sshd start >/dev/null 2>&1
+    eend $?
+}
+
+stop() {
+    /etc/init.d/sshd stop >/dev/null 2>&1
+    return 0
+}
+SIMPLESSH
+chmod 755 "$ROOT/etc/init.d/simple-ssh"
+chroot "$ROOT" rc-update add simple-ssh default >/dev/null 2>&1 || true
+
 # The live system never mounts anything from fstab; an empty one avoids fsck/remount noise.
 : > "$ROOT/etc/fstab"

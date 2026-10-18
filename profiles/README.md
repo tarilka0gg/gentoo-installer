@@ -27,6 +27,8 @@ Every file of a profile directory is optional. Lines starting with `#` and empty
 | `desc` | first line: the name shown to the user; the other lines: a one-sentence description |
 | `parent` | profiles this one inherits from (`flavor/minimal`, `mix-in/audio`), one per line, applied first |
 | `atoms` | packages to install; `~atom` marks one that only has a `~amd64` keyword |
+| `apps` | one line per package: `category/name \| Name \| a sentence about it`, shown on the installer's Software page; every package needs one |
+| `screens/<package name>.jpg` | a screenshot of the package (`ghostty.jpg`), shown under its sentence; about 760 px wide, JPEG, 20-75 KB. Compiled into the installer. Optional: only programs with a window of their own and that could be photographed |
 | `use` | `package.use` lines |
 | `licenses` | `package.license` lines |
 | `services` | OpenRC services to switch on after the packages are installed, in order |

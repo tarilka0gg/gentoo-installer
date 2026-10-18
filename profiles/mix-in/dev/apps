@@ -1,0 +1,3 @@
+app-editors/neovim | Neovim | A modern, extensible text editor for the terminal.
+dev-lang/rust-bin | Rust | The Rust compiler and Cargo, as a ready-made binary.
+app-containers/podman | Podman | Runs containers without a background service.

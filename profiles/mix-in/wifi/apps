@@ -1,0 +1,2 @@
+net-wireless/iwd | iwd | Intel's wireless daemon: connects to Wi-Fi from the command line and from the desktop's network menu.
+sys-kernel/linux-firmware | Linux firmware | The firmware files that Wi-Fi, graphics and Bluetooth chips need before they work.

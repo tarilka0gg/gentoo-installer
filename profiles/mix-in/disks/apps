@@ -1,0 +1,17 @@
+sys-block/gparted | GParted | A graphical partition editor: resize, move, copy and format partitions.
+sys-block/parted | parted | Edits partition tables from the command line.
+sys-fs/btrfs-progs | btrfs tools | Tools for the btrfs file system: snapshots, checks and repair.
+sys-fs/dosfstools | dosfstools | Makes and repairs FAT file systems (the EFI partition, USB sticks).
+sys-fs/exfatprogs | exFAT tools | Makes and checks exFAT, the format of big SD cards and USB drives.
+sys-fs/f2fs-tools | F2FS tools | Tools for the file system made for flash storage.
+sys-fs/xfsprogs | XFS tools | Tools for the XFS file system.
+sys-fs/ntfs3g | NTFS-3G | Reads and writes Windows (NTFS) drives.
+sys-fs/cryptsetup | cryptsetup | Opens and manages encrypted disks (LUKS).
+sys-fs/mdadm | mdadm | Builds software RAID arrays.
+sys-fs/lvm2 | LVM | Flexible logical volumes that can span several disks.
+sys-fs/ddrescue | ddrescue | Copies the data off a failing disk and skips the bad parts.
+app-admin/testdisk | TestDisk | Finds lost partitions and recovers deleted files.
+sys-apps/smartmontools | smartmontools | Reads a disk's health (SMART) and warns before it fails.
+sys-apps/nvme-cli | nvme-cli | Inspects and controls NVMe drives.
+sys-apps/hdparm | hdparm | Reads and tunes the settings of hard disks.
+sys-apps/gptfdisk | gdisk | Partition editor for GPT disks (gdisk and sgdisk).

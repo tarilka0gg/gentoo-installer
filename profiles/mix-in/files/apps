@@ -1,0 +1,5 @@
+xfce-base/thunar | Thunar | A fast, simple file manager.
+x11-themes/adw-gtk3 | adw-gtk3 | A theme that gives GTK 3 programs the look of the GTK 4 apps and lets them follow the wallpaper's colours.
+xfce-base/tumbler | Tumbler | Makes the picture and document previews of the file manager.
+gnome-base/gvfs | gvfs | Lets the file manager open drives, phones and network shares.
+app-misc/yazi | Yazi | A fast file manager for the terminal, with previews.

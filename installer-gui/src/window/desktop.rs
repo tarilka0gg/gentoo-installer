@@ -291,6 +291,51 @@ pub(super) fn gpu_select_page(
     page
 }
 
+/// One package of a group, as the Software page shows it: the name, a sentence about it, and its screenshot when there is one.
+fn app_row(group_id: &str, app: &installer_core::packages::AppEntry) -> gtk::ListBoxRow {
+    let name = gtk::Label::builder()
+        .label(app.name)
+        .css_classes(vec!["heading".to_string()])
+        .halign(gtk::Align::Start)
+        .build();
+    let text = gtk::Label::builder()
+        .label(app.description)
+        .css_classes(vec!["dim-label".to_string()])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .xalign(0.0)
+        .build();
+    let column = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .margin_top(10)
+        .margin_bottom(10)
+        .margin_start(16)
+        .margin_end(16)
+        .build();
+    column.append(&name);
+    column.append(&text);
+    if let Some(bytes) = installer_core::packages::screen(group_id, app.atom) {
+        // a screenshot that cannot be read is simply left out
+        if let Ok(texture) = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)) {
+            let picture = gtk::Picture::builder()
+                .paintable(&texture)
+                .can_shrink(true)
+                .content_fit(gtk::ContentFit::ScaleDown)
+                .halign(gtk::Align::Start)
+                .css_classes(vec!["card".to_string()])
+                .build();
+            picture.set_size_request(-1, 220);
+            column.append(&picture);
+        }
+    }
+    gtk::ListBoxRow::builder()
+        .child(&column)
+        .activatable(false)
+        .selectable(false)
+        .build()
+}
+
 /// Advanced-setup only: the system type (flavor) and the optional software, one switch per group in `installer_core::packages`.
 /// The defaults of the chosen flavor are ticked; with Advanced off they are installed anyway.
 pub(super) fn packages_select_page(
@@ -334,13 +379,14 @@ pub(super) fn packages_select_page(
         .selection_mode(gtk::SelectionMode::None)
         .css_classes(vec!["boxed-list".to_string()])
         .build();
-    // (group id, its switch, its row, whether it needs a desktop)
-    let mut group_rows: Vec<(String, gtk::Switch, adw::ActionRow, bool)> = Vec::new();
+    // (group id, its switch, its row, whether it needs a desktop). Each group is a row that opens inline into its packages: a name, a
+    // sentence about each, and a screenshot where there is one (compiled in with the profiles).
+    let mut group_rows: Vec<(String, gtk::Switch, adw::ExpanderRow, bool)> = Vec::new();
     for group in installer_core::packages::GROUPS.iter() {
         if !installer_core::offline::group_available(group.id) {
             continue; // not on an offline medium
         }
-        let row = adw::ActionRow::builder()
+        let row = adw::ExpanderRow::builder()
             .title(group.name)
             .subtitle(group.description)
             .build();
@@ -362,7 +408,9 @@ pub(super) fn packages_select_page(
             }
         });
         row.add_suffix(&switch);
-        row.set_activatable_widget(Some(&switch));
+        for app in group.apps {
+            row.add_row(&app_row(group.id, app));
+        }
         list.append(&row);
         group_rows.push((id, switch, row, group.needs_desktop));
     }

@@ -1,0 +1,9 @@
+sys-apps/pciutils | pciutils | Lists the PCI devices: the graphics card, the network card and so on.
+sys-apps/usbutils | usbutils | Lists what is plugged into USB.
+sys-apps/dmidecode | dmidecode | Reads the machine's make, model and memory slots from its firmware.
+sys-apps/ethtool | ethtool | Shows and sets the options of wired network cards.
+net-analyzer/nmap | Nmap | Scans a network for devices and open ports.
+net-analyzer/tcpdump | tcpdump | Shows the network traffic that passes your computer.
+net-analyzer/traceroute | traceroute | Shows the route packets take to a server.
+net-wireless/iw | iw | Controls Wi-Fi cards from the command line.
+net-wireless/wpa_supplicant | wpa_supplicant | The classic Wi-Fi login daemon (WPA2, WPA3 and company networks).

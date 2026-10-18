@@ -1,0 +1,9 @@
+gui-apps/wl-clipboard | wl-clipboard | Copy and paste from the command line.
+media-gfx/imv | imv | A quick image viewer.
+sys-apps/xdg-desktop-portal | xdg-desktop-portal | Lets programs ask the desktop for a file picker or screen sharing.
+sys-apps/xdg-desktop-portal-gtk | Portal for GTK | The file chooser and dialogs behind those requests, in the GTK style.
+x11-themes/adwaita-icon-theme | Adwaita icons | The icon set most GTK programs use.
+media-fonts/dejavu | DejaVu fonts | A clear font family that covers many languages.
+gui-apps/qt6ct | qt6ct | Makes Qt programs follow the desktop's colours and fonts.
+gui-apps/fuzzel | fuzzel | A small application launcher.
+gui-apps/grim | grim | Takes screenshots.

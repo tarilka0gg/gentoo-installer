@@ -41,6 +41,21 @@ pub struct Group {
     pub guru: bool,
     /// Only makes sense on a system with a desktop (the page hides it on a console flavor).
     pub needs_desktop: bool,
+    /// What each package of the group is, for the Software page.
+    pub apps: &'static [AppEntry],
+}
+
+/// One package of a group as the Software page shows it: a name, a sentence and, where there is one, a screenshot ([`screen`]).
+pub struct AppEntry {
+    pub atom: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub has_screen: bool,
+}
+
+/// The screenshot of a package of a group (JPEG, WebP or PNG bytes), compiled in with the profiles.
+pub fn screen(group_id: &str, atom: &str) -> Option<&'static [u8]> {
+    Repo::bundled().screen(group_id, atom)
 }
 
 fn leak_strs(v: &[String]) -> &'static [&'static str] {
@@ -73,6 +88,18 @@ pub static GROUPS: LazyLock<Vec<Group>> = LazyLock::new(|| {
             licenses: leak_strs(&m.licenses),
             guru: m.guru,
             needs_desktop: m.needs_desktop,
+            apps: Box::leak(
+                m.apps
+                    .iter()
+                    .map(|a| AppEntry {
+                        atom: leak(&a.atom),
+                        name: leak(&a.name),
+                        description: leak(&a.description),
+                        has_screen: a.has_screen,
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            ),
         })
         .collect()
 });
@@ -300,6 +327,20 @@ mod tests {
         assert!(flavor_has_desktop("desktop") && !flavor_has_desktop("minimal"));
         assert!(flavor_has_desktop("no-such-flavor"), "unknown: a desktop, as before flavors existed");
         assert!(f.iter().all(|f| f.defaults.iter().all(|d| find(d).is_some())));
+    }
+
+    #[test]
+    fn every_package_of_every_group_has_a_name_and_a_sentence() {
+        let mut n = 0;
+        for g in GROUPS.iter() {
+            assert_eq!(g.apps.iter().map(|a| a.atom).collect::<Vec<_>>(), g.atoms, "{}: one entry per package, in order", g.id);
+            for a in g.apps {
+                assert!(!a.name.is_empty() && a.description.len() > 15, "{}: {}", g.id, a.atom);
+                assert_eq!(a.has_screen, screen(g.id, a.atom).is_some());
+                n += 1;
+            }
+        }
+        assert!(n >= 69, "{n} packages described");
     }
 
     #[test]

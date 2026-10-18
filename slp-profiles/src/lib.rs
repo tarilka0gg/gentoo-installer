@@ -31,6 +31,16 @@ impl Kind {
     }
 }
 
+/// A package of a mix-in as a person sees it: what it is called, a sentence about it and whether there is a screenshot of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct App {
+    pub atom: String,
+    pub name: String,
+    pub description: String,
+    /// There is a screenshot (`screen` of the [`Repo`] returns it).
+    pub has_screen: bool,
+}
+
 /// What a flavor or mix-in is, by its own files (not including what it inherits).
 #[derive(Debug, Clone)]
 pub struct Info {
@@ -55,6 +65,8 @@ pub struct Info {
     pub defaults: Vec<String>,
     /// Packages, without the `~` marker.
     pub atoms: Vec<String>,
+    /// What each package is (`apps`), in the order of `atoms`; a package without a line has its name and no description.
+    pub apps: Vec<App>,
     /// The packages among `atoms` that only have a `~amd64` keyword.
     pub testing: Vec<String>,
     pub use_lines: Vec<String>,
@@ -120,6 +132,8 @@ struct Raw {
 #[derive(Debug, Default)]
 pub struct Repo {
     layers: BTreeMap<String, Raw>,
+    /// Screenshots by `mix-in/<id>/<package name>`.
+    images: BTreeMap<String, Vec<u8>>,
     flavor_order: Vec<String>,
     mix_in_order: Vec<String>,
 }
@@ -137,7 +151,28 @@ impl Repo {
     /// The data compiled into this crate.
     pub fn bundled() -> &'static Repo {
         static REPO: OnceLock<Repo> = OnceLock::new();
-        REPO.get_or_init(|| Repo::from_files(BUNDLE.iter().map(|(p, c)| (p.to_string(), c.to_string()))))
+        REPO.get_or_init(|| {
+            let mut repo = Repo::from_files(BUNDLE.iter().map(|(p, c)| (p.to_string(), c.to_string())));
+            for (path, bytes) in BUNDLE_IMAGES {
+                repo.add_image(path, bytes.to_vec());
+            }
+            repo
+        })
+    }
+
+    /// `mix-in/<id>/screens/<package name>.jpg` (or `.webp`, `.png`).
+    fn add_image(&mut self, path: &str, bytes: Vec<u8>) {
+        let parts: Vec<&str> = path.split('/').collect();
+        if let ["mix-in", id, "screens", file] = parts.as_slice() {
+            let name = file.rsplit_once('.').map(|x| x.0).unwrap_or(file);
+            self.images.insert(format!("{id}/{name}"), bytes);
+        }
+    }
+
+    /// The screenshot of a package of a mix-in (an `atom` like `x11-terms/ghostty`), if there is one: JPEG, WebP or PNG bytes.
+    pub fn screen(&self, mix_in: &str, atom: &str) -> Option<&[u8]> {
+        let name = atom.rsplit('/').next().unwrap_or(atom);
+        self.images.get(&format!("{mix_in}/{name}")).map(Vec::as_slice)
     }
 
     /// From `(path relative to profiles/, contents)` pairs.
@@ -163,20 +198,27 @@ impl Repo {
 
     /// From a directory laid out like `profiles/` (for tests and for working on the data).
     pub fn from_dir(dir: &Path) -> std::io::Result<Repo> {
-        fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, String)>) -> std::io::Result<()> {
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, String)>, images: &mut Vec<(String, Vec<u8>)>) -> std::io::Result<()> {
             for e in std::fs::read_dir(dir)? {
                 let p = e?.path();
+                let rel = || p.strip_prefix(base).unwrap().to_string_lossy().to_string();
                 if p.is_dir() {
-                    walk(&p, base, out)?;
+                    walk(&p, base, out, images)?;
+                } else if p.extension().is_some_and(|x| x == "jpg" || x == "webp" || x == "png") {
+                    images.push((rel(), std::fs::read(&p)?));
                 } else if let Ok(text) = std::fs::read_to_string(&p) {
-                    out.push((p.strip_prefix(base).unwrap().to_string_lossy().to_string(), text));
+                    out.push((rel(), text));
                 }
             }
             Ok(())
         }
-        let mut files = Vec::new();
-        walk(dir, dir, &mut files)?;
-        Ok(Repo::from_files(files))
+        let (mut files, mut images) = (Vec::new(), Vec::new());
+        walk(dir, dir, &mut files, &mut images)?;
+        let mut repo = Repo::from_files(files);
+        for (path, bytes) in images {
+            repo.add_image(&path, bytes);
+        }
+        Ok(repo)
     }
 
     fn raw(&self, full: &str) -> Option<&Raw> {
@@ -240,6 +282,25 @@ impl Repo {
                 None => atoms.push(a),
             }
         }
+        let described: BTreeMap<String, (String, String)> = self
+            .file(&full, "apps")
+            .iter()
+            .filter_map(|l| {
+                let mut p = l.splitn(3, '|').map(str::trim);
+                Some((p.next()?.to_string(), (p.next()?.to_string(), p.next().unwrap_or("").to_string())))
+            })
+            .collect();
+        let apps = atoms
+            .iter()
+            .map(|a| {
+                let (name, description) = described
+                    .get(a)
+                    .cloned()
+                    .unwrap_or_else(|| (a.rsplit('/').next().unwrap_or(a).to_string(), String::new()));
+                let has_screen = self.screen(&short, a).is_some();
+                App { atom: a.clone(), name, description, has_screen }
+            })
+            .collect();
         let make_conf = self
             .file(&full, "make-conf")
             .iter()
@@ -269,6 +330,7 @@ impl Repo {
             parents,
             defaults,
             atoms,
+            apps,
             testing,
             use_lines: self.file(&full, "use"),
             licenses: self.file(&full, "licenses"),
@@ -437,6 +499,20 @@ impl Repo {
                     let ok = a.split_once('/').is_some_and(|(c, n)| !c.is_empty() && !n.is_empty() && !a.contains(' '));
                     if !ok {
                         out.push(format!("{full}: {a:?} is not category/name"));
+                    }
+                }
+                // every package says what it is, and `apps` names nothing the profile does not install
+                if self.layers[full].files.contains_key("apps") {
+                    for a in &info.apps {
+                        if a.description.is_empty() {
+                            out.push(format!("{full}: {} has no description in apps", a.atom));
+                        }
+                    }
+                    for l in self.file(full, "apps") {
+                        let atom = l.split('|').next().unwrap_or("").trim();
+                        if !info.atoms.iter().any(|x| x == atom) {
+                            out.push(format!("{full}: apps describes {atom}, which the profile does not install"));
+                        }
                     }
                 }
             }
@@ -715,6 +791,43 @@ mod tests {
         let e = r.resolve(&sel("base", &["gfx-a", "gfx-b"])).unwrap_err();
         assert!(matches!(e, Error::Conflict { ref group, .. } if group == "gfx"), "{e}");
         assert!(r.resolve(&sel("base", &["gfx-a", "gfx-a"])).is_ok(), "the same one twice is not a conflict");
+    }
+
+    #[test]
+    fn each_package_says_what_it_is_and_a_screenshot_is_found_by_package_name() {
+        let mut r = repo(&[
+            ("flavor/index", "f\n"),
+            ("flavor/f/desc", "F\n"),
+            ("mix-in/index", "m\n"),
+            ("mix-in/m/desc", "M\n"),
+            ("mix-in/m/atoms", "app-misc/a\n~app-misc/b\napp-misc/c\n"),
+            ("mix-in/m/apps", "app-misc/a | Alpha | The first one.\napp-misc/b | Beta | The second | with a bar in it.\n"),
+        ]);
+        r.add_image("mix-in/m/screens/a.webp", vec![1, 2, 3]);
+        let m = r.info(Kind::MixIn, "m").unwrap();
+        let names: Vec<_> = m.apps.iter().map(|a| (a.atom.as_str(), a.name.as_str(), a.description.as_str(), a.has_screen)).collect();
+        assert_eq!(
+            names,
+            vec![
+                ("app-misc/a", "Alpha", "The first one.", true),
+                ("app-misc/b", "Beta", "The second | with a bar in it.", false),
+                ("app-misc/c", "c", "", false), // no line: its name, no description
+            ]
+        );
+        assert_eq!(r.screen("m", "app-misc/a"), Some(&[1u8, 2, 3][..]));
+        assert_eq!(r.screen("m", "app-misc/b"), None);
+        assert_eq!(r.screen("other", "app-misc/a"), None);
+        let p = r.problems().join("\n");
+        assert!(!p.contains("app-misc/a"), "{p}");
+        // an `apps` line for a package the profile does not install, and a package without a description, are both named
+        let r2 = repo(&[
+            ("flavor/index", "f\n"), ("flavor/f/desc", "F\n"),
+            ("mix-in/index", "m\n"), ("mix-in/m/desc", "M\n"),
+            ("mix-in/m/atoms", "app-misc/a\napp-misc/c\n"),
+            ("mix-in/m/apps", "app-misc/a | Alpha | One.\napp-misc/zzz | Z | Not here.\n"),
+        ]);
+        let p2 = r2.problems().join("\n");
+        assert!(p2.contains("app-misc/c has no description in apps") && p2.contains("describes app-misc/zzz"), "{p2}");
     }
 
     #[test]

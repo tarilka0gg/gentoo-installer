@@ -1,0 +1,3 @@
+app-portage/eix | eix | Searches the package tree in a blink.
+app-portage/gentoolkit | gentoolkit | Tools to query and check installed packages (equery and others).
+app-portage/cpuid2cpuflags | cpuid2cpuflags | Tells which instruction sets your processor has, for the package settings.

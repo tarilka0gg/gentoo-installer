@@ -1,0 +1,10 @@
+dev-vcs/git | Git | The version control system most software projects use.
+sys-process/btop | btop | A colourful monitor of the processor, memory, disks and network.
+app-misc/fastfetch | fastfetch | Shows your system's logo and the key facts about it in the terminal.
+app-shells/fish | fish | A friendly shell that suggests and highlights commands as you type.
+app-editors/micro | micro | A small terminal text editor that works the way you expect (Ctrl+S, Ctrl+C, mouse).
+app-misc/tmux | tmux | Splits one terminal into panes and keeps your sessions alive when you disconnect.
+app-misc/screen | GNU Screen | The classic terminal multiplexer: sessions that survive a lost connection.
+sys-process/lsof | lsof | Lists which program has which file or network port open.
+dev-debug/strace | strace | Shows the calls a program makes to the system, for finding out why it fails.
+app-misc/jq | jq | Reads and reshapes JSON on the command line.

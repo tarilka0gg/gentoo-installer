@@ -8,5 +8,5 @@ license.workspace = true
 installer-core.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
-gtk = { version = "0.9", package = "gtk4" }
+gtk = { version = "0.9", package = "gtk4", features = ["v4_8"] }
 libadwaita = { version = "0.7", features = ["v1_4"] }
