@@ -79,10 +79,10 @@ if [ ! -x "$BIN" ]; then
     fetch
 fi
 
-# A new profile every time Zen starts, made from /usr/share/live-zen: user.js (less RAM and CPU, less tracking, no first-run pages) and, in
-# Zen's own folder, policies.json (DuckDuckGo, uBlock Origin, SponsorBlock, CanvasBlocker, LocalCDN installed from addons.mozilla.org,
-# DNS over HTTPS, HTTPS-only). Nothing of anyone's own Zen layout is in it. While Zen is running the profile is left alone, so a second
-# launch opens another window in the same browser.
+# A new profile every time Zen starts, made from /usr/share/live-zen: user.js (less RAM and CPU, less tracking, no first-run pages, the
+# author's compact-mode layout), zen-themes.json (the list of Zen mods; Zen downloads them itself) and, in Zen's own folder, policies.json
+# (DuckDuckGo, uBlock Origin, SponsorBlock, CanvasBlocker, LocalCDN installed from addons.mozilla.org, DNS over HTTPS, HTTPS-only).
+# While Zen is running the profile is left alone, so a second launch opens another window in the same browser.
 T=${ZEN_LIVE_TEMPLATE:-/usr/share/live-zen}
 P=${ZEN_LIVE_PROFILE:-$HOME/.zen-live}
 if [ -f "$T/policies.json" ] && [ -d "$D/zen" ]; then
@@ -96,12 +96,13 @@ fi
 if [ -z "$running" ]; then
     rm -rf "$P"; mkdir -p "$P"
     [ -f "$T/user.js" ] && cp "$T/user.js" "$P/user.js"
+    [ -f "$T/zen-themes.json" ] && cp "$T/zen-themes.json" "$P/zen-themes.json"
 fi
 exec "$BIN" --profile "$P" "$@"
 GETZEN
     chmod 755 "$ROOT/usr/local/bin/get-zen"
     install -d "$ROOT/usr/share/live-zen"
-    install -m 644 "$(dirname "$(readlink -f "$0")")/live-zen/user.js" "$(dirname "$(readlink -f "$0")")/live-zen/policies.json" "$ROOT/usr/share/live-zen/"
+    install -m 644 "$(dirname "$(readlink -f "$0")")"/live-zen/{user.js,policies.json,zen-themes.json} "$ROOT/usr/share/live-zen/"
     cat > "$ROOT/usr/share/applications/zen-browser.desktop" <<'ZENDESKTOP'
 [Desktop Entry]
 Type=Application
