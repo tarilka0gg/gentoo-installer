@@ -291,6 +291,7 @@ pub(super) fn confirm_page_build(
                 secure_boot: state.secure_boot.get(),
                 build_kernel: state.build_kernel.get(),
                 render: state.render.get(),
+                flavor: state.flavor.borrow().clone(),
                 packages: state.packages.borrow().clone(),
                 stage3: std::env::var("GENTOO_INSTALLER_STAGE3_URL")
                     .ok()

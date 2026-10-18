@@ -3,7 +3,7 @@
 #
 # Steps, in order (default: all of them):
 #   check     read-only: clean trees, binaries newer than the sources, tools and inputs present. Always runs first.
-#   build     cargo build --release (installer-cli, installer-gui)
+#   build     cargo build --release (installer-cli, installer-gui, slp)
 #   limine    Limine's BIOS stages with the Ventoy patch (only if $LIMINE_DIR has no `limine` tool yet; REBUILD_LIMINE=1 forces)
 #   rootfs    refresh-rootfs.sh for live-root-gui (gui) and live-root (minimal)       [root]
 #   assemble  assemble-iso.sh for both images, Secure Boot signed                     [root]
@@ -100,7 +100,7 @@ step_check() {
 
 step_build() {
     say "build"
-    as_user cargo build --release --manifest-path "$REPO/Cargo.toml" -p installer-cli -p installer-gui
+    as_user cargo build --release --manifest-path "$REPO/Cargo.toml" -p installer-cli -p installer-gui -p slp
 }
 
 step_limine() {

@@ -44,6 +44,8 @@ pub struct Info {
     /// A package of this profile comes from the GURU overlay.
     pub guru: bool,
     pub needs_desktop: bool,
+    /// A graphics card (`gfx-*`): offered with the graphics, not as software to tick.
+    pub graphics: bool,
     /// Flavors: whether the system gets a desktop (`None`: inherits).
     pub desktop: Option<bool>,
     pub hidden: bool,
@@ -58,7 +60,8 @@ pub struct Info {
     pub use_lines: Vec<String>,
     pub licenses: Vec<String>,
     pub services: Vec<String>,
-    pub make_conf: Vec<(String, String)>,
+    /// `(key, value, append)`: `append` is `KEY+="value"`, which adds words to the other profiles' value.
+    pub make_conf: Vec<(String, String, bool)>,
     pub rebuild: Vec<String>,
 }
 
@@ -100,8 +103,9 @@ pub struct Effective {
     pub use_lines: Vec<String>,
     pub licenses: Vec<String>,
     pub services: Vec<String>,
-    /// Later profiles win per key.
-    pub make_conf: Vec<(String, String)>,
+    /// `(key, value, append)`: later profiles win per key, `+=` words are collected from all of them. `append`: [`render`] adds the
+    /// words to what the file already sets instead of replacing it.
+    pub make_conf: Vec<(String, String, bool)>,
     pub guru: bool,
     pub desktop: bool,
     pub rebuild: Vec<String>,
@@ -201,9 +205,14 @@ impl Repo {
         self.mix_in_order.iter().filter_map(|id| self.info(Kind::MixIn, id)).collect()
     }
 
-    /// The mix-ins that are software to tick (not in a group like `gfx`).
+    /// The mix-ins that are software to tick (not the graphics cards).
     pub fn software(&self) -> Vec<Info> {
-        self.mix_ins().into_iter().filter(|m| m.group.is_none()).collect()
+        self.mix_ins().into_iter().filter(|m| !m.graphics).collect()
+    }
+
+    /// The graphics-card mix-ins.
+    pub fn graphics(&self) -> Vec<Info> {
+        self.mix_ins().into_iter().filter(|m| m.graphics).collect()
     }
 
     pub fn flavor_names(&self) -> Vec<String> {
@@ -236,7 +245,11 @@ impl Repo {
             .iter()
             .filter_map(|l| {
                 let (k, v) = l.split_once('=')?;
-                Some((k.trim().to_string(), v.trim().trim_matches('"').to_string()))
+                let (k, append) = match k.trim().strip_suffix('+') {
+                    Some(k) => (k.trim(), true),
+                    None => (k.trim(), false),
+                };
+                Some((k.to_string(), v.trim().trim_matches('"').to_string(), append))
             })
             .collect();
         let desktop = raw.files.get("desktop").map(|t| matches!(t.trim(), "yes" | "true" | "1"));
@@ -250,6 +263,7 @@ impl Repo {
             group: self.file(&full, "group").into_iter().next(),
             guru: needs.iter().any(|n| n == "guru"),
             needs_desktop: needs.iter().any(|n| n == "desktop"),
+            graphics: raw.files.contains_key("graphics"),
             desktop,
             hidden: raw.files.contains_key("hidden"),
             parents,
@@ -359,10 +373,21 @@ impl Repo {
             for a in &info.rebuild {
                 push_unique(&mut eff.rebuild, a);
             }
-            for (k, v) in &info.make_conf {
-                match eff.make_conf.iter_mut().find(|(ek, _)| ek == k) {
-                    Some(slot) => slot.1 = v.clone(),
-                    None => eff.make_conf.push((k.clone(), v.clone())),
+            for (k, v, append) in &info.make_conf {
+                match eff.make_conf.iter_mut().find(|(ek, _, _)| ek == k) {
+                    Some(slot) if *append => {
+                        for w in v.split_whitespace() {
+                            if !slot.1.split_whitespace().any(|x| x == w) {
+                                slot.1 = format!("{} {w}", slot.1).trim().to_string();
+                            }
+                        }
+                        slot.2 = true;
+                    }
+                    Some(slot) => {
+                        slot.1 = v.clone();
+                        slot.2 = false;
+                    }
+                    None => eff.make_conf.push((k.clone(), v.split_whitespace().collect::<Vec<_>>().join(" "), *append)),
                 }
             }
             eff.guru |= info.guru;
@@ -443,15 +468,31 @@ pub struct RenderOptions {
     pub guru_wildcard: bool,
 }
 
+/// `/etc/portage/package.use` is a file on some systems and a directory on others, and Portage takes one or the other. When it is a
+/// file, it becomes a directory that keeps the old contents as `00-original`.
+fn ensure_config_dir(dir: &Path) -> std::io::Result<()> {
+    if dir.is_file() {
+        let old = std::fs::read(dir)?;
+        std::fs::remove_file(dir)?;
+        std::fs::create_dir_all(dir)?;
+        if !old.iter().all(u8::is_ascii_whitespace) {
+            std::fs::write(dir.join("00-original"), old)?;
+        }
+    } else {
+        std::fs::create_dir_all(dir)?;
+    }
+    Ok(())
+}
+
 fn write_managed(path: &Path, header: &str, body: &str) -> std::io::Result<Option<PathBuf>> {
     if body.is_empty() {
-        if path.exists() {
+        if path.is_file() {
             std::fs::remove_file(path)?;
         }
         return Ok(None);
     }
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        ensure_config_dir(dir)?;
     }
     std::fs::write(path, format!("{MANAGED}\n{header}\n{body}"))?;
     Ok(Some(path.to_path_buf()))
@@ -489,6 +530,29 @@ pub fn set_make_conf_key(path: &Path, key: &str, value: &str) -> std::io::Result
     Ok(true)
 }
 
+/// Adds words to a make.conf variable (`VIDEO_CARDS`) without removing the ones it has. Returns whether the file changed.
+pub fn add_make_conf_words(path: &Path, key: &str, words: &str) -> std::io::Result<bool> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut have: Vec<String> = Vec::new();
+    for l in text.lines() {
+        let l = l.trim_start();
+        if let Some(rest) = l.strip_prefix(key).map(str::trim_start).and_then(|r| r.strip_prefix('=')) {
+            have = rest.trim().trim_matches('"').split_whitespace().map(String::from).collect();
+        }
+    }
+    let mut changed = false;
+    for w in words.split_whitespace() {
+        if !have.iter().any(|h| h == w) {
+            have.push(w.to_string());
+            changed = true;
+        }
+    }
+    if !changed && text.lines().any(|l| l.trim_start().starts_with(key)) {
+        return Ok(false);
+    }
+    set_make_conf_key(path, key, &have.join(" "))
+}
+
 /// Writes the Portage configuration of a choice under `root` (`/` on a running system, the mounted target in the installer):
 /// `package.use`, `package.accept_keywords`, `package.license` (each as `slp`), the set `@slp` with the packages, and the
 /// `make.conf` keys. Returns the files written.
@@ -509,9 +573,11 @@ pub fn render(root: &Path, sel: &Selection, eff: &Effective, opts: RenderOptions
     ] {
         written.extend(write_managed(&portage.join(rel), &header, &body)?);
     }
-    for (k, v) in &eff.make_conf {
-        if set_make_conf_key(&portage.join("make.conf"), k, v)? {
-            written.push(portage.join("make.conf"));
+    for (k, v, append) in &eff.make_conf {
+        let path = portage.join("make.conf");
+        let changed = if *append { add_make_conf_words(&path, k, v)? } else { set_make_conf_key(&path, k, v)? };
+        if changed {
+            written.push(path);
         }
     }
     Ok(written)
@@ -577,7 +643,7 @@ mod tests {
             ("flavor/big/desktop", "yes\n"),
             ("flavor/big/defaults", "game\n"),
             ("flavor/big/use", "dev-foo/bar baz\n"),
-            ("mix-in/index", "tools\ngame\ngfx-a\ngfx-b\n"),
+            ("mix-in/index", "tools\ngame\ngfx-a\ngfx-b\ngfx-c\n"),
             ("mix-in/tools/desc", "Tools\nSome tools.\n"),
             ("mix-in/tools/atoms", "app-misc/a\n# a comment\n\napp-misc/b\n"),
             ("mix-in/game/desc", "Games\nPlay.\n"),
@@ -587,10 +653,15 @@ mod tests {
             ("mix-in/game/services", "gamed\n"),
             ("mix-in/gfx-a/desc", "A\nCard A.\n"),
             ("mix-in/gfx-a/group", "gfx\n"),
-            ("mix-in/gfx-a/make-conf", "VIDEO_CARDS=\"a\"\n"),
+            ("mix-in/gfx-a/make-conf", "VIDEO_CARDS+=\"a\"\n"),
+            ("mix-in/gfx-a/graphics", "\n"),
             ("mix-in/gfx-b/desc", "B\nCard B.\n"),
             ("mix-in/gfx-b/group", "gfx\n"),
-            ("mix-in/gfx-b/make-conf", "VIDEO_CARDS=\"b\"\n"),
+            ("mix-in/gfx-b/make-conf", "VIDEO_CARDS+=\"b c\"\n"),
+            ("mix-in/gfx-b/graphics", "\n"),
+            ("mix-in/gfx-c/desc", "C\nCard C.\n"),
+            ("mix-in/gfx-c/graphics", "\n"),
+            ("mix-in/gfx-c/make-conf", "VIDEO_CARDS+=\"c a\"\n"),
         ])
     }
 
@@ -647,10 +718,24 @@ mod tests {
     }
 
     #[test]
-    fn make_conf_keys_of_later_profiles_win() {
+    fn make_conf_words_are_collected_from_every_profile_that_adds_them() {
         let r = tiny();
         let e = r.resolve(&sel("base", &["gfx-a"])).unwrap();
-        assert_eq!(e.make_conf, vec![("VIDEO_CARDS".to_string(), "a".to_string())]);
+        assert_eq!(e.make_conf, vec![("VIDEO_CARDS".to_string(), "a".to_string(), true)]);
+        let e = r.resolve(&sel("base", &["gfx-c", "gfx-a"])).unwrap();
+        assert_eq!(e.make_conf, vec![("VIDEO_CARDS".to_string(), "c a".to_string(), true)], "a word once, in the order met");
+        let r = repo(&[
+            ("flavor/index", "f\n"), ("flavor/f/desc", "F\n"), ("flavor/f/make-conf", "X=\"one\"\n"),
+            ("mix-in/index", "m\n"), ("mix-in/m/desc", "M\n"), ("mix-in/m/make-conf", "X=\"two\"\n"),
+        ]);
+        assert_eq!(r.resolve(&sel("f", &["m"])).unwrap().make_conf, vec![("X".to_string(), "two".to_string(), false)], "plain: the later one wins");
+    }
+
+    #[test]
+    fn graphics_cards_are_kept_apart_from_software() {
+        let r = tiny();
+        assert_eq!(r.software().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["tools", "game"]);
+        assert_eq!(r.graphics().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["gfx-a", "gfx-b", "gfx-c"]);
     }
 
     #[test]
@@ -706,13 +791,29 @@ mod tests {
         assert!(read("package.accept_keywords/slp").contains("games-util/c ~amd64\n*/*::guru ~amd64\n"));
         assert!(read("package.license/slp").contains("games-util/c some-licence\n"));
         assert_eq!(read("sets/slp").lines().skip(2).collect::<Vec<_>>(), vec!["app-misc/a", "app-misc/b", "games-util/c"]);
-        assert_eq!(read("make.conf"), "CFLAGS=\"-O2\"\nVIDEO_CARDS=\"a\"\nMAKEOPTS=\"-j4\"\n");
+        assert_eq!(read("make.conf"), "CFLAGS=\"-O2\"\nVIDEO_CARDS=\"old a\"\nMAKEOPTS=\"-j4\"\n", "the words are added to what the file has");
         // rendering a smaller choice removes what is no longer needed
         let s2 = sel("base", &["tools"]);
         render(&root, &s2, &r.resolve(&s2).unwrap(), RenderOptions::default()).unwrap();
         assert!(!root.join("etc/portage/package.license/slp").exists());
         assert!(!root.join("etc/portage/package.accept_keywords/slp").exists());
         assert_eq!(std::fs::read_to_string(root.join("etc/portage/make.conf")).unwrap().matches("VIDEO_CARDS").count(), 1);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_plain_file_where_portage_wants_a_directory_is_turned_into_one_without_losing_it() {
+        let r = tiny();
+        let s = sel("big", &["tools", "game"]);
+        let e = r.resolve(&s).unwrap();
+        let root = temp("filedir");
+        std::fs::create_dir_all(root.join("etc/portage")).unwrap();
+        std::fs::write(root.join("etc/portage/package.use"), "dev-foo/old flag\n").unwrap();
+        std::fs::write(root.join("etc/portage/package.accept_keywords"), "\n").unwrap();
+        render(&root, &s, &e, RenderOptions::default()).unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("etc/portage/package.use/00-original")).unwrap(), "dev-foo/old flag\n");
+        assert!(root.join("etc/portage/sets/slp").is_file());
+        assert!(!root.join("etc/portage/package.accept_keywords/00-original").exists(), "an empty file is not worth keeping");
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -737,6 +838,19 @@ mod tests {
         std::fs::write(&f, "A=\"x\"\nAB=\"keep\"\nA = \"y\"\n").unwrap();
         set_make_conf_key(&f, "A", "z").unwrap();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "A=\"z\"\nAB=\"keep\"\n", "AB is another key; a second A line is dropped");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn add_make_conf_words_keeps_what_is_there_and_does_not_touch_an_unchanged_file() {
+        let root = temp("add");
+        let f = root.join("make.conf");
+        std::fs::write(&f, "VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi\"\nOTHER=\"x\"\n").unwrap();
+        assert!(!add_make_conf_words(&f, "VIDEO_CARDS", "intel radeonsi").unwrap(), "all there already");
+        assert!(add_make_conf_words(&f, "VIDEO_CARDS", "virgl intel").unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi virgl\"\nOTHER=\"x\"\n");
+        assert!(add_make_conf_words(&f, "NEW", "a b").unwrap());
+        assert!(std::fs::read_to_string(&f).unwrap().ends_with("NEW=\"a b\"\n"));
         std::fs::remove_dir_all(&root).ok();
     }
 

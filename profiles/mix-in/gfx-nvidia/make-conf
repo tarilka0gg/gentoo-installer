@@ -1,1 +1,1 @@
-VIDEO_CARDS="nvidia"
+VIDEO_CARDS+="nvidia"

@@ -6,6 +6,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
     Network,
+    /// What kind of system: a flavor of the profiles (skipped when `GENTOO_INSTALLER_FLAVOR` says).
+    Flavor,
     DiskSelect,
     Account,
     Confirm,

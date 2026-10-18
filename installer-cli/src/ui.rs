@@ -33,6 +33,9 @@ pub struct AppState {
     pub disks: Vec<disk::Disk>,
     pub profile: Option<hardware::Profile>,
     pub selected_disk: usize,
+    /// The flavors to choose from (the "System type" step) and the one under the cursor.
+    pub flavors: Vec<installer_core::packages::Flavor>,
+    pub flavor_idx: usize,
     pub status: String,
     pub install_log: Vec<String>,
     pub install_rx: Option<mpsc::UnboundedReceiver<InstallEvent>>,
@@ -56,6 +59,11 @@ pub struct AppState {
 
 impl AppState {
     fn new() -> Self {
+        let flavors = installer_core::packages::flavors();
+        let flavor_idx = flavors
+            .iter()
+            .position(|f| f.id == installer_core::packages::DEFAULT_FLAVOR)
+            .unwrap_or(0);
         Self {
             step: Step::Network,
             ethernet_up: network::IwdClient::ethernet_link_up()
@@ -63,6 +71,8 @@ impl AppState {
             disks: Vec::new(),
             profile: None,
             selected_disk: 0,
+            flavors,
+            flavor_idx,
             status: String::new(),
             install_log: Vec::new(),
             install_rx: None,
@@ -118,6 +128,14 @@ pub async fn run(terminal: &mut DefaultTerminal) -> Result<()> {
                 }
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Down if state.step == Step::Flavor => {
+                        if state.flavor_idx + 1 < state.flavors.len() {
+                            state.flavor_idx += 1;
+                        }
+                    }
+                    KeyCode::Up if state.step == Step::Flavor => {
+                        state.flavor_idx = state.flavor_idx.saturating_sub(1);
+                    }
                     KeyCode::Down => {
                         if state.selected_disk + 1 < state.disks.len() {
                             state.selected_disk += 1;
@@ -257,20 +275,31 @@ async fn enter_confirm(state: &mut AppState) {
     state.step = Step::Confirm;
 }
 
+/// Detects the hardware, lists the disks and shows the disk page.
+async fn enter_disk_select(state: &mut AppState) {
+    state.step = Step::DiskSelect;
+    state.status = "detecting hardware + listing disks...".into();
+    state.profile = hardware::Profile::detect().ok();
+    match disk::list(&installer_core::command::RealCommandRunner).await {
+        Ok(disks) => {
+            state.disks = disks;
+            state.status.clear();
+        }
+        Err(e) => state.status = format!("disk listing failed: {e}"),
+    }
+}
+
 async fn advance(state: &mut AppState) {
     match state.step {
         Step::Network => {
-            state.step = Step::DiskSelect;
-            state.status = "detecting hardware + listing disks...".into();
-            state.profile = hardware::Profile::detect().ok();
-            match disk::list(&installer_core::command::RealCommandRunner).await {
-                Ok(disks) => {
-                    state.disks = disks;
-                    state.status.clear();
-                }
-                Err(e) => state.status = format!("disk listing failed: {e}"),
+            // The flavor is asked for unless the environment (or the simulation) already answers it.
+            if std::env::var("GENTOO_INSTALLER_FLAVOR").is_ok() || simulate_mode() || state.flavors.len() < 2 {
+                enter_disk_select(state).await;
+            } else {
+                state.step = Step::Flavor;
             }
         }
+        Step::Flavor => enter_disk_select(state).await,
         Step::DiskSelect => {
             if state.disks.get(state.selected_disk).is_some() {
                 let from_env = std::env::var("GENTOO_INSTALLER_USERNAME").is_ok()
@@ -399,13 +428,22 @@ fn start_install(state: &mut AppState, mode: RunMode) {
         Ok("none") => Some(installer_core::hardware::Gpu::None),
         _ => None,
     };
+    let flavor = std::env::var("GENTOO_INSTALLER_FLAVOR")
+        .map(|v| v.trim().to_string())
+        .unwrap_or_else(|_| {
+            state
+                .flavors
+                .get(state.flavor_idx)
+                .map(|f| f.id.clone())
+                .unwrap_or_else(|| installer_core::packages::DEFAULT_FLAVOR.to_string())
+        });
     let packages: Vec<String> = match std::env::var("GENTOO_INSTALLER_PACKAGES") {
         Ok(v) => v
             .split(',')
             .map(|g| g.trim().to_string())
             .filter(|g| !g.is_empty())
             .collect(),
-        Err(_) => installer_core::packages::default_ids(),
+        Err(_) => installer_core::packages::default_ids_for(&flavor),
     };
 
     // Custom stage3 (your own tarball): GENTOO_INSTALLER_STAGE3_URL=<https://…|file://…|/path>,
@@ -450,6 +488,7 @@ fn start_install(state: &mut AppState, mode: RunMode) {
         locales,
         gpu_override,
         render: crate::headless::render_from_env(),
+        flavor,
         packages,
         stage3,
         account,
@@ -479,6 +518,7 @@ fn draw(frame: &mut ratatui::Frame, state: &AppState) {
 
     match state.step {
         Step::Network => draw_network(frame, chunks[1], state),
+        Step::Flavor => draw_flavor(frame, chunks[1], state),
         Step::DiskSelect => draw_disk_select(frame, chunks[1], state),
         Step::Account => draw_account(frame, chunks[1], state),
         Step::Confirm => draw_confirm(frame, chunks[1], state),
@@ -557,6 +597,27 @@ fn draw_network(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: 
         Paragraph::new(hint).block(Block::default().borders(Borders::ALL)),
         chunks[2],
     );
+}
+
+fn draw_flavor(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let items: Vec<ListItem> = state
+        .flavors
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let marker = if i == state.flavor_idx { ">" } else { " " };
+            ListItem::new(vec![
+                Line::from(format!("{marker} {}", f.name)),
+                Line::from(format!("    {}", f.description)),
+            ])
+        })
+        .collect();
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("System type [Up/Down, Enter to continue] (change it later with `slp`)"),
+    );
+    frame.render_widget(list, area);
 }
 
 fn draw_disk_select(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -727,6 +788,20 @@ mod tests {
             .install_log
             .iter()
             .any(|l| l.contains("git clone failed")));
+    }
+
+    #[tokio::test]
+    async fn the_system_type_is_asked_after_the_network_and_the_cursor_starts_on_the_default() {
+        std::env::remove_var("GENTOO_INSTALLER_FLAVOR");
+        std::env::remove_var("GENTOO_INSTALLER_SIMULATE");
+        let mut state = AppState::new();
+        assert_eq!(
+            state.flavors.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+            ["minimal", "desktop", "workstation"]
+        );
+        assert_eq!(state.flavors[state.flavor_idx].id, "desktop");
+        advance(&mut state).await; // the network step
+        assert_eq!(state.step, Step::Flavor);
     }
 
     #[test]

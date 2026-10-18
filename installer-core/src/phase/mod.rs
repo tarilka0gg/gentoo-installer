@@ -163,6 +163,8 @@ pub struct Settings {
     pub secure_boot: bool,
     /// Git URL of the wm-configs repository the desktop step clones.
     pub wm_configs_git_url: String,
+    /// The flavor of the system (`minimal`, `desktop`, `workstation`; see `profiles/`).
+    pub flavor: String,
     /// Ids from `packages::GROUPS` to install after the desktop.
     pub packages: Vec<String>,
     /// Replaces the detected GPU (kernel build, driver, `VIDEO_CARDS`); `None` keeps detection.
@@ -190,6 +192,7 @@ impl Default for Settings {
             secure_boot: false,
             wm: crate::wm::WmChoice::default(),
             wm_configs_git_url: String::new(),
+            flavor: crate::packages::DEFAULT_FLAVOR.to_string(),
             packages: Vec::new(),
             gpu_override: None,
             render: Default::default(),

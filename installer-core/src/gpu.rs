@@ -226,6 +226,27 @@ pub fn video_cards(devices: &[GpuDevice], extra: Option<Gpu>, nouveau: bool) -> 
     out
 }
 
+/// The graphics mix-ins (`gfx-*` of the profiles) that go with the adapters: the same detection as [`video_cards`], named the way
+/// `slp` names them, in the same order, each once.
+pub fn gfx_mix_ins(devices: &[GpuDevice], extra: Option<Gpu>, nouveau: bool) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in video_cards(devices, extra, nouveau) {
+        let id = match word {
+            "amdgpu" | "radeonsi" => "gfx-amd",
+            "radeon" | "r300" | "r600" => "gfx-legacy-radeon",
+            "intel" => "gfx-intel",
+            "nvidia" => "gfx-nvidia",
+            "nouveau" => "gfx-nouveau",
+            "virgl" | "vmware" | "qxl" => "gfx-virtual",
+            _ => continue,
+        };
+        if !out.iter().any(|o| o == id) {
+            out.push(id.to_string());
+        }
+    }
+    out
+}
+
 /// The adapter the compositor should render on. Physical adapters are preferred over virtual ones;
 /// among those, [`RenderPreference::Auto`] takes the most capable (discrete) one and
 /// [`RenderPreference::Integrated`] the least capable. `None` when the machine has no adapter.
@@ -373,6 +394,24 @@ mod tests {
     fn a_virtual_gpu_gets_its_mesa_driver() {
         assert_eq!(video_cards(&parse_lspci(VIRTIO), None, false), ["virgl"]);
         assert_eq!(video_cards(&[], None, false), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn the_graphics_mix_ins_are_the_detected_drivers_under_their_profile_names() {
+        // the hybrid laptop: both adapters, discrete first, and the proprietary or the open NVIDIA driver as chosen
+        assert_eq!(gfx_mix_ins(&parse_lspci(HYBRID), None, false), ["gfx-nvidia", "gfx-intel"]);
+        assert_eq!(gfx_mix_ins(&parse_lspci(HYBRID), None, true), ["gfx-nouveau", "gfx-intel"]);
+        assert_eq!(gfx_mix_ins(&parse_lspci(VIRTIO), None, false), ["gfx-virtual"]);
+        assert_eq!(gfx_mix_ins(&parse_lspci(VIRTIO), Some(Gpu::Amd), false), ["gfx-virtual", "gfx-amd"]);
+        assert_eq!(gfx_mix_ins(&[], Some(Gpu::RadeonLegacy), false), ["gfx-legacy-radeon"]);
+        assert_eq!(gfx_mix_ins(&[], None, false), Vec::<String>::new());
+        // every name is a mix-in that exists, and a hybrid laptop's pair can be chosen together
+        for id in ["gfx-nvidia", "gfx-intel", "gfx-nouveau", "gfx-virtual", "gfx-amd", "gfx-legacy-radeon"] {
+            assert!(slp_profiles::Repo::bundled().info(slp_profiles::Kind::MixIn, id).is_some(), "{id}");
+        }
+        assert!(slp_profiles::Repo::bundled()
+            .resolve(&slp_profiles::Selection { flavor: "desktop".into(), mix_ins: gfx_mix_ins(&parse_lspci(HYBRID), None, false) })
+            .is_ok());
     }
 
     #[test]

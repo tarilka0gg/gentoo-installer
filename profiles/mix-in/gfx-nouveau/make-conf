@@ -1,1 +1,1 @@
-VIDEO_CARDS="nouveau"
+VIDEO_CARDS+="nouveau"

@@ -1,1 +1,1 @@
-VIDEO_CARDS="amdgpu radeonsi"
+VIDEO_CARDS+="amdgpu radeonsi"

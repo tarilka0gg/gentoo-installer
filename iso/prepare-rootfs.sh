@@ -13,6 +13,15 @@ PROFILE=${5:-}     # optional output of make-profile.py: the user's own niri/Noc
 install -Dm755 "$CLI" "$ROOT/usr/local/bin/installer-cli"
 "$(dirname "$(readlink -f "$0")")/strip-isa-note.sh" "$ROOT/usr/local/bin/installer-cli"
 
+# slp (flavors and mix-ins): the installer copies it from here into every system it installs (installer-core's slp_tool). Built
+# next to the installer (cargo build -p slp); the live image itself is the `live` flavor.
+SLP_BIN=$(dirname "$CLI")/slp
+if [ -x "$SLP_BIN" ]; then
+    install -Dm755 "$SLP_BIN" "$ROOT/usr/local/bin/slp"
+    install -d "$ROOT/etc/slp"
+    printf '# The Simple Linux profile of this system; change it with `slp`.\nflavor=live\n' > "$ROOT/etc/slp/state"
+fi
+
 # Empty root password + autologin on both consoles. The serial line is what QEMU tests use.
 chroot "$ROOT" passwd -d root >/dev/null
 sed -i -E '/^c1:/d; /^s0:/d' "$ROOT/etc/inittab"

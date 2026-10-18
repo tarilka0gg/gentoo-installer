@@ -1193,6 +1193,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "slp-profiles",
  "thiserror",
  "tokio",
  "tokio-stream",

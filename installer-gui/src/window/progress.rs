@@ -504,6 +504,7 @@ pub fn build_debug_progress(app: &adw::Application) {
         locales: vec!["en_US.UTF-8".into()],
         gpu_override: None,
         render: Default::default(),
+        flavor: installer_core::packages::DEFAULT_FLAVOR.to_string(),
         packages: Vec::new(),
         stage3: None,
         account: Account {

@@ -291,9 +291,8 @@ pub(super) fn gpu_select_page(
     page
 }
 
-/// Advanced-setup only: optional software, one switch per group in `installer_core::packages`.
-/// The defaults (terminal, browser, CLI tools) are ticked; with Advanced off they are
-/// installed anyway.
+/// Advanced-setup only: the system type (flavor) and the optional software, one switch per group in `installer_core::packages`.
+/// The defaults of the chosen flavor are ticked; with Advanced off they are installed anyway.
 pub(super) fn packages_select_page(
     nav: adw::NavigationView,
     state: Rc<WizardState>,
@@ -312,11 +311,32 @@ pub(super) fn packages_select_page(
         .wrap(true)
         .build();
 
+    // The system type: one flavor of the profiles. Choosing one ticks what it ticks by default and hides what needs a desktop on a
+    // console system; `slp` on the installed system changes it later.
+    let flavors = Rc::new(installer_core::packages::flavors());
+    let flavor_names: Vec<&str> = flavors.iter().map(|f| f.name.as_str()).collect();
+    let flavor_row = adw::ComboRow::builder()
+        .title("System type")
+        .model(&gtk::StringList::new(&flavor_names))
+        .build();
+    let current = state.flavor.borrow().clone();
+    flavor_row.set_selected(flavors.iter().position(|f| f.id == current).unwrap_or(0) as u32);
+    if let Some(f) = flavors.iter().find(|f| f.id == current) {
+        flavor_row.set_subtitle(&f.description);
+    }
+    let flavor_list = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .css_classes(vec!["boxed-list".to_string()])
+        .build();
+    flavor_list.append(&flavor_row);
+
     let list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .css_classes(vec!["boxed-list".to_string()])
         .build();
-    for group in installer_core::packages::GROUPS {
+    // (group id, its switch, its row, whether it needs a desktop)
+    let mut group_rows: Vec<(String, gtk::Switch, adw::ActionRow, bool)> = Vec::new();
+    for group in installer_core::packages::GROUPS.iter() {
         if !installer_core::offline::group_available(group.id) {
             continue; // not on an offline medium
         }
@@ -330,17 +350,46 @@ pub(super) fn packages_select_page(
             .build();
         let state = state.clone();
         let id = group.id.to_string();
-        switch.connect_state_set(move |_, on| {
-            let mut ids = state.packages.borrow_mut();
-            ids.retain(|i| *i != id);
-            if on {
-                ids.push(id.clone());
+        switch.connect_state_set({
+            let id = id.clone();
+            move |_, on| {
+                let mut ids = state.packages.borrow_mut();
+                ids.retain(|i| *i != id);
+                if on {
+                    ids.push(id.clone());
+                }
+                glib::Propagation::Proceed
             }
-            glib::Propagation::Proceed
         });
         row.add_suffix(&switch);
         row.set_activatable_widget(Some(&switch));
         list.append(&row);
+        group_rows.push((id, switch, row, group.needs_desktop));
+    }
+    let group_rows = Rc::new(group_rows);
+    {
+        let state = state.clone();
+        let flavors = flavors.clone();
+        let group_rows = group_rows.clone();
+        flavor_row.connect_selected_notify(move |row| {
+            let Some(f) = flavors.get(row.selected() as usize) else {
+                return;
+            };
+            row.set_subtitle(&f.description);
+            *state.flavor.borrow_mut() = f.id.clone();
+            for (id, switch, group_row, needs_desktop) in group_rows.iter() {
+                let usable = f.desktop || !*needs_desktop;
+                group_row.set_visible(usable);
+                // the switch handler keeps `state.packages` in step
+                switch.set_active(usable && f.defaults.iter().any(|d| d == id));
+            }
+        });
+    }
+    // The page opens with the rows of the current flavor.
+    if let Some(f) = flavors.iter().find(|f| f.id == current) {
+        for (_, _, row, needs_desktop) in group_rows.iter() {
+            row.set_visible(f.desktop || !*needs_desktop);
+        }
     }
 
     let content = gtk::Box::builder()
@@ -353,6 +402,7 @@ pub(super) fn packages_select_page(
         .build();
     content.append(&heading);
     content.append(&body);
+    content.append(&flavor_list);
     content.append(&list);
     let next_button = gtk::Button::builder()
         .label("Continue")

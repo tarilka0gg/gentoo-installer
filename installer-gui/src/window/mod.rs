@@ -91,6 +91,8 @@ struct WizardState {
     gpu: Cell<Option<hardware::Gpu>>,
     /// Which graphics card the desktop is drawn on when there are several.
     render: Cell<installer_core::gpu::RenderPreference>,
+    /// The flavor of the system (`installer_core::packages::flavors`); the Software page changes it and the groups ticked with it.
+    flavor: RefCell<String>,
     packages: RefCell<Vec<String>>,
     opt_level: Cell<OptLevel>,
     package_mode: Cell<PackageMode>,
@@ -127,6 +129,7 @@ impl WizardState {
             wm: Cell::new(WmChoice::default()),
             gpu: Cell::new(None),
             render: Cell::new(installer_core::gpu::RenderPreference::default()),
+            flavor: RefCell::new(installer_core::packages::DEFAULT_FLAVOR.to_string()),
             packages: RefCell::new(installer_core::packages::default_ids()),
             opt_level: Cell::new(OptLevel::default()),
             package_mode: Cell::new(PackageMode::default()),

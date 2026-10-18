@@ -1,9 +1,10 @@
-//! Packages: the optional software groups the user ticked (`packages::GROUPS`).
+//! Packages: the optional software groups the user ticked (the mix-ins of the profiles), and `slp` to change them later.
 
 use super::{Ctx, Phase, PhaseId};
 use crate::event::{Event, EventTx};
 use crate::packages;
 use crate::portage_store;
+use crate::slp_tool;
 use crate::tui_shim;
 use crate::ustan;
 use std::path::Path;
@@ -42,7 +43,28 @@ impl Phase for PackagesPhase {
             id: self.id(),
             label: self.label().to_string(),
         });
-        packages::install(ctx.runner.as_ref(), &ctx.target, &ctx.settings.packages).await?;
+        let gpus = match ctx.runner.run("lspci", &["-nn", "-D"]).await {
+            Ok(text) => crate::gpu::parse_lspci(&text),
+            Err(_) => Vec::new(),
+        };
+        let nouveau = ctx.settings.gpu_override == Some(crate::hardware::Gpu::Nouveau)
+            || ctx.profile.as_ref().is_some_and(|p| p.gpu == crate::hardware::Gpu::Nouveau);
+        let gfx = crate::gpu::gfx_mix_ins(&gpus, ctx.settings.gpu_override, nouveau);
+        packages::install(
+            ctx.runner.as_ref(),
+            &ctx.target,
+            &ctx.settings.flavor,
+            &ctx.settings.packages,
+            &gfx,
+        )
+        .await?;
+        let copied = slp_tool::install_from_live(Path::new("/"), &ctx.target).await?;
+        if !copied.is_empty() {
+            let _ = tx.send(Event::Log {
+                line: format!("slp copied to /usr/local ({})", copied.join(", ")),
+                level: crate::event::Level::Info,
+            });
+        }
         if ctx.settings.ustan {
             let copied = ustan::install_from_live(Path::new("/"), &ctx.target).await?;
             if !copied.is_empty() {

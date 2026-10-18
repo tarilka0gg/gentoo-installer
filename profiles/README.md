@@ -4,7 +4,8 @@ A system is **one flavor** plus any number of **mix-ins**, like Funtoo's `epro` 
 
 * a **flavor** says what kind of system it is and inherits from another one (`workstation` → `desktop` → `minimal`);
 * a **mix-in** is an optional bundle (`gaming`, `office`, `dev`, ...) of packages and the USE flags they need;
-* the **`gfx-*` mix-ins** are the graphics card: only one of them at a time (they share the group `gfx`) and each sets `VIDEO_CARDS`.
+* the **`gfx-*` mix-ins** are the graphics cards of the machine (`graphics`): each adds its drivers to `VIDEO_CARDS`, so a laptop with Intel and
+  NVIDIA graphics has both; the alternatives for one vendor exclude each other (`gfx-amd` or `gfx-legacy-radeon`, `gfx-nvidia` or `gfx-nouveau`).
 
 The installer's Software page, the `slp` command and the build of the binhost and of the live ISO all read the same files, which are
 compiled into them (the `slp-profiles` crate), so there is one place that says what each choice means.
@@ -29,9 +30,10 @@ Every file of a profile directory is optional. Lines starting with `#` and empty
 | `use` | `package.use` lines |
 | `licenses` | `package.license` lines |
 | `services` | OpenRC services to switch on after the packages are installed, in order |
-| `make-conf` | `KEY="value"` lines for `/etc/portage/make.conf` (the graphics mix-ins set `VIDEO_CARDS`) |
+| `make-conf` | `KEY="value"` lines for `/etc/portage/make.conf`; `KEY+="value"` adds words to what the other profiles set (the graphics mix-ins add to `VIDEO_CARDS`) |
 | `needs` | `guru` (the package comes from the GURU overlay), `desktop` (only makes sense with a desktop) |
 | `group` | mix-ins with the same group exclude each other |
+| `graphics` | an empty marker: a graphics card, not software to tick on the Software page |
 | `desktop` | flavors only: `yes` or `no`, whether the system gets a desktop |
 | `defaults` | flavors only: the mix-ins ticked by default (inherited and added to) |
 | `hidden` | flavors only: not offered by the installer (`live` is the ISO's own) |

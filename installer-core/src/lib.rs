@@ -32,6 +32,7 @@ pub mod sltools;
 pub mod stage3;
 pub mod store;
 pub mod timezone;
+pub mod slp_tool;
 pub mod tui_shim;
 pub mod ustan;
 pub mod wm;

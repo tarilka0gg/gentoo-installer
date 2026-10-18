@@ -77,3 +77,18 @@ fn the_flavors_offered_are_the_three_and_the_live_one_is_hidden() {
     assert_eq!(repo.resolve(&Selection { flavor: "minimal".into(), mix_ins: vec![] }).unwrap().desktop, false);
     assert_eq!(repo.resolve(&Selection { flavor: "workstation".into(), mix_ins: vec![] }).unwrap().desktop, true);
 }
+
+#[test]
+fn the_graphics_mix_ins_name_the_drivers_the_installer_picks() {
+    let repo = Repo::bundled();
+    let vc = |id: &str| repo.resolve(&Selection { flavor: "desktop".into(), mix_ins: vec![id.into()] }).unwrap().make_conf;
+    assert_eq!(vc("gfx-amd"), vec![("VIDEO_CARDS".to_string(), "amdgpu radeonsi".to_string(), true)]);
+    assert_eq!(vc("gfx-legacy-radeon")[0].1, "radeon r300 r600");
+    assert_eq!(vc("gfx-intel")[0].1, "intel");
+    assert_eq!(vc("gfx-virtual")[0].1, "virgl vmware qxl");
+    // a hybrid laptop: both, and the alternatives for one vendor exclude each other
+    let both = repo.resolve(&Selection { flavor: "desktop".into(), mix_ins: vec!["gfx-nvidia".into(), "gfx-intel".into()] }).unwrap();
+    assert_eq!(both.make_conf, vec![("VIDEO_CARDS".to_string(), "nvidia intel".to_string(), true)]);
+    assert!(repo.resolve(&Selection { flavor: "desktop".into(), mix_ins: vec!["gfx-nvidia".into(), "gfx-nouveau".into()] }).is_err());
+    assert!(repo.software().iter().all(|m| !m.id.starts_with("gfx-")));
+}

@@ -82,7 +82,13 @@ pub async fn run() -> Result<()> {
     if let Ok(v) = std::env::var("GENTOO_INSTALLER_KEYBOARD_OPTIONS") {
         settings.keyboard_options = v;
     }
-    settings.desktop = std::env::var("GENTOO_INSTALLER_WM").as_deref() != Ok("none");
+    // The flavor (`minimal`, `desktop`, `workstation`) says whether there is a desktop and what is ticked by default;
+    // GENTOO_INSTALLER_WM=none still turns the desktop off.
+    if let Ok(v) = std::env::var("GENTOO_INSTALLER_FLAVOR") {
+        settings.flavor = v.trim().to_string();
+    }
+    settings.desktop = installer_core::packages::flavor_has_desktop(&settings.flavor)
+        && std::env::var("GENTOO_INSTALLER_WM").as_deref() != Ok("none");
     settings.ustan = std::env::var("GENTOO_INSTALLER_USTAN").as_deref() != Ok("0");
     settings.portage_store = std::env::var("GENTOO_INSTALLER_STORE").as_deref() != Ok("0");
     settings.secure_boot = std::env::var("GENTOO_INSTALLER_SECUREBOOT").as_deref() == Ok("1");
@@ -102,7 +108,7 @@ pub async fn run() -> Result<()> {
             .map(|g| g.trim().to_string())
             .filter(|g| !g.is_empty())
             .collect(),
-        Err(_) => installer_core::packages::default_ids(),
+        Err(_) => installer_core::packages::default_ids_for(&settings.flavor),
     };
     settings.gpu_override = match std::env::var("GENTOO_INSTALLER_GPU").as_deref() {
         Ok("nvidia") => Some(installer_core::hardware::Gpu::Nvidia),

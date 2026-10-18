@@ -43,6 +43,9 @@ pub struct InstallOptions {
     /// NVIDIA driver gets compiled. `None` keeps whatever detection found.
     pub gpu_override: Option<Gpu>,
     pub render: crate::gpu::RenderPreference,
+    /// The flavor of the system (`minimal`, `desktop`, `workstation`): it decides whether the system gets a desktop and which software
+    /// is ticked by default.
+    pub flavor: String,
     /// Ids from `packages::GROUPS` to emerge after the desktop.
     pub packages: Vec<String>,
     /// A custom stage3 tarball (your own, with your shell and tools) instead of Gentoo's
@@ -87,11 +90,12 @@ impl InstallOptions {
             account: Some(self.account),
             stage3: self.stage3,
             wm: self.wm,
-            desktop: true,
+            desktop: crate::packages::flavor_has_desktop(&self.flavor),
             ustan: true,
             portage_store: true,
             secure_boot: self.secure_boot,
             wm_configs_git_url: self.wm_configs_git_url,
+            flavor: self.flavor,
             packages: self.packages,
             gpu_override: self.gpu_override,
             render: self.render,
@@ -247,6 +251,7 @@ mod tests {
             locales: vec!["uk_UA.UTF-8".into()],
             gpu_override: Some(Gpu::Amd),
             render: Default::default(),
+            flavor: "desktop".into(),
             packages: vec!["wifi".into()],
             stage3: None,
             account: Account {
