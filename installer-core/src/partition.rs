@@ -343,11 +343,13 @@ pub async fn create_partitions(
         Some((root_mib, _)) => format!("{}MiB", swap_end_mib + root_mib),
         None => tail.to_string(),
     };
+    // `--` ends parted's own options, so that an end like `-2MiB` (from the end of the disk) is a position and not a flag.
     runner
         .run_status(
             "parted",
             &[
                 "--script",
+                "--",
                 disk,
                 "mkpart",
                 "root",
@@ -360,7 +362,7 @@ pub async fn create_partitions(
         runner
             .run_status(
                 "parted",
-                &["--script", disk, "mkpart", "home", &root_end, tail],
+                &["--script", "--", disk, "mkpart", "home", &root_end, tail],
             )
             .await?;
     }
@@ -371,7 +373,7 @@ pub async fn create_partitions(
         runner
             .run_status(
                 "parted",
-                &["--script", disk, "mkpart", "biosboot", "-2MiB", "-1MiB"],
+                &["--script", "--", disk, "mkpart", "biosboot", "-2MiB", "-1MiB"],
             )
             .await?;
         runner
@@ -767,7 +769,7 @@ mod tests {
         let root = calls.iter().find(|a| a.contains(&"root".to_string())).unwrap();
         assert_eq!(root[root.len() - 1], "-2MiB", "root stops short of the end: {root:?}");
         let n = calls.len();
-        assert_eq!(calls[n - 2], ["--script", "/dev/sda", "mkpart", "biosboot", "-2MiB", "-1MiB"]);
+        assert_eq!(calls[n - 2], ["--script", "--", "/dev/sda", "mkpart", "biosboot", "-2MiB", "-1MiB"]);
         assert_eq!(calls[n - 1], ["--script", "/dev/sda", "set", "4", "bios_grub", "on"]);
     }
 
