@@ -71,6 +71,10 @@ pub struct Layout {
     /// `/home` on a partition of its own when the disk is big enough (see [`root_home_split`]).
     #[serde(default = "default_true")]
     pub separate_home: bool,
+    /// A 1 MiB BIOS boot partition at the very end of the disk, which Limine needs to boot a GPT disk through legacy BIOS (it keeps
+    /// its second stage there). Made when the machine itself booted through BIOS; last, so that the other partitions keep their numbers.
+    #[serde(default)]
+    pub bios_boot: bool,
 }
 
 /// `(root_mib, home_mib)` for a disk of `disk_bytes` with the ESP and swap in front, or `None` when everything should stay in one
@@ -115,6 +119,7 @@ pub fn plan_with_swap(disk: &str, root_fs: RootFs, swap_gib: u64) -> Layout {
         swap_gib: swap_gib.clamp(SWAP_MIN_GIB, SWAP_MAX_GIB),
         root_fs,
         separate_home: true,
+        bios_boot: !crate::bootloader::firmware_is_uefi(),
     }
 }
 
@@ -201,6 +206,8 @@ pub fn plan_free_space(
             root_n,
             home_n,
         },
+        // next to other systems the layout is only the three partitions in the free region (a BIOS boot partition is not made there)
+        bios_boot: false,
         ..plan_with_swap(disk, root_fs, swap_gib)
     }
 }
@@ -330,9 +337,11 @@ pub async fn create_partitions(
     } else {
         None
     };
+    // The last of `/` and `/home` ends 2 MiB before the end of the disk when the BIOS boot partition goes after it.
+    let tail = if layout.bios_boot { "-2MiB" } else { "100%" };
     let root_end = match split {
         Some((root_mib, _)) => format!("{}MiB", swap_end_mib + root_mib),
-        None => "100%".to_string(),
+        None => tail.to_string(),
     };
     runner
         .run_status(
@@ -351,8 +360,22 @@ pub async fn create_partitions(
         runner
             .run_status(
                 "parted",
-                &["--script", disk, "mkpart", "home", &root_end, "100%"],
+                &["--script", disk, "mkpart", "home", &root_end, tail],
             )
+            .await?;
+    }
+    if layout.bios_boot {
+        // Limine's `bios-install` finds it by its type (the `bios_grub` flag) on a GPT disk; after `/home` or `/` so that the numbers
+        // of the others stay: 4 without `/home`, 5 with it.
+        let n = if split.is_some() { "5" } else { "4" };
+        runner
+            .run_status(
+                "parted",
+                &["--script", disk, "mkpart", "biosboot", "-2MiB", "-1MiB"],
+            )
+            .await?;
+        runner
+            .run_status("parted", &["--script", disk, "set", n, "bios_grub", "on"])
             .await?;
     }
 
@@ -726,6 +749,62 @@ mod tests {
             "parted",
             &["--script", "/dev/sda", "set", "1", "esp", "on"],
         );
+    }
+
+    fn parted_calls(runner: &FakeCommandRunner) -> Vec<Vec<String>> {
+        runner.calls().into_iter().filter(|(c, _)| c == "parted").map(|(_, a)| a).collect()
+    }
+
+    #[tokio::test]
+    async fn a_bios_machine_gets_a_bios_boot_partition_after_the_others_so_they_keep_their_numbers() {
+        // Limine cannot boot a GPT disk through legacy BIOS without one ("no BIOS boot partition specified or detected").
+        let runner = FakeCommandRunner::new(); // no size known: one root partition
+        let mut layout = plan("/dev/sda", RootFs::Btrfs, 16 * GIB);
+        layout.bios_boot = true;
+        let parts = create_partitions(&runner, &layout).await.unwrap();
+        assert_eq!((parts.esp.as_str(), parts.swap.as_str(), parts.root.as_str()), ("/dev/sda1", "/dev/sda2", "/dev/sda3"));
+        let calls = parted_calls(&runner);
+        let root = calls.iter().find(|a| a.contains(&"root".to_string())).unwrap();
+        assert_eq!(root[root.len() - 1], "-2MiB", "root stops short of the end: {root:?}");
+        let n = calls.len();
+        assert_eq!(calls[n - 2], ["--script", "/dev/sda", "mkpart", "biosboot", "-2MiB", "-1MiB"]);
+        assert_eq!(calls[n - 1], ["--script", "/dev/sda", "set", "4", "bios_grub", "on"]);
+    }
+
+    #[tokio::test]
+    async fn with_a_home_partition_the_bios_boot_partition_is_the_fifth() {
+        let runner = FakeCommandRunner::new();
+        runner.respond("blockdev", format!("{}\n", 1000 * GIB));
+        let mut layout = plan("/dev/sda", RootFs::Btrfs, 16 * GIB);
+        layout.bios_boot = true;
+        let parts = create_partitions(&runner, &layout).await.unwrap();
+        assert_eq!(parts.home.as_deref(), Some("/dev/sda4"));
+        let calls = parted_calls(&runner);
+        let home = calls.iter().find(|a| a.contains(&"home".to_string())).unwrap();
+        assert_eq!(home[home.len() - 1], "-2MiB");
+        assert_eq!(calls[calls.len() - 1], ["--script", "/dev/sda", "set", "5", "bios_grub", "on"]);
+    }
+
+    #[tokio::test]
+    async fn a_uefi_machine_gets_no_bios_boot_partition_and_the_old_ends() {
+        let runner = FakeCommandRunner::new();
+        let mut layout = plan("/dev/sda", RootFs::Btrfs, 16 * GIB);
+        layout.bios_boot = false;
+        create_partitions(&runner, &layout).await.unwrap();
+        let calls = parted_calls(&runner);
+        assert!(!calls.iter().any(|a| a.iter().any(|x| x == "bios_grub" || x == "biosboot")));
+        let root = calls.iter().find(|a| a.contains(&"root".to_string())).unwrap();
+        assert_eq!(root[root.len() - 1], "100%");
+    }
+
+    #[test]
+    fn a_layout_saved_before_the_field_existed_loads_without_one() {
+        let mut layout = plan("/dev/sda", RootFs::Btrfs, 16 * GIB);
+        layout.bios_boot = true;
+        let mut json: serde_json::Value = serde_json::to_value(&layout).unwrap();
+        json.as_object_mut().unwrap().remove("bios_boot");
+        let old: Layout = serde_json::from_value(json).unwrap();
+        assert!(!old.bios_boot);
     }
 
     const GIB: u64 = 1024 * 1024 * 1024;

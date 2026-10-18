@@ -157,7 +157,8 @@ pub async fn configure(
     .await
 }
 
-fn firmware_is_uefi() -> bool {
+/// Booted through UEFI (the machine this runs on; the installed system boots the same way).
+pub fn firmware_is_uefi() -> bool {
     Path::new("/sys/firmware/efi").is_dir()
 }
 
