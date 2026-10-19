@@ -276,10 +276,12 @@ pub fn build(app: &adw::Application) {
         .build();
 
     window.present();
-    // `GENTOO_INSTALLER_GUI_PAGE=keyboard|timezone|gpu|software|optimization` opens the wizard on that page (for looking at it).
+    // `GENTOO_INSTALLER_GUI_PAGE=keyboard|timezone|desktop|gpu|disk|software|optimization|network` opens the wizard on that page (for looking at it).
     match std::env::var("GENTOO_INSTALLER_GUI_PAGE").as_deref() {
         Ok("keyboard") => nav.push(&keyboard_page),
         Ok("timezone") => nav.push(&timezone_page),
+        Ok("desktop") => nav.push(&wm_page),
+        Ok("network") => nav.push(&network_page),
         Ok("gpu") => nav.push(&gpu_page),
         Ok("disk") => nav.push(&disk_page),
         Ok("software") => nav.push(&packages_page),

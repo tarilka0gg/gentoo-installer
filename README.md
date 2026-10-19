@@ -59,6 +59,10 @@ License: [GPL-2.0-or-later](LICENSE).
 - **Extras copied from the live image**: [ustan](https://github.com/tarilka0gg/ustan), Portage Store and
   [tui-shim](https://github.com/tarilka0gg/tui-shim) (terminal programs as desktop apps).
 
+## Screenshots
+
+Every page of the graphical installer: [simple-linux, "The installer"](https://github.com/tarilka0gg/simple-linux#the-installer). `GENTOO_INSTALLER_GUI_PAGE=keyboard|timezone|desktop|gpu|disk|software|optimization|network installer-gui` opens the wizard on a page, and `installer-gui --debug-progress` shows the installing and done screens with a simulated run, which is how they were taken.
+
 ## Design choices
 
 - **OpenRC only, no systemd.** Services are enabled through `services.rs` (`rc-update add … default`); the keyboard layout is read from
