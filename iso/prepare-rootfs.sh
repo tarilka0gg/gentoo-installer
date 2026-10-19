@@ -740,6 +740,18 @@ grep -q '^rc_parallel="YES"' "$ROOT/etc/rc.conf" || echo 'rc_parallel="YES"' >> 
 
 echo simple-linux-live > "$ROOT/etc/hostname"
 sed -i 's/^hostname=.*/hostname="simple-linux-live"/' "$ROOT/etc/conf.d/hostname"
+# One language setting for Simple Linux programs (https://github.com/tarilka0gg/simple-locale): "auto" follows the system locale,
+# "uk" or "en" decides for the machine; ~/.config/simple-linux/locale.toml and SIMPLE_LANG override it per user and per run.
+mkdir -p "$ROOT/etc/simple-linux"
+cat > "$ROOT/etc/simple-linux/locale.toml" <<'LOCALETOML'
+# The language of Simple Linux programs (https://github.com/tarilka0gg/simple-locale).
+# lang      "auto" follows the system locale (LC_ALL, LC_MESSAGES, LANGUAGE, LANG); or a code: "en", "uk".
+# fallback  the language when nothing else decides.
+# A user's ~/.config/simple-linux/locale.toml and SIMPLE_LANG=uk in the environment beat this file.
+lang = "auto"
+fallback = "en"
+LOCALETOML
+
 # The system says what it is (Noctalia's System panel, fastfetch): a real /etc/os-release in place of baselayout's symlink. ID stays gentoo.
 rm -f "$ROOT/etc/os-release"
 cat > "$ROOT/etc/os-release" <<'OSREL'
