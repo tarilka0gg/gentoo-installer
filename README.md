@@ -61,7 +61,16 @@ License: [GPL-2.0-or-later](LICENSE).
 
 ## Screenshots
 
-Every page of the graphical installer: [simple-linux, "The installer"](https://github.com/tarilka0gg/simple-linux#the-installer). `GENTOO_INSTALLER_GUI_PAGE=keyboard|timezone|desktop|gpu|disk|software|optimization|network installer-gui` opens the wizard on a page, and `installer-gui --debug-progress` shows the installing and done screens with a simulated run, which is how they were taken.
+The graphical installer, page by page (0.2.33, in a virtual machine; the images live in the [simple-linux](https://github.com/tarilka0gg/simple-linux#the-installer) repository):
+
+| | | |
+|---|---|---|
+| ![Welcome](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/01-welcome.png) | ![Keyboard layouts](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/02-keyboard.png) | ![Time zone](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/03-timezone.png) |
+| ![Desktop](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/04-desktop.png) | ![Graphics driver](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/05-graphics.png) | ![Software](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/06-software.png) |
+| ![A software group opened](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/07-software-expanded.png) | ![Build options](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/08-build-options.png) | ![Disk](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/09-disk.png) |
+| ![Installing](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/10-installing.png) | ![Done](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/11-done.png) |  |
+
+`GENTOO_INSTALLER_GUI_PAGE=keyboard|timezone|desktop|gpu|disk|software|optimization|network installer-gui` opens the wizard on a page, and `installer-gui --debug-progress` shows the installing and done screens with a simulated run, which is how they were taken.
 
 ## Design choices
 
