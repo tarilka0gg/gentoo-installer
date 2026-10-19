@@ -61,14 +61,56 @@ License: [GPL-2.0-or-later](LICENSE).
 
 ## Screenshots
 
-The graphical installer, page by page (0.2.33, in a virtual machine; the images live in the [simple-linux](https://github.com/tarilka0gg/simple-linux#the-installer) repository):
+The graphical installer, page by page (0.2.33, in a virtual machine; the images live in the [simple-linux](https://github.com/tarilka0gg/simple-linux#the-installer) repository).
 
-| | | |
-|---|---|---|
-| ![Welcome](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/01-welcome.png) | ![Keyboard layouts](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/02-keyboard.png) | ![Time zone](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/03-timezone.png) |
-| ![Desktop](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/04-desktop.png) | ![Graphics driver](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/05-graphics.png) | ![Software](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/06-software.png) |
-| ![A software group opened](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/07-software-expanded.png) | ![Build options](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/08-build-options.png) | ![Disk](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/09-disk.png) |
-| ![Installing](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/10-installing.png) | ![Done](https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/11-done.png) |  |
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/01-welcome.png" alt="Welcome" width="100%"></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/02-keyboard.png" alt="Keyboard layouts" width="100%"></td>
+  </tr>
+  <tr>
+    <td><b>Welcome</b><br><sub>The installer's first screen: disk, kernel and boot are decided for you.</sub></td>
+    <td><b>Keyboard layouts</b><br><sub>Add every layout you type; the first is the main one, and a box lets you test them.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/03-timezone.png" alt="Time zone" width="100%"></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/04-desktop.png" alt="Desktop" width="100%"></td>
+  </tr>
+  <tr>
+    <td><b>Time zone</b><br><sub>Search for a city, capital or country, or let the internet connection tell.</sub></td>
+    <td><b>Desktop</b><br><sub>Pick a compositor (niri, Hyprland, Sway, Labwc, MangoWC, dwl); Noctalia comes with any of them.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/05-graphics.png" alt="Graphics driver" width="100%"></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/06-software.png" alt="Software" width="100%"></td>
+  </tr>
+  <tr>
+    <td><b>Graphics driver</b><br><sub>The cards found; the choice picks the kernel build and, for NVIDIA, whether the proprietary driver is compiled.</sub></td>
+    <td><b>Software</b><br><sub>A system type (console, desktop, workstation) and groups of programs to tick.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/07-software-expanded.png" alt="A group opened" width="100%"></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/08-build-options.png" alt="Build options" width="100%"></td>
+  </tr>
+  <tr>
+    <td><b>A group opened</b><br><sub>Every program says in a sentence what it is, and many have a screenshot.</sub></td>
+    <td><b>Build options</b><br><sub>-O3, building everything from source, building the kernel for this computer: all off by default.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/09-disk.png" alt="Disk" width="100%"></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/10-installing.png" alt="Installing" width="100%"></td>
+  </tr>
+  <tr>
+    <td><b>Disk</b><br><sub>Erase the whole disk, or install next to what is already there; disks that are too small are greyed out.</sub></td>
+    <td><b>Installing</b><br><sub>Sixteen phases with a progress bar and a live log (this is the simulated run).</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/tarilka0gg/simple-linux/main/docs/img/0.2.33/11-done.png" alt="Done" width="100%"></td>
+  </tr>
+  <tr>
+    <td><b>Done</b><br><sub>Restart and the system is ready.</sub></td>
+  </tr>
+</table>
 
 `GENTOO_INSTALLER_GUI_PAGE=keyboard|timezone|desktop|gpu|disk|software|optimization|network installer-gui` opens the wizard on a page, and `installer-gui --debug-progress` shows the installing and done screens with a simulated run, which is how they were taken.
 
