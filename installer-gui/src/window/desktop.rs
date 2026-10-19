@@ -291,6 +291,41 @@ pub(super) fn gpu_select_page(
     page
 }
 
+/// A screenshot at its own size in a window of its own, over the wizard; a click on it or Esc closes it.
+fn show_screenshot(parent: &gtk::Window, title: &str, texture: &gtk::gdk::Texture) {
+    let picture = gtk::Picture::builder()
+        .paintable(texture)
+        .content_fit(gtk::ContentFit::Contain)
+        .can_shrink(true)
+        .hexpand(true)
+        .vexpand(true)
+        .build();
+    let window = gtk::Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title(title)
+        .default_width(texture.width() + 24)
+        .default_height(texture.height() + 24)
+        .child(&picture)
+        .build();
+    let click = gtk::GestureClick::new();
+    let closing = window.clone();
+    click.connect_released(move |_, _, _, _| closing.close());
+    picture.add_controller(click);
+    let keys = gtk::EventControllerKey::new();
+    let closing = window.clone();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            closing.close();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(keys);
+    window.present();
+}
+
 /// One package of a group, as the Software page shows it: the name, a sentence about it, and its screenshot when there is one.
 fn app_row(group_id: &str, app: &installer_core::packages::AppEntry) -> gtk::ListBoxRow {
     let name = gtk::Label::builder()
@@ -326,6 +361,17 @@ fn app_row(group_id: &str, app: &installer_core::packages::AppEntry) -> gtk::Lis
                 .css_classes(vec!["card".to_string()])
                 .build();
             picture.set_size_request(-1, 220);
+            // a click opens the picture at its own size in a window of its own
+            picture.set_cursor_from_name(Some("zoom-in"));
+            picture.set_tooltip_text(Some("Click to enlarge"));
+            let click = gtk::GestureClick::new();
+            let (weak, title) = (picture.downgrade(), app.name.to_string());
+            click.connect_released(move |_, _, _, _| {
+                if let Some(parent) = weak.upgrade().and_then(|p| p.root()).and_downcast::<gtk::Window>() {
+                    show_screenshot(&parent, &title, &texture);
+                }
+            });
+            picture.add_controller(click);
             column.append(&picture);
         }
     }
