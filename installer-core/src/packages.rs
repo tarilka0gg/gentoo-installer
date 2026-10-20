@@ -59,7 +59,10 @@ pub fn screen(group_id: &str, atom: &str) -> Option<&'static [u8]> {
 }
 
 fn leak_strs(v: &[String]) -> &'static [&'static str] {
-    let items: Vec<&'static str> = v.iter().map(|s| &*Box::leak(s.clone().into_boxed_str())).collect();
+    let items: Vec<&'static str> = v
+        .iter()
+        .map(|s| &*Box::leak(s.clone().into_boxed_str()))
+        .collect();
     Box::leak(items.into_boxed_slice())
 }
 
@@ -123,8 +126,18 @@ pub fn flavors() -> Vec<Flavor> {
         .filter(|f| !f.hidden)
         .map(|f| {
             let desktop = flavor_has_desktop(&f.id);
-            let defaults = f.defaults.into_iter().filter(|d| find(d).is_some()).collect();
-            Flavor { id: f.id, name: f.name, description: f.description, desktop, defaults }
+            let defaults = f
+                .defaults
+                .into_iter()
+                .filter(|d| find(d).is_some())
+                .collect();
+            Flavor {
+                id: f.id,
+                name: f.name,
+                description: f.description,
+                desktop,
+                defaults,
+            }
         })
         .collect()
 }
@@ -132,7 +145,10 @@ pub fn flavors() -> Vec<Flavor> {
 /// Whether a flavor comes with a desktop (an unknown one: yes, as before flavors existed).
 pub fn flavor_has_desktop(flavor: &str) -> bool {
     Repo::bundled()
-        .resolve(&Selection { flavor: flavor.to_string(), mix_ins: Vec::new() })
+        .resolve(&Selection {
+            flavor: flavor.to_string(),
+            mix_ins: Vec::new(),
+        })
         .map(|e| e.desktop)
         .unwrap_or(true)
 }
@@ -148,7 +164,10 @@ pub fn default_ids() -> Vec<String> {
 
 /// The ids a flavor ticks by default, in the order the groups are offered; empty for an unknown flavor.
 pub fn default_ids_for(flavor: &str) -> Vec<String> {
-    let wanted = Repo::bundled().info(Kind::Flavor, flavor).map(|f| f.defaults).unwrap_or_default();
+    let wanted = Repo::bundled()
+        .info(Kind::Flavor, flavor)
+        .map(|f| f.defaults)
+        .unwrap_or_default();
     GROUPS
         .iter()
         .filter(|g| wanted.iter().any(|w| w == g.id))
@@ -199,7 +218,10 @@ pub fn installed(target: &Path, ids: &[String]) -> bool {
 
 /// Does the choice rebuild installed packages with other USE flags (32-bit libraries)?
 pub fn needs_changed_use(effective: &slp_profiles::Effective) -> bool {
-    effective.use_lines.iter().any(|l| l.split_whitespace().any(|w| w == "abi_x86_32"))
+    effective
+        .use_lines
+        .iter()
+        .any(|l| l.split_whitespace().any(|w| w == "abi_x86_32"))
 }
 
 const STEAM_OVERLAY: &str = "steam-overlay";
@@ -250,7 +272,15 @@ pub async fn install(
         if effective.overlays.iter().any(|o| o == STEAM_OVERLAY) {
             crate::wm::ensure_overlay(runner, target, STEAM_OVERLAY, STEAM_OVERLAY_URL).await?;
         }
-        slp_profiles::render(target, &selection, &effective, RenderOptions { guru_wildcard: true }).map_err(io)?;
+        slp_profiles::render(
+            target,
+            &selection,
+            &effective,
+            RenderOptions {
+                guru_wildcard: true,
+            },
+        )
+        .map_err(io)?;
         let mut recorded = chosen.iter().map(|g| g.id.to_string()).collect::<Vec<_>>();
         let repo = Repo::bundled();
         for g in gfx {
@@ -258,7 +288,12 @@ pub async fn install(
                 recorded.push(g.clone());
             }
         }
-        State(Selection { flavor: flavor.to_string(), mix_ins: recorded }).save(target).map_err(io)?;
+        State(Selection {
+            flavor: flavor.to_string(),
+            mix_ins: recorded,
+        })
+        .save(target)
+        .map_err(io)?;
         // A bare stage3 profile needs point USE changes for desktop software (harfbuzz for
         // freetype, nftables for iptables, X for vulkan-loader...), different for every
         // atom. `--autounmask-write --autounmask-continue` lets Portage write and apply
@@ -276,7 +311,10 @@ pub async fn install(
         // A group that needs 32-bit libraries (Steam) changes the USE flags of packages the stage3 already has (util-linux, fontconfig,
         // expat...): `--noreplace` alone would keep them and stop on a slot conflict, `--changed-use` rebuilds just those.
         if crate::packages::needs_changed_use(&effective) {
-            argv.insert(argv.iter().position(|a| *a == "--noreplace").unwrap_or(0) + 1, "--changed-use");
+            argv.insert(
+                argv.iter().position(|a| *a == "--noreplace").unwrap_or(0) + 1,
+                "--changed-use",
+            );
         }
         argv.extend(effective.atoms.iter().map(String::as_str));
         runner.run_status("chroot", &argv).await?;
@@ -331,28 +369,66 @@ mod tests {
     #[test]
     fn the_flavors_are_the_three_and_each_ticks_its_own_defaults() {
         let f = flavors();
-        assert_eq!(f.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(), ["minimal", "desktop", "workstation"]);
-        assert_eq!(f.iter().map(|f| f.desktop).collect::<Vec<_>>(), [false, true, true]);
-        assert_eq!(default_ids_for("minimal"), ["wifi", "tools", "disks", "hardware", "gentoo-tools"]);
+        assert_eq!(
+            f.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+            ["minimal", "desktop", "workstation"]
+        );
+        assert_eq!(
+            f.iter().map(|f| f.desktop).collect::<Vec<_>>(),
+            [false, true, true]
+        );
+        assert_eq!(
+            default_ids_for("minimal"),
+            ["wifi", "tools", "disks", "hardware", "gentoo-tools"]
+        );
         assert_eq!(
             default_ids(),
-            ["wifi", "terminal", "browser", "tools", "files", "audio", "desktop-utils", "disks", "hardware", "gentoo-tools"]
+            [
+                "wifi",
+                "terminal",
+                "browser",
+                "tools",
+                "files",
+                "audio",
+                "desktop-utils",
+                "disks",
+                "hardware",
+                "gentoo-tools"
+            ]
         );
         assert!(default_ids_for("workstation").contains(&"dev".to_string()));
-        assert!(default_ids_for("workstation").contains(&"terminal".to_string()), "a flavor keeps what it inherits");
+        assert!(
+            default_ids_for("workstation").contains(&"terminal".to_string()),
+            "a flavor keeps what it inherits"
+        );
         assert!(default_ids_for("no-such-flavor").is_empty());
         assert!(flavor_has_desktop("desktop") && !flavor_has_desktop("minimal"));
-        assert!(flavor_has_desktop("no-such-flavor"), "unknown: a desktop, as before flavors existed");
-        assert!(f.iter().all(|f| f.defaults.iter().all(|d| find(d).is_some())));
+        assert!(
+            flavor_has_desktop("no-such-flavor"),
+            "unknown: a desktop, as before flavors existed"
+        );
+        assert!(f
+            .iter()
+            .all(|f| f.defaults.iter().all(|d| find(d).is_some())));
     }
 
     #[test]
     fn every_package_of_every_group_has_a_name_and_a_sentence() {
         let mut n = 0;
         for g in GROUPS.iter() {
-            assert_eq!(g.apps.iter().map(|a| a.atom).collect::<Vec<_>>(), g.atoms, "{}: one entry per package, in order", g.id);
+            assert_eq!(
+                g.apps.iter().map(|a| a.atom).collect::<Vec<_>>(),
+                g.atoms,
+                "{}: one entry per package, in order",
+                g.id
+            );
             for a in g.apps {
-                assert!(!a.name.is_empty() && a.description.len() > 15, "{}: {}", g.id, a.atom);
+                assert!(
+                    !a.name.is_empty() && a.description.len() > 15,
+                    "{}: {}",
+                    g.id,
+                    a.atom
+                );
                 assert_eq!(a.has_screen, screen(g.id, a.atom).is_some());
                 n += 1;
             }
@@ -362,8 +438,30 @@ mod tests {
 
     #[test]
     fn groups_that_need_a_desktop_are_marked() {
-        let needs: Vec<&str> = GROUPS.iter().filter(|g| g.needs_desktop).map(|g| g.id).collect();
-        assert_eq!(needs, ["terminal", "browser", "files", "audio", "desktop-utils", "media", "graphics", "chat", "office", "gaming", "steam", "minecraft", "creative", "craft-office"]);
+        let needs: Vec<&str> = GROUPS
+            .iter()
+            .filter(|g| g.needs_desktop)
+            .map(|g| g.id)
+            .collect();
+        assert_eq!(
+            needs,
+            [
+                "terminal",
+                "browser",
+                "files",
+                "audio",
+                "desktop-utils",
+                "media",
+                "graphics",
+                "chat",
+                "office",
+                "gaming",
+                "steam",
+                "minecraft",
+                "creative",
+                "craft-office"
+            ]
+        );
     }
 
     #[test]
@@ -389,9 +487,15 @@ mod tests {
     async fn emerges_all_atoms_in_one_call_and_unmounts() {
         let dir = temp_target("ok");
         let runner = FakeCommandRunner::new();
-        install(&runner, &dir, DEFAULT_FLAVOR, &["browser".into(), "gaming".into()], &["gfx-amd".into()])
-            .await
-            .unwrap();
+        install(
+            &runner,
+            &dir,
+            DEFAULT_FLAVOR,
+            &["browser".into(), "gaming".into()],
+            &["gfx-amd".into()],
+        )
+        .await
+        .unwrap();
 
         let calls = runner.calls();
         let emerge = calls
@@ -414,10 +518,17 @@ mod tests {
         assert_eq!(calls.iter().filter(|(c, _)| c == "umount").count(), 3);
         // what the system was made from is recorded for `slp`, and the packages are the set @slp
         let state = std::fs::read_to_string(dir.join("etc/slp/state")).unwrap();
-        assert!(state.contains("flavor=desktop\nmix-in=browser\nmix-in=gaming\nmix-in=gfx-amd\n"), "{state}");
+        assert!(
+            state.contains("flavor=desktop\nmix-in=browser\nmix-in=gaming\nmix-in=gfx-amd\n"),
+            "{state}"
+        );
         let set = std::fs::read_to_string(dir.join("etc/portage/sets/slp")).unwrap();
-        assert!(set.contains("www-client/zen-bin\ngames-util/gamemode\ngames-util/mangohud\n"), "{set}");
-        let kw = std::fs::read_to_string(dir.join("etc/portage/package.accept_keywords/slp")).unwrap();
+        assert!(
+            set.contains("www-client/zen-bin\ngames-util/gamemode\ngames-util/mangohud\n"),
+            "{set}"
+        );
+        let kw =
+            std::fs::read_to_string(dir.join("etc/portage/package.accept_keywords/slp")).unwrap();
         assert!(
             kw.contains("games-util/gamemode ~amd64")
                 && kw.contains("games-util/mangohud ~amd64")
@@ -439,16 +550,44 @@ mod tests {
     async fn steam_and_the_craft_apps_bring_their_overlays_and_rebuild_for_32_bit() {
         let dir = temp_target("overlays");
         let runner = FakeCommandRunner::new();
-        install(&runner, &dir, DEFAULT_FLAVOR, &["steam".into(), "creative".into()], &[]).await.unwrap();
+        install(
+            &runner,
+            &dir,
+            DEFAULT_FLAVOR,
+            &["steam".into(), "creative".into()],
+            &[],
+        )
+        .await
+        .unwrap();
         let calls = runner.calls();
         // Steam's overlay is cloned (a fresh target has none); the Craft ebuilds are written from the profiles
-        assert!(calls.iter().any(|(c, a)| c == "git" && a.iter().any(|x| x.contains("anyc/steam-overlay"))), "{calls:?}");
-        assert!(dir.join("var/db/repos/slp-local/media-gfx/photocraft-bin/Manifest").is_file());
-        let emerge = calls.iter().find(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("env")).unwrap();
-        assert!(emerge.1.iter().any(|a| a == "--changed-use"), "{:?}", emerge.1);
-        assert!(emerge.1.iter().any(|a| a == "games-util/steam-launcher") && emerge.1.iter().any(|a| a == "media-gfx/photocraft-bin"));
+        assert!(
+            calls
+                .iter()
+                .any(|(c, a)| c == "git" && a.iter().any(|x| x.contains("anyc/steam-overlay"))),
+            "{calls:?}"
+        );
+        assert!(dir
+            .join("var/db/repos/slp-local/media-gfx/photocraft-bin/Manifest")
+            .is_file());
+        let emerge = calls
+            .iter()
+            .find(|(c, a)| c == "chroot" && a.get(1).map(String::as_str) == Some("env"))
+            .unwrap();
+        assert!(
+            emerge.1.iter().any(|a| a == "--changed-use"),
+            "{:?}",
+            emerge.1
+        );
+        assert!(
+            emerge.1.iter().any(|a| a == "games-util/steam-launcher")
+                && emerge.1.iter().any(|a| a == "media-gfx/photocraft-bin")
+        );
         let licence = std::fs::read_to_string(dir.join("etc/portage/package.license/slp")).unwrap();
-        assert!(licence.contains("games-util/steam-launcher ValveSteamLicense"), "{licence}");
+        assert!(
+            licence.contains("games-util/steam-launcher ValveSteamLicense"),
+            "{licence}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -457,7 +596,11 @@ mod tests {
         let dir = temp_target("fail");
         let runner = FakeCommandRunner::new();
         runner.fail("chroot", "emerge: blocked");
-        assert!(install(&runner, &dir, DEFAULT_FLAVOR, &["media".into()], &[]).await.is_err());
+        assert!(
+            install(&runner, &dir, DEFAULT_FLAVOR, &["media".into()], &[])
+                .await
+                .is_err()
+        );
         assert_eq!(
             runner.calls().iter().filter(|(c, _)| c == "umount").count(),
             3
@@ -480,9 +623,15 @@ mod use_tests {
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         std::fs::write(dir.join("etc/resolv.conf"), "x\n").ok();
 
-        install(&FakeCommandRunner::new(), &dir, DEFAULT_FLAVOR, &["terminal".into()], &[])
-            .await
-            .unwrap();
+        install(
+            &FakeCommandRunner::new(),
+            &dir,
+            DEFAULT_FLAVOR,
+            &["terminal".into()],
+            &[],
+        )
+        .await
+        .unwrap();
 
         let text = std::fs::read_to_string(dir.join("etc/portage/package.use/slp")).unwrap();
         assert!(text.contains("x11-terms/ghostty wayland"), "{text}");
@@ -499,7 +648,9 @@ mod use_tests {
         std::fs::write(dir.join("etc/resolv.conf"), "x\n").ok();
         let runner = crate::command::FakeCommandRunner::new();
 
-        install(&runner, &dir, DEFAULT_FLAVOR, &["wifi".into()], &[]).await.unwrap();
+        install(&runner, &dir, DEFAULT_FLAVOR, &["wifi".into()], &[])
+            .await
+            .unwrap();
 
         let lic = std::fs::read_to_string(dir.join("etc/portage/package.license/slp")).unwrap();
         assert!(

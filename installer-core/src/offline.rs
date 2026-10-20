@@ -74,7 +74,17 @@ pub fn activate() -> Option<u16> {
 /// Software groups whose packages do not fit on the medium (GitHub takes no file over 2 GiB; LibreOffice alone is 200 MB, Zen 105 MB). Offline they are not offered and an id given
 /// by hand is ignored; the group can be installed on the finished system, with a network.
 pub const NOT_ON_MEDIUM: &[&str] = &[
-    "browser", "dev", "media", "graphics", "chat", "office", "gaming", "steam", "minecraft", "creative", "craft-office",
+    "browser",
+    "dev",
+    "media",
+    "graphics",
+    "chat",
+    "office",
+    "gaming",
+    "steam",
+    "minecraft",
+    "creative",
+    "craft-office",
 ];
 
 /// Can this software group be installed from here? Always, except on an offline medium that left it out.

@@ -15,13 +15,19 @@ fn main() {
         let repo = Repo::bundled();
         packages::GROUPS
             .iter()
-            .filter(|g| repo.info(slp_profiles::Kind::MixIn, g.id).is_some_and(|i| i.overlays.is_empty()))
+            .filter(|g| {
+                repo.info(slp_profiles::Kind::MixIn, g.id)
+                    .is_some_and(|i| i.overlays.is_empty())
+            })
             .map(|g| g.id.to_string())
             .collect()
     } else {
         packages::default_ids()
     };
-    let selection = Selection { flavor: packages::DEFAULT_FLAVOR.to_string(), mix_ins: ids };
+    let selection = Selection {
+        flavor: packages::DEFAULT_FLAVOR.to_string(),
+        mix_ins: ids,
+    };
     let effective = Repo::bundled().resolve(&selection).expect("profile");
     for (path, content) in effective.binhost_spec() {
         let file = dir.join(&path);

@@ -17,7 +17,8 @@ include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
 pub const LOCAL_OVERLAY: &str = "slp-local";
 
 /// The marker the files written by [`render`] start with.
-pub const MANAGED: &str = "# Written by slp (Simple Linux profiles); change the profile with `slp`, not this file.";
+pub const MANAGED: &str =
+    "# Written by slp (Simple Linux profiles); change the profile with `slp`, not this file.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -85,17 +86,30 @@ pub struct Info {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    Unknown { kind: &'static str, id: String, known: Vec<String> },
-    Conflict { group: String, a: String, b: String },
+    Unknown {
+        kind: &'static str,
+        id: String,
+        known: Vec<String>,
+    },
+    Conflict {
+        group: String,
+        a: String,
+        b: String,
+    },
     Cycle(String),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Unknown { kind, id, known } => write!(f, "unknown {kind} {id:?}; known: {}", known.join(", ")),
+            Error::Unknown { kind, id, known } => {
+                write!(f, "unknown {kind} {id:?}; known: {}", known.join(", "))
+            }
             Error::Conflict { group, a, b } => {
-                write!(f, "{a} and {b} exclude each other (both are in the group {group}); choose one")
+                write!(
+                    f,
+                    "{a} and {b} exclude each other (both are in the group {group}); choose one"
+                )
             }
             Error::Cycle(id) => write!(f, "the profile {id} inherits from itself"),
         }
@@ -162,7 +176,8 @@ impl Repo {
     pub fn bundled() -> &'static Repo {
         static REPO: OnceLock<Repo> = OnceLock::new();
         REPO.get_or_init(|| {
-            let mut repo = Repo::from_files(BUNDLE.iter().map(|(p, c)| (p.to_string(), c.to_string())));
+            let mut repo =
+                Repo::from_files(BUNDLE.iter().map(|(p, c)| (p.to_string(), c.to_string())));
             for (path, bytes) in BUNDLE_IMAGES {
                 repo.add_image(path, bytes.to_vec());
             }
@@ -182,7 +197,9 @@ impl Repo {
     /// The screenshot of a package of a mix-in (an `atom` like `x11-terms/ghostty`), if there is one: JPEG, WebP or PNG bytes.
     pub fn screen(&self, mix_in: &str, atom: &str) -> Option<&[u8]> {
         let name = atom.rsplit('/').next().unwrap_or(atom);
-        self.images.get(&format!("{mix_in}/{name}")).map(Vec::as_slice)
+        self.images
+            .get(&format!("{mix_in}/{name}"))
+            .map(Vec::as_slice)
     }
 
     /// The files of the `slp-local` overlay: ebuilds for programs Portage does not have, with their `Manifest`s. Path inside the overlay.
@@ -216,13 +233,21 @@ impl Repo {
 
     /// From a directory laid out like `profiles/` (for tests and for working on the data).
     pub fn from_dir(dir: &Path) -> std::io::Result<Repo> {
-        fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, String)>, images: &mut Vec<(String, Vec<u8>)>) -> std::io::Result<()> {
+        fn walk(
+            dir: &Path,
+            base: &Path,
+            out: &mut Vec<(String, String)>,
+            images: &mut Vec<(String, Vec<u8>)>,
+        ) -> std::io::Result<()> {
             for e in std::fs::read_dir(dir)? {
                 let p = e?.path();
                 let rel = || p.strip_prefix(base).unwrap().to_string_lossy().to_string();
                 if p.is_dir() {
                     walk(&p, base, out, images)?;
-                } else if p.extension().is_some_and(|x| x == "jpg" || x == "webp" || x == "png") {
+                } else if p
+                    .extension()
+                    .is_some_and(|x| x == "jpg" || x == "webp" || x == "png")
+                {
                     images.push((rel(), std::fs::read(&p)?));
                 } else if let Ok(text) = std::fs::read_to_string(&p) {
                     out.push((rel(), text));
@@ -244,7 +269,10 @@ impl Repo {
     }
 
     fn file(&self, full: &str, name: &str) -> Vec<String> {
-        self.raw(full).and_then(|r| r.files.get(name)).map(|t| lines(t)).unwrap_or_default()
+        self.raw(full)
+            .and_then(|r| r.files.get(name))
+            .map(|t| lines(t))
+            .unwrap_or_default()
     }
 
     fn full_id(kind: Kind, id: &str) -> String {
@@ -257,12 +285,18 @@ impl Repo {
 
     /// Flavors in the order of `flavor/index` (the hidden ones too).
     pub fn flavors(&self) -> Vec<Info> {
-        self.flavor_order.iter().filter_map(|id| self.info(Kind::Flavor, id)).collect()
+        self.flavor_order
+            .iter()
+            .filter_map(|id| self.info(Kind::Flavor, id))
+            .collect()
     }
 
     /// Every mix-in in the order of `mix-in/index`.
     pub fn mix_ins(&self) -> Vec<Info> {
-        self.mix_in_order.iter().filter_map(|id| self.info(Kind::MixIn, id)).collect()
+        self.mix_in_order
+            .iter()
+            .filter_map(|id| self.info(Kind::MixIn, id))
+            .collect()
     }
 
     /// The mix-ins that are software to tick (not the graphics cards).
@@ -286,7 +320,11 @@ impl Repo {
     pub fn info(&self, kind: Kind, id: &str) -> Option<Info> {
         let full = Self::full_id(kind, id);
         let raw = self.raw(&full)?;
-        let short = full.split_once('/').map(|x| x.1).unwrap_or(&full).to_string();
+        let short = full
+            .split_once('/')
+            .map(|x| x.1)
+            .unwrap_or(&full)
+            .to_string();
         let desc = raw.files.get("desc").map(|t| lines(t)).unwrap_or_default();
         let needs = self.file(&full, "needs");
         let mut atoms = Vec::new();
@@ -305,18 +343,25 @@ impl Repo {
             .iter()
             .filter_map(|l| {
                 let mut p = l.splitn(3, '|').map(str::trim);
-                Some((p.next()?.to_string(), (p.next()?.to_string(), p.next().unwrap_or("").to_string())))
+                Some((
+                    p.next()?.to_string(),
+                    (p.next()?.to_string(), p.next().unwrap_or("").to_string()),
+                ))
             })
             .collect();
         let apps = atoms
             .iter()
             .map(|a| {
-                let (name, description) = described
-                    .get(a)
-                    .cloned()
-                    .unwrap_or_else(|| (a.rsplit('/').next().unwrap_or(a).to_string(), String::new()));
+                let (name, description) = described.get(a).cloned().unwrap_or_else(|| {
+                    (a.rsplit('/').next().unwrap_or(a).to_string(), String::new())
+                });
                 let has_screen = self.screen(&short, a).is_some();
-                App { atom: a.clone(), name, description, has_screen }
+                App {
+                    atom: a.clone(),
+                    name,
+                    description,
+                    has_screen,
+                }
             })
             .collect();
         let make_conf = self
@@ -328,12 +373,23 @@ impl Repo {
                     Some(k) => (k.trim(), true),
                     None => (k.trim(), false),
                 };
-                Some((k.to_string(), v.trim().trim_matches('"').to_string(), append))
+                Some((
+                    k.to_string(),
+                    v.trim().trim_matches('"').to_string(),
+                    append,
+                ))
             })
             .collect();
-        let desktop = raw.files.get("desktop").map(|t| matches!(t.trim(), "yes" | "true" | "1"));
+        let desktop = raw
+            .files
+            .get("desktop")
+            .map(|t| matches!(t.trim(), "yes" | "true" | "1"));
         let parents = self.file(&full, "parent");
-        let defaults = if kind == Kind::Flavor { self.inherited_defaults(&full, &mut Vec::new()) } else { Vec::new() };
+        let defaults = if kind == Kind::Flavor {
+            self.inherited_defaults(&full, &mut Vec::new())
+        } else {
+            Vec::new()
+        };
         Some(Info {
             id: short,
             kind,
@@ -377,18 +433,37 @@ impl Repo {
         }
         set.extend(self.file(full, "defaults"));
         // canonical order: the order the mix-ins are offered in
-        let mut ordered: Vec<String> = self.mix_in_order.iter().filter(|m| set.contains(*m)).cloned().collect();
+        let mut ordered: Vec<String> = self
+            .mix_in_order
+            .iter()
+            .filter(|m| set.contains(*m))
+            .cloned()
+            .collect();
         ordered.extend(set.into_iter().filter(|m| !self.mix_in_order.contains(m)));
         ordered
     }
 
     /// The layers a profile brings, parents first; each layer once.
-    fn expand(&self, kind: Kind, id: &str, out: &mut Vec<String>, stack: &mut Vec<String>) -> Result<(), Error> {
+    fn expand(
+        &self,
+        kind: Kind,
+        id: &str,
+        out: &mut Vec<String>,
+        stack: &mut Vec<String>,
+    ) -> Result<(), Error> {
         let full = Self::full_id(kind, id);
         if self.raw(&full).is_none() {
-            let known = if kind == Kind::Flavor { self.flavor_order.clone() } else { self.mix_in_order.clone() };
+            let known = if kind == Kind::Flavor {
+                self.flavor_order.clone()
+            } else {
+                self.mix_in_order.clone()
+            };
             return Err(Error::Unknown {
-                kind: if kind == Kind::Flavor { "flavor" } else { "mix-in" },
+                kind: if kind == Kind::Flavor {
+                    "flavor"
+                } else {
+                    "mix-in"
+                },
                 id: id.to_string(),
                 known,
             });
@@ -429,19 +504,30 @@ impl Repo {
             for b in &chosen[i + 1..] {
                 if let (Some(ga), Some(gb)) = (&a.group, &b.group) {
                     if ga == gb {
-                        return Err(Error::Conflict { group: ga.clone(), a: a.id.clone(), b: b.id.clone() });
+                        return Err(Error::Conflict {
+                            group: ga.clone(),
+                            a: a.id.clone(),
+                            b: b.id.clone(),
+                        });
                     }
                 }
             }
         }
-        let mut eff = Effective { desktop: true, ..Default::default() };
+        let mut eff = Effective {
+            desktop: true,
+            ..Default::default()
+        };
         let push_unique = |v: &mut Vec<String>, x: &str| {
             if !v.iter().any(|y| y == x) {
                 v.push(x.to_string());
             }
         };
         for full in &layers {
-            let kind = if full.starts_with("flavor/") { Kind::Flavor } else { Kind::MixIn };
+            let kind = if full.starts_with("flavor/") {
+                Kind::Flavor
+            } else {
+                Kind::MixIn
+            };
             let info = self.info(kind, full).expect("layer exists");
             for a in &info.atoms {
                 push_unique(&mut eff.atoms, a);
@@ -475,7 +561,11 @@ impl Repo {
                         slot.1 = v.clone();
                         slot.2 = false;
                     }
-                    None => eff.make_conf.push((k.clone(), v.split_whitespace().collect::<Vec<_>>().join(" "), *append)),
+                    None => eff.make_conf.push((
+                        k.clone(),
+                        v.split_whitespace().collect::<Vec<_>>().join(" "),
+                        *append,
+                    )),
                 }
             }
             eff.guru |= info.guru;
@@ -495,10 +585,16 @@ impl Repo {
     /// Everything wrong with the data: unknown parents and defaults, entries missing from an index, malformed packages.
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for (kind, order) in [(Kind::Flavor, &self.flavor_order), (Kind::MixIn, &self.mix_in_order)] {
+        for (kind, order) in [
+            (Kind::Flavor, &self.flavor_order),
+            (Kind::MixIn, &self.mix_in_order),
+        ] {
             for id in order {
                 if self.raw(&format!("{}/{id}", kind.dir())).is_none() {
-                    out.push(format!("{}/index lists {id}, which has no directory", kind.dir()));
+                    out.push(format!(
+                        "{}/index lists {id}, which has no directory",
+                        kind.dir()
+                    ));
                 }
             }
         }
@@ -527,7 +623,9 @@ impl Repo {
             }
             if let Some(info) = self.info(kind, short) {
                 for a in &info.atoms {
-                    let ok = a.split_once('/').is_some_and(|(c, n)| !c.is_empty() && !n.is_empty() && !a.contains(' '));
+                    let ok = a
+                        .split_once('/')
+                        .is_some_and(|(c, n)| !c.is_empty() && !n.is_empty() && !a.contains(' '));
                     if !ok {
                         out.push(format!("{full}: {a:?} is not category/name"));
                     }
@@ -542,7 +640,9 @@ impl Repo {
                     for l in self.file(full, "apps") {
                         let atom = l.split('|').next().unwrap_or("").trim();
                         if !info.atoms.iter().any(|x| x == atom) {
-                            out.push(format!("{full}: apps describes {atom}, which the profile does not install"));
+                            out.push(format!(
+                                "{full}: apps describes {atom}, which the profile does not install"
+                            ));
                         }
                     }
                 }
@@ -557,12 +657,25 @@ impl Effective {
     /// (`iso/binhost/`): `(path, contents)`.
     pub fn binhost_spec(&self) -> Vec<(String, String)> {
         let join = |v: &[String]| v.iter().map(|l| format!("{l}\n")).collect::<String>();
-        let keywords: String = self.testing.iter().map(|a| format!("{a} ~amd64\n")).collect();
+        let keywords: String = self
+            .testing
+            .iter()
+            .map(|a| format!("{a} ~amd64\n"))
+            .collect();
         vec![
             ("world-groups".to_string(), join(&self.atoms)),
-            ("package.accept_keywords/gentoo-installer-packages".to_string(), keywords),
-            ("package.use/gentoo-installer-packages".to_string(), join(&self.use_lines)),
-            ("package.license/gentoo-installer-packages".to_string(), join(&self.licenses)),
+            (
+                "package.accept_keywords/gentoo-installer-packages".to_string(),
+                keywords,
+            ),
+            (
+                "package.use/gentoo-installer-packages".to_string(),
+                join(&self.use_lines),
+            ),
+            (
+                "package.license/gentoo-installer-packages".to_string(),
+                join(&self.licenses),
+            ),
         ]
     }
 }
@@ -612,7 +725,10 @@ pub fn set_make_conf_key(path: &Path, key: &str, value: &str) -> std::io::Result
     let mut found = false;
     let mut out: Vec<String> = Vec::new();
     for l in text.lines() {
-        let is_key = l.trim_start().strip_prefix(key).is_some_and(|r| r.trim_start().starts_with('='));
+        let is_key = l
+            .trim_start()
+            .strip_prefix(key)
+            .is_some_and(|r| r.trim_start().starts_with('='));
         if is_key {
             if !found {
                 out.push(new_line.clone());
@@ -643,8 +759,17 @@ pub fn add_make_conf_words(path: &Path, key: &str, words: &str) -> std::io::Resu
     let mut have: Vec<String> = Vec::new();
     for l in text.lines() {
         let l = l.trim_start();
-        if let Some(rest) = l.strip_prefix(key).map(str::trim_start).and_then(|r| r.strip_prefix('=')) {
-            have = rest.trim().trim_matches('"').split_whitespace().map(String::from).collect();
+        if let Some(rest) = l
+            .strip_prefix(key)
+            .map(str::trim_start)
+            .and_then(|r| r.strip_prefix('='))
+        {
+            have = rest
+                .trim()
+                .trim_matches('"')
+                .split_whitespace()
+                .map(String::from)
+                .collect();
         }
     }
     let mut changed = false;
@@ -663,11 +788,28 @@ pub fn add_make_conf_words(path: &Path, key: &str, words: &str) -> std::io::Resu
 /// Writes the Portage configuration of a choice under `root` (`/` on a running system, the mounted target in the installer):
 /// `package.use`, `package.accept_keywords`, `package.license` (each as `slp`), the set `@slp` with the packages, and the
 /// `make.conf` keys. Returns the files written.
-pub fn render(root: &Path, sel: &Selection, eff: &Effective, opts: RenderOptions) -> std::io::Result<Vec<PathBuf>> {
+pub fn render(
+    root: &Path,
+    sel: &Selection,
+    eff: &Effective,
+    opts: RenderOptions,
+) -> std::io::Result<Vec<PathBuf>> {
     let portage = root.join("etc/portage");
-    let header = format!("# flavor: {}; mix-ins: {}", sel.flavor, if sel.mix_ins.is_empty() { "-".to_string() } else { sel.mix_ins.join(" ") });
+    let header = format!(
+        "# flavor: {}; mix-ins: {}",
+        sel.flavor,
+        if sel.mix_ins.is_empty() {
+            "-".to_string()
+        } else {
+            sel.mix_ins.join(" ")
+        }
+    );
     let join = |v: &[String]| v.iter().map(|l| format!("{l}\n")).collect::<String>();
-    let mut keywords: String = eff.testing.iter().map(|a| format!("{a} ~amd64\n")).collect();
+    let mut keywords: String = eff
+        .testing
+        .iter()
+        .map(|a| format!("{a} ~amd64\n"))
+        .collect();
     if (eff.guru || opts.guru_wildcard) && !eff.layers.is_empty() && !eff.atoms.is_empty() {
         keywords.push_str("*/*::guru ~amd64\n");
     }
@@ -689,7 +831,11 @@ pub fn render(root: &Path, sel: &Selection, eff: &Effective, opts: RenderOptions
     }
     for (k, v, append) in &eff.make_conf {
         let path = portage.join("make.conf");
-        let changed = if *append { add_make_conf_words(&path, k, v)? } else { set_make_conf_key(&path, k, v)? };
+        let changed = if *append {
+            add_make_conf_words(&path, k, v)?
+        } else {
+            set_make_conf_key(&path, k, v)?
+        };
         if changed {
             written.push(path);
         }
@@ -703,7 +849,10 @@ fn bundled_overlay() -> &'static BTreeMap<String, String> {
 
 /// Writes the `slp-local` overlay (`files`: path inside the overlay, contents) to `var/db/repos/slp-local` under `root` and registers it in
 /// `etc/portage/repos.conf`. Files that are the same are left alone; an ebuild of an older version stays (Portage picks the newest).
-pub fn write_local_overlay(root: &Path, files: &BTreeMap<String, String>) -> std::io::Result<Vec<PathBuf>> {
+pub fn write_local_overlay(
+    root: &Path,
+    files: &BTreeMap<String, String>,
+) -> std::io::Result<Vec<PathBuf>> {
     let repo = root.join("var/db/repos").join(LOCAL_OVERLAY);
     let mut written = Vec::new();
     for (rel, body) in files {
@@ -720,7 +869,8 @@ pub fn write_local_overlay(root: &Path, files: &BTreeMap<String, String>) -> std
     let conf = root.join("etc/portage/repos.conf");
     ensure_config_dir(&conf)?;
     let conf_file = conf.join(format!("{LOCAL_OVERLAY}.conf"));
-    let text = format!("[{LOCAL_OVERLAY}]\nlocation = /var/db/repos/{LOCAL_OVERLAY}\nauto-sync = no\n");
+    let text =
+        format!("[{LOCAL_OVERLAY}]\nlocation = /var/db/repos/{LOCAL_OVERLAY}\nauto-sync = no\n");
     if std::fs::read_to_string(&conf_file).ok().as_deref() != Some(text.as_str()) {
         std::fs::write(&conf_file, text)?;
         written.push(conf_file);
@@ -760,7 +910,8 @@ impl State {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let mut text = String::from("# The Simple Linux profile of this system; change it with `slp`.\n");
+        let mut text =
+            String::from("# The Simple Linux profile of this system; change it with `slp`.\n");
         text.push_str(&format!("flavor={}\n", self.0.flavor));
         for m in &self.0.mix_ins {
             text.push_str(&format!("mix-in={m}\n"));
@@ -790,7 +941,10 @@ mod tests {
             ("flavor/big/use", "dev-foo/bar baz\n"),
             ("mix-in/index", "tools\ngame\ngfx-a\ngfx-b\ngfx-c\n"),
             ("mix-in/tools/desc", "Tools\nSome tools.\n"),
-            ("mix-in/tools/atoms", "app-misc/a\n# a comment\n\napp-misc/b\n"),
+            (
+                "mix-in/tools/atoms",
+                "app-misc/a\n# a comment\n\napp-misc/b\n",
+            ),
             ("mix-in/game/desc", "Games\nPlay.\n"),
             ("mix-in/game/atoms", "~games-util/c\napp-misc/a\n"),
             ("mix-in/game/needs", "guru\ndesktop\n"),
@@ -811,7 +965,10 @@ mod tests {
     }
 
     fn sel(flavor: &str, mix: &[&str]) -> Selection {
-        Selection { flavor: flavor.into(), mix_ins: mix.iter().map(|s| s.to_string()).collect() }
+        Selection {
+            flavor: flavor.into(),
+            mix_ins: mix.iter().map(|s| s.to_string()).collect(),
+        }
     }
 
     #[test]
@@ -819,14 +976,20 @@ mod tests {
         let r = tiny();
         let big = r.info(Kind::Flavor, "big").unwrap();
         assert_eq!(big.defaults, vec!["tools", "game"]);
-        assert_eq!(r.info(Kind::Flavor, "base").unwrap().defaults, vec!["tools"]);
+        assert_eq!(
+            r.info(Kind::Flavor, "base").unwrap().defaults,
+            vec!["tools"]
+        );
         assert_eq!(big.parents, vec!["flavor/base"]);
     }
 
     #[test]
     fn comments_and_blank_lines_are_ignored_and_testing_atoms_are_marked() {
         let r = tiny();
-        assert_eq!(r.info(Kind::MixIn, "tools").unwrap().atoms, vec!["app-misc/a", "app-misc/b"]);
+        assert_eq!(
+            r.info(Kind::MixIn, "tools").unwrap().atoms,
+            vec!["app-misc/a", "app-misc/b"]
+        );
         let g = r.info(Kind::MixIn, "game").unwrap();
         assert_eq!(g.atoms, vec!["games-util/c", "app-misc/a"]);
         assert_eq!(g.testing, vec!["games-util/c"]);
@@ -839,27 +1002,46 @@ mod tests {
     fn resolving_applies_parents_first_and_drops_duplicates() {
         let r = tiny();
         let e = r.resolve(&sel("big", &["tools", "game"])).unwrap();
-        assert_eq!(e.layers, vec!["flavor/base", "flavor/big", "mix-in/tools", "mix-in/game"]);
+        assert_eq!(
+            e.layers,
+            vec!["flavor/base", "flavor/big", "mix-in/tools", "mix-in/game"]
+        );
         assert_eq!(e.atoms, vec!["app-misc/a", "app-misc/b", "games-util/c"]);
         assert_eq!(e.testing, vec!["games-util/c"]);
         assert_eq!(e.use_lines, vec!["dev-foo/bar baz"]);
         assert_eq!(e.licenses, vec!["games-util/c some-licence"]);
         assert_eq!(e.services, vec!["gamed"]);
         assert!(e.guru && e.desktop);
-        assert!(!r.resolve(&sel("base", &[])).unwrap().desktop, "the nearest flavor that says so decides");
+        assert!(
+            !r.resolve(&sel("base", &[])).unwrap().desktop,
+            "the nearest flavor that says so decides"
+        );
     }
 
     #[test]
     fn unknown_names_and_exclusive_mix_ins_are_errors() {
         let r = tiny();
         match r.resolve(&sel("nope", &[])) {
-            Err(Error::Unknown { kind: "flavor", id, known }) => assert!(id == "nope" && known == vec!["base", "big"]),
+            Err(Error::Unknown {
+                kind: "flavor",
+                id,
+                known,
+            }) => assert!(id == "nope" && known == vec!["base", "big"]),
             other => panic!("{other:?}"),
         }
-        assert!(matches!(r.resolve(&sel("base", &["gamex"])), Err(Error::Unknown { kind: "mix-in", .. })));
+        assert!(matches!(
+            r.resolve(&sel("base", &["gamex"])),
+            Err(Error::Unknown { kind: "mix-in", .. })
+        ));
         let e = r.resolve(&sel("base", &["gfx-a", "gfx-b"])).unwrap_err();
-        assert!(matches!(e, Error::Conflict { ref group, .. } if group == "gfx"), "{e}");
-        assert!(r.resolve(&sel("base", &["gfx-a", "gfx-a"])).is_ok(), "the same one twice is not a conflict");
+        assert!(
+            matches!(e, Error::Conflict { ref group, .. } if group == "gfx"),
+            "{e}"
+        );
+        assert!(
+            r.resolve(&sel("base", &["gfx-a", "gfx-a"])).is_ok(),
+            "the same one twice is not a conflict"
+        );
     }
 
     #[test]
@@ -874,12 +1056,28 @@ mod tests {
         ]);
         r.add_image("mix-in/m/screens/a.webp", vec![1, 2, 3]);
         let m = r.info(Kind::MixIn, "m").unwrap();
-        let names: Vec<_> = m.apps.iter().map(|a| (a.atom.as_str(), a.name.as_str(), a.description.as_str(), a.has_screen)).collect();
+        let names: Vec<_> = m
+            .apps
+            .iter()
+            .map(|a| {
+                (
+                    a.atom.as_str(),
+                    a.name.as_str(),
+                    a.description.as_str(),
+                    a.has_screen,
+                )
+            })
+            .collect();
         assert_eq!(
             names,
             vec![
                 ("app-misc/a", "Alpha", "The first one.", true),
-                ("app-misc/b", "Beta", "The second | with a bar in it.", false),
+                (
+                    "app-misc/b",
+                    "Beta",
+                    "The second | with a bar in it.",
+                    false
+                ),
                 ("app-misc/c", "c", "", false), // no line: its name, no description
             ]
         );
@@ -890,39 +1088,80 @@ mod tests {
         assert!(!p.contains("app-misc/a"), "{p}");
         // an `apps` line for a package the profile does not install, and a package without a description, are both named
         let r2 = repo(&[
-            ("flavor/index", "f\n"), ("flavor/f/desc", "F\n"),
-            ("mix-in/index", "m\n"), ("mix-in/m/desc", "M\n"),
+            ("flavor/index", "f\n"),
+            ("flavor/f/desc", "F\n"),
+            ("mix-in/index", "m\n"),
+            ("mix-in/m/desc", "M\n"),
             ("mix-in/m/atoms", "app-misc/a\napp-misc/c\n"),
-            ("mix-in/m/apps", "app-misc/a | Alpha | One.\napp-misc/zzz | Z | Not here.\n"),
+            (
+                "mix-in/m/apps",
+                "app-misc/a | Alpha | One.\napp-misc/zzz | Z | Not here.\n",
+            ),
         ]);
         let p2 = r2.problems().join("\n");
-        assert!(p2.contains("app-misc/c has no description in apps") && p2.contains("describes app-misc/zzz"), "{p2}");
+        assert!(
+            p2.contains("app-misc/c has no description in apps")
+                && p2.contains("describes app-misc/zzz"),
+            "{p2}"
+        );
     }
 
     #[test]
     fn make_conf_words_are_collected_from_every_profile_that_adds_them() {
         let r = tiny();
         let e = r.resolve(&sel("base", &["gfx-a"])).unwrap();
-        assert_eq!(e.make_conf, vec![("VIDEO_CARDS".to_string(), "a".to_string(), true)]);
+        assert_eq!(
+            e.make_conf,
+            vec![("VIDEO_CARDS".to_string(), "a".to_string(), true)]
+        );
         let e = r.resolve(&sel("base", &["gfx-c", "gfx-a"])).unwrap();
-        assert_eq!(e.make_conf, vec![("VIDEO_CARDS".to_string(), "c a".to_string(), true)], "a word once, in the order met");
+        assert_eq!(
+            e.make_conf,
+            vec![("VIDEO_CARDS".to_string(), "c a".to_string(), true)],
+            "a word once, in the order met"
+        );
         let r = repo(&[
-            ("flavor/index", "f\n"), ("flavor/f/desc", "F\n"), ("flavor/f/make-conf", "X=\"one\"\n"),
-            ("mix-in/index", "m\n"), ("mix-in/m/desc", "M\n"), ("mix-in/m/make-conf", "X=\"two\"\n"),
+            ("flavor/index", "f\n"),
+            ("flavor/f/desc", "F\n"),
+            ("flavor/f/make-conf", "X=\"one\"\n"),
+            ("mix-in/index", "m\n"),
+            ("mix-in/m/desc", "M\n"),
+            ("mix-in/m/make-conf", "X=\"two\"\n"),
         ]);
-        assert_eq!(r.resolve(&sel("f", &["m"])).unwrap().make_conf, vec![("X".to_string(), "two".to_string(), false)], "plain: the later one wins");
+        assert_eq!(
+            r.resolve(&sel("f", &["m"])).unwrap().make_conf,
+            vec![("X".to_string(), "two".to_string(), false)],
+            "plain: the later one wins"
+        );
     }
 
     #[test]
     fn graphics_cards_are_kept_apart_from_software() {
         let r = tiny();
-        assert_eq!(r.software().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["tools", "game"]);
-        assert_eq!(r.graphics().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["gfx-a", "gfx-b", "gfx-c"]);
+        assert_eq!(
+            r.software()
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["tools", "game"]
+        );
+        assert_eq!(
+            r.graphics()
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gfx-a", "gfx-b", "gfx-c"]
+        );
     }
 
     #[test]
     fn a_profile_that_inherits_from_itself_is_an_error() {
-        let r = repo(&[("flavor/index", "x\n"), ("flavor/x/desc", "X\n"), ("flavor/x/parent", "flavor/x\n"), ("mix-in/index", "")]);
+        let r = repo(&[
+            ("flavor/index", "x\n"),
+            ("flavor/x/desc", "X\n"),
+            ("flavor/x/parent", "flavor/x\n"),
+            ("mix-in/index", ""),
+        ]);
         assert!(matches!(r.resolve(&sel("x", &[])), Err(Error::Cycle(_))));
     }
 
@@ -964,22 +1203,49 @@ mod tests {
         let e = r.resolve(&s).unwrap();
         let root = temp("render");
         std::fs::create_dir_all(root.join("etc/portage")).unwrap();
-        std::fs::write(root.join("etc/portage/make.conf"), "CFLAGS=\"-O2\"\nVIDEO_CARDS=\"old\"\nMAKEOPTS=\"-j4\"\n").unwrap();
+        std::fs::write(
+            root.join("etc/portage/make.conf"),
+            "CFLAGS=\"-O2\"\nVIDEO_CARDS=\"old\"\nMAKEOPTS=\"-j4\"\n",
+        )
+        .unwrap();
         let files = render(&root, &s, &e, RenderOptions::default()).unwrap();
         assert!(files.len() >= 5);
         let read = |p: &str| std::fs::read_to_string(root.join("etc/portage").join(p)).unwrap();
         assert!(read("package.use/slp").ends_with("dev-foo/bar baz\n"));
         assert!(read("package.use/slp").starts_with(MANAGED));
-        assert!(read("package.accept_keywords/slp").contains("games-util/c ~amd64\n*/*::guru ~amd64\n"));
+        assert!(
+            read("package.accept_keywords/slp").contains("games-util/c ~amd64\n*/*::guru ~amd64\n")
+        );
         assert!(read("package.license/slp").contains("games-util/c some-licence\n"));
-        assert_eq!(read("sets/slp").lines().skip(2).collect::<Vec<_>>(), vec!["app-misc/a", "app-misc/b", "games-util/c"]);
-        assert_eq!(read("make.conf"), "CFLAGS=\"-O2\"\nVIDEO_CARDS=\"old a\"\nMAKEOPTS=\"-j4\"\n", "the words are added to what the file has");
+        assert_eq!(
+            read("sets/slp").lines().skip(2).collect::<Vec<_>>(),
+            vec!["app-misc/a", "app-misc/b", "games-util/c"]
+        );
+        assert_eq!(
+            read("make.conf"),
+            "CFLAGS=\"-O2\"\nVIDEO_CARDS=\"old a\"\nMAKEOPTS=\"-j4\"\n",
+            "the words are added to what the file has"
+        );
         // rendering a smaller choice removes what is no longer needed
         let s2 = sel("base", &["tools"]);
-        render(&root, &s2, &r.resolve(&s2).unwrap(), RenderOptions::default()).unwrap();
+        render(
+            &root,
+            &s2,
+            &r.resolve(&s2).unwrap(),
+            RenderOptions::default(),
+        )
+        .unwrap();
         assert!(!root.join("etc/portage/package.license/slp").exists());
-        assert!(!root.join("etc/portage/package.accept_keywords/slp").exists());
-        assert_eq!(std::fs::read_to_string(root.join("etc/portage/make.conf")).unwrap().matches("VIDEO_CARDS").count(), 1);
+        assert!(!root
+            .join("etc/portage/package.accept_keywords/slp")
+            .exists());
+        assert_eq!(
+            std::fs::read_to_string(root.join("etc/portage/make.conf"))
+                .unwrap()
+                .matches("VIDEO_CARDS")
+                .count(),
+            1
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -993,9 +1259,17 @@ mod tests {
         std::fs::write(root.join("etc/portage/package.use"), "dev-foo/old flag\n").unwrap();
         std::fs::write(root.join("etc/portage/package.accept_keywords"), "\n").unwrap();
         render(&root, &s, &e, RenderOptions::default()).unwrap();
-        assert_eq!(std::fs::read_to_string(root.join("etc/portage/package.use/00-original")).unwrap(), "dev-foo/old flag\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("etc/portage/package.use/00-original")).unwrap(),
+            "dev-foo/old flag\n"
+        );
         assert!(root.join("etc/portage/sets/slp").is_file());
-        assert!(!root.join("etc/portage/package.accept_keywords/00-original").exists(), "an empty file is not worth keeping");
+        assert!(
+            !root
+                .join("etc/portage/package.accept_keywords/00-original")
+                .exists(),
+            "an empty file is not worth keeping"
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -1005,8 +1279,20 @@ mod tests {
         let s = sel("base", &["tools"]);
         let e = r.resolve(&s).unwrap();
         let root = temp("guru");
-        render(&root, &s, &e, RenderOptions { guru_wildcard: true }).unwrap();
-        assert!(std::fs::read_to_string(root.join("etc/portage/package.accept_keywords/slp")).unwrap().contains("*/*::guru ~amd64"));
+        render(
+            &root,
+            &s,
+            &e,
+            RenderOptions {
+                guru_wildcard: true,
+            },
+        )
+        .unwrap();
+        assert!(
+            std::fs::read_to_string(root.join("etc/portage/package.accept_keywords/slp"))
+                .unwrap()
+                .contains("*/*::guru ~amd64")
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -1015,11 +1301,18 @@ mod tests {
         let root = temp("mk");
         let f = root.join("make.conf");
         assert!(set_make_conf_key(&f, "A", "1").unwrap());
-        assert!(!set_make_conf_key(&f, "A", "1").unwrap(), "no change, no write");
+        assert!(
+            !set_make_conf_key(&f, "A", "1").unwrap(),
+            "no change, no write"
+        );
         assert!(set_make_conf_key(&f, "A", "2").unwrap());
         std::fs::write(&f, "A=\"x\"\nAB=\"keep\"\nA = \"y\"\n").unwrap();
         set_make_conf_key(&f, "A", "z").unwrap();
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "A=\"z\"\nAB=\"keep\"\n", "AB is another key; a second A line is dropped");
+        assert_eq!(
+            std::fs::read_to_string(&f).unwrap(),
+            "A=\"z\"\nAB=\"keep\"\n",
+            "AB is another key; a second A line is dropped"
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -1027,12 +1320,24 @@ mod tests {
     fn add_make_conf_words_keeps_what_is_there_and_does_not_touch_an_unchanged_file() {
         let root = temp("add");
         let f = root.join("make.conf");
-        std::fs::write(&f, "VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi\"\nOTHER=\"x\"\n").unwrap();
-        assert!(!add_make_conf_words(&f, "VIDEO_CARDS", "intel radeonsi").unwrap(), "all there already");
+        std::fs::write(
+            &f,
+            "VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi\"\nOTHER=\"x\"\n",
+        )
+        .unwrap();
+        assert!(
+            !add_make_conf_words(&f, "VIDEO_CARDS", "intel radeonsi").unwrap(),
+            "all there already"
+        );
         assert!(add_make_conf_words(&f, "VIDEO_CARDS", "virgl intel").unwrap());
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi virgl\"\nOTHER=\"x\"\n");
+        assert_eq!(
+            std::fs::read_to_string(&f).unwrap(),
+            "VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi virgl\"\nOTHER=\"x\"\n"
+        );
         assert!(add_make_conf_words(&f, "NEW", "a b").unwrap());
-        assert!(std::fs::read_to_string(&f).unwrap().ends_with("NEW=\"a b\"\n"));
+        assert!(std::fs::read_to_string(&f)
+            .unwrap()
+            .ends_with("NEW=\"a b\"\n"));
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -1051,7 +1356,11 @@ mod tests {
         let r = Repo::bundled();
         assert_eq!(r.problems(), Vec::<String>::new());
         for f in r.flavors() {
-            r.resolve(&Selection { flavor: f.id.clone(), mix_ins: f.defaults.clone() }).unwrap();
+            r.resolve(&Selection {
+                flavor: f.id.clone(),
+                mix_ins: f.defaults.clone(),
+            })
+            .unwrap();
         }
         let live = r.info(Kind::Flavor, "live").unwrap();
         assert!(live.hidden && live.use_lines.iter().any(|l| l == "media-libs/mesa -llvm"));

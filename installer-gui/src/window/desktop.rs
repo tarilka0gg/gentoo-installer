@@ -367,7 +367,11 @@ fn app_row(group_id: &str, app: &installer_core::packages::AppEntry) -> gtk::Lis
             let click = gtk::GestureClick::new();
             let (weak, title) = (picture.downgrade(), app.name.to_string());
             click.connect_released(move |_, _, _, _| {
-                if let Some(parent) = weak.upgrade().and_then(|p| p.root()).and_downcast::<gtk::Window>() {
+                if let Some(parent) = weak
+                    .upgrade()
+                    .and_then(|p| p.root())
+                    .and_downcast::<gtk::Window>()
+                {
                     show_screenshot(&parent, &title, &texture);
                 }
             });

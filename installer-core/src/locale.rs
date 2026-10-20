@@ -177,11 +177,17 @@ mod tests {
 
         apply_os_release(&dir).await.unwrap();
 
-        assert!(!std::fs::symlink_metadata(dir.join("etc/os-release")).unwrap().file_type().is_symlink());
+        assert!(!std::fs::symlink_metadata(dir.join("etc/os-release"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
         let text = std::fs::read_to_string(dir.join("etc/os-release")).unwrap();
         assert!(text.contains("PRETTY_NAME='Simple Linux'") && text.contains("ID='gentoo'"));
         // the package's own file is untouched
-        assert_eq!(std::fs::read_to_string(dir.join("usr/lib/os-release")).unwrap(), "NAME='Gentoo'\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("usr/lib/os-release")).unwrap(),
+            "NAME='Gentoo'\n"
+        );
     }
 
     fn temp_target(tag: &str) -> std::path::PathBuf {

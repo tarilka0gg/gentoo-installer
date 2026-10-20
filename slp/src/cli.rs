@@ -48,9 +48,18 @@ pub fn execute(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32
             rest.push(a.clone());
         }
     }
-    let mut ctx = Ctx { root, out, err, repo: Repo::bundled() };
+    let mut ctx = Ctx {
+        root,
+        out,
+        err,
+        repo: Repo::bundled(),
+    };
     let cmd = rest.first().map(String::as_str).unwrap_or("show");
-    let tail = if rest.is_empty() { &rest[..] } else { &rest[1..] };
+    let tail = if rest.is_empty() {
+        &rest[..]
+    } else {
+        &rest[1..]
+    };
     let result = match cmd {
         "show" => show(&mut ctx),
         "list" => list(&mut ctx, tail.first().map(String::as_str)),
@@ -79,21 +88,39 @@ pub fn execute(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32
 fn load(ctx: &Ctx) -> Result<Selection, String> {
     match State::load(&ctx.root).map_err(|e| e.to_string())? {
         Some(State(sel)) => Ok(sel),
-        None => Err("this system has no profile recorded (/etc/slp/state); run `slp init` to give it one".to_string()),
+        None => Err(
+            "this system has no profile recorded (/etc/slp/state); run `slp init` to give it one"
+                .to_string(),
+        ),
     }
 }
 
 fn save_and_apply(ctx: &mut Ctx, sel: &Selection) -> Result<Effective, String> {
     let eff = ctx.repo.resolve(sel).map_err(|e| e.to_string())?;
-    State(sel.clone()).save(&ctx.root).map_err(|e| format!("saving the profile: {e}"))?;
-    render(&ctx.root, sel, &eff, RenderOptions::default()).map_err(|e| format!("writing the Portage configuration: {e}"))?;
+    State(sel.clone())
+        .save(&ctx.root)
+        .map_err(|e| format!("saving the profile: {e}"))?;
+    render(&ctx.root, sel, &eff, RenderOptions::default())
+        .map_err(|e| format!("writing the Portage configuration: {e}"))?;
     Ok(eff)
 }
 
 fn info_of(ctx: &Ctx, kind: Kind, id: &str) -> Result<Info, String> {
     ctx.repo.info(kind, id).ok_or_else(|| {
-        let known = if kind == Kind::Flavor { ctx.repo.flavor_names() } else { ctx.repo.mix_in_names() };
-        format!("unknown {} {id:?}; known: {}", if kind == Kind::Flavor { "flavor" } else { "mix-in" }, known.join(", "))
+        let known = if kind == Kind::Flavor {
+            ctx.repo.flavor_names()
+        } else {
+            ctx.repo.mix_in_names()
+        };
+        format!(
+            "unknown {} {id:?}; known: {}",
+            if kind == Kind::Flavor {
+                "flavor"
+            } else {
+                "mix-in"
+            },
+            known.join(", ")
+        )
     })
 }
 
@@ -109,14 +136,26 @@ fn show(ctx: &mut Ctx) -> Result<(), String> {
             }
         }
     }
-    let (graphics, software): (Vec<&String>, Vec<&String>) =
-        sel.mix_ins.iter().partition(|m| ctx.repo.info(Kind::MixIn, m).is_some_and(|i| i.graphics));
-    let join = |v: &[&String]| if v.is_empty() { "-".to_string() } else { v.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ") };
+    let (graphics, software): (Vec<&String>, Vec<&String>) = sel
+        .mix_ins
+        .iter()
+        .partition(|m| ctx.repo.info(Kind::MixIn, m).is_some_and(|i| i.graphics));
+    let join = |v: &[&String]| {
+        if v.is_empty() {
+            "-".to_string()
+        } else {
+            v.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")
+        }
+    };
     let _ = writeln!(ctx.out, "flavor:    {} ({})", sel.flavor, flavor.name);
     if !inherited.is_empty() {
         let _ = writeln!(ctx.out, "inherits:  {}", inherited.join(", "));
     }
-    let _ = writeln!(ctx.out, "desktop:   {}", if eff.desktop { "yes" } else { "no" });
+    let _ = writeln!(
+        ctx.out,
+        "desktop:   {}",
+        if eff.desktop { "yes" } else { "no" }
+    );
     let _ = writeln!(ctx.out, "mix-ins:   {}", join(&software));
     let _ = writeln!(ctx.out, "graphics:  {}", join(&graphics));
     let _ = writeln!(ctx.out, "packages:  {} (the set @slp)", eff.atoms.len());
@@ -124,29 +163,61 @@ fn show(ctx: &mut Ctx) -> Result<(), String> {
 }
 
 fn list(ctx: &mut Ctx, what: Option<&str>) -> Result<(), String> {
-    let sel = State::load(&ctx.root).map_err(|e| e.to_string())?.map(|s| s.0);
+    let sel = State::load(&ctx.root)
+        .map_err(|e| e.to_string())?
+        .map(|s| s.0);
     let on_flavor = |id: &str| sel.as_ref().is_some_and(|s| s.flavor == id);
-    let on_mix = |id: &str| sel.as_ref().is_some_and(|s| s.mix_ins.iter().any(|m| m == id));
+    let on_mix = |id: &str| {
+        sel.as_ref()
+            .is_some_and(|s| s.mix_ins.iter().any(|m| m == id))
+    };
     let want = |k: &str| what.is_none() || what == Some(k);
-    if !matches!(what, None | Some("flavors") | Some("mix-ins") | Some("graphics")) {
-        return Err(format!("list what? flavors, mix-ins or graphics (not {:?})", what.unwrap_or("")));
+    if !matches!(
+        what,
+        None | Some("flavors") | Some("mix-ins") | Some("graphics")
+    ) {
+        return Err(format!(
+            "list what? flavors, mix-ins or graphics (not {:?})",
+            what.unwrap_or("")
+        ));
     }
     if want("flavors") {
         let _ = writeln!(ctx.out, "Flavors:");
         for f in ctx.repo.flavors().into_iter().filter(|f| !f.hidden) {
-            let _ = writeln!(ctx.out, " {} {:<14} {} - {}", if on_flavor(&f.id) { '*' } else { ' ' }, f.id, f.name, f.description);
+            let _ = writeln!(
+                ctx.out,
+                " {} {:<14} {} - {}",
+                if on_flavor(&f.id) { '*' } else { ' ' },
+                f.id,
+                f.name,
+                f.description
+            );
         }
     }
     if want("mix-ins") {
         let _ = writeln!(ctx.out, "Mix-ins:");
         for m in ctx.repo.software() {
-            let _ = writeln!(ctx.out, " {} {:<14} {} - {}", if on_mix(&m.id) { '*' } else { ' ' }, m.id, m.name, m.description);
+            let _ = writeln!(
+                ctx.out,
+                " {} {:<14} {} - {}",
+                if on_mix(&m.id) { '*' } else { ' ' },
+                m.id,
+                m.name,
+                m.description
+            );
         }
     }
     if want("graphics") {
         let _ = writeln!(ctx.out, "Graphics:");
         for m in ctx.repo.graphics() {
-            let _ = writeln!(ctx.out, " {} {:<18} {} - {}", if on_mix(&m.id) { '*' } else { ' ' }, m.id, m.name, m.description);
+            let _ = writeln!(
+                ctx.out,
+                " {} {:<18} {} - {}",
+                if on_mix(&m.id) { '*' } else { ' ' },
+                m.id,
+                m.name,
+                m.description
+            );
         }
     }
     Ok(())
@@ -174,19 +245,37 @@ fn info(ctx: &mut Ctx, args: &[String]) -> Result<(), String> {
             let _ = writeln!(out, "  {label:<11} {}", items.join(", "));
         }
     };
-    let atoms: Vec<String> = i.atoms.iter().map(|a| if i.testing.contains(a) { format!("{a} (~amd64)") } else { a.clone() }).collect();
+    let atoms: Vec<String> = i
+        .atoms
+        .iter()
+        .map(|a| {
+            if i.testing.contains(a) {
+                format!("{a} (~amd64)")
+            } else {
+                a.clone()
+            }
+        })
+        .collect();
     section(ctx.out, "packages:", &atoms);
     section(ctx.out, "use:", &i.use_lines);
     section(ctx.out, "licences:", &i.licenses);
     section(ctx.out, "services:", &i.services);
-    let mk: Vec<String> = i.make_conf.iter().map(|(k, v, a)| format!("{k}{}=\"{v}\"", if *a { "+" } else { "" })).collect();
+    let mk: Vec<String> = i
+        .make_conf
+        .iter()
+        .map(|(k, v, a)| format!("{k}{}=\"{v}\"", if *a { "+" } else { "" }))
+        .collect();
     section(ctx.out, "make.conf:", &mk);
     Ok(())
 }
 
 /// The mix-ins a flavor ticks that exist, plus the graphics ones already chosen.
 fn defaults_of(ctx: &Ctx, flavor: &str, keep: &[String]) -> Vec<String> {
-    let mut mix: Vec<String> = ctx.repo.info(Kind::Flavor, flavor).map(|f| f.defaults).unwrap_or_default();
+    let mut mix: Vec<String> = ctx
+        .repo
+        .info(Kind::Flavor, flavor)
+        .map(|f| f.defaults)
+        .unwrap_or_default();
     for m in keep {
         if ctx.repo.info(Kind::MixIn, m).is_some_and(|i| i.graphics) && !mix.contains(m) {
             mix.push(m.clone());
@@ -199,17 +288,34 @@ fn init(ctx: &mut Ctx, args: &[String]) -> Result<(), String> {
     if State::load(&ctx.root).map_err(|e| e.to_string())?.is_some() {
         return Err("this system already has a profile; `slp show` it, `slp flavor` or `slp mix-in` changes it".to_string());
     }
-    let flavor = args.first().cloned().unwrap_or_else(|| "desktop".to_string());
+    let flavor = args
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "desktop".to_string());
     info_of(ctx, Kind::Flavor, &flavor)?;
-    let sel = Selection { mix_ins: defaults_of(ctx, &flavor, &[]), flavor };
+    let sel = Selection {
+        mix_ins: defaults_of(ctx, &flavor, &[]),
+        flavor,
+    };
     save_and_apply(ctx, &sel)?;
-    let _ = writeln!(ctx.out, "Profile recorded: flavor {}, mix-ins {}.", sel.flavor, sel.mix_ins.join(" "));
-    let _ = writeln!(ctx.out, "Nothing was installed. `slp install` installs what is missing.");
+    let _ = writeln!(
+        ctx.out,
+        "Profile recorded: flavor {}, mix-ins {}.",
+        sel.flavor,
+        sel.mix_ins.join(" ")
+    );
+    let _ = writeln!(
+        ctx.out,
+        "Nothing was installed. `slp install` installs what is missing."
+    );
     Ok(())
 }
 
 fn flavor(ctx: &mut Ctx, args: &[String]) -> Result<(), String> {
-    let name = args.iter().find(|a| !a.starts_with("--")).ok_or("flavor which? see `slp list flavors`")?;
+    let name = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .ok_or("flavor which? see `slp list flavors`")?;
     info_of(ctx, Kind::Flavor, name)?;
     let mut sel = load(ctx)?;
     sel.flavor = name.clone();
@@ -217,13 +323,20 @@ fn flavor(ctx: &mut Ctx, args: &[String]) -> Result<(), String> {
         sel.mix_ins = defaults_of(ctx, name, &sel.mix_ins);
     }
     let eff = save_and_apply(ctx, &sel)?;
-    let _ = writeln!(ctx.out, "Flavor: {} ({} packages in @slp). `slp install` installs what is missing.", sel.flavor, eff.atoms.len());
+    let _ = writeln!(
+        ctx.out,
+        "Flavor: {} ({} packages in @slp). `slp install` installs what is missing.",
+        sel.flavor,
+        eff.atoms.len()
+    );
     Ok(())
 }
 
 fn mix_in(ctx: &mut Ctx, args: &[String]) -> Result<(), String> {
     if args.is_empty() {
-        return Err("mix-in which? `slp mix-in +gaming -office`; see `slp list mix-ins`".to_string());
+        return Err(
+            "mix-in which? `slp mix-in +gaming -office`; see `slp list mix-ins`".to_string(),
+        );
     }
     let mut sel = load(ctx)?;
     let (mut add, mut remove): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
@@ -244,7 +357,12 @@ fn mix_in(ctx: &mut Ctx, args: &[String]) -> Result<(), String> {
         }
     }
     let eff = save_and_apply(ctx, &sel)?;
-    let _ = writeln!(ctx.out, "Mix-ins: {} ({} packages in @slp). `slp install` installs what is missing.", sel.mix_ins.join(" "), eff.atoms.len());
+    let _ = writeln!(
+        ctx.out,
+        "Mix-ins: {} ({} packages in @slp). `slp install` installs what is missing.",
+        sel.mix_ins.join(" "),
+        eff.atoms.len()
+    );
     Ok(())
 }
 
@@ -275,7 +393,10 @@ fn install(ctx: &mut Ctx) -> Result<(), String> {
     }
     let _ = writeln!(ctx.out, "Installing @slp ({} packages)...", eff.atoms.len());
     // 32-bit libraries (Steam) change the USE flags of packages that are already installed: rebuild just those
-    let changed_use = eff.use_lines.iter().any(|l| l.split_whitespace().any(|w| w == "abi_x86_32"));
+    let changed_use = eff
+        .use_lines
+        .iter()
+        .any(|l| l.split_whitespace().any(|w| w == "abi_x86_32"));
     let status = std::process::Command::new("emerge")
         .args(["--noreplace", "--autounmask-write", "--autounmask-continue"])
         .args(changed_use.then_some("--changed-use"))
@@ -286,7 +407,9 @@ fn install(ctx: &mut Ctx) -> Result<(), String> {
         return Err("emerge did not finish; `slp install` can be run again".to_string());
     }
     for service in &eff.services {
-        let _ = std::process::Command::new("rc-update").args(["add", service, "default"]).status();
+        let _ = std::process::Command::new("rc-update")
+            .args(["add", service, "default"])
+            .status();
     }
     let _ = writeln!(ctx.out, "Done.");
     Ok(())
@@ -298,22 +421,33 @@ fn add_steam_overlay() -> Result<(), String> {
     let dir = Path::new("/var/db/repos/steam-overlay");
     let text = "[steam-overlay]\nlocation = /var/db/repos/steam-overlay\nsync-type = git\nsync-uri = https://github.com/anyc/steam-overlay.git\nauto-sync = yes\n";
     if conf.is_dir() {
-        std::fs::write(conf.join("steam-overlay.conf"), text).map_err(|e| format!("writing repos.conf: {e}"))?;
+        std::fs::write(conf.join("steam-overlay.conf"), text)
+            .map_err(|e| format!("writing repos.conf: {e}"))?;
     } else {
         let old = std::fs::read_to_string(conf).unwrap_or_default();
         if !old.contains("[steam-overlay]") {
-            std::fs::write(conf, format!("{old}\n{text}")).map_err(|e| format!("writing repos.conf: {e}"))?;
+            std::fs::write(conf, format!("{old}\n{text}"))
+                .map_err(|e| format!("writing repos.conf: {e}"))?;
         }
     }
     if dir.exists() {
         return Ok(());
     }
     let status = std::process::Command::new("git")
-        .args(["clone", "--depth", "1", "https://github.com/anyc/steam-overlay.git"])
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            "https://github.com/anyc/steam-overlay.git",
+        ])
         .arg(dir)
         .status()
         .map_err(|e| format!("could not run git: {e}"))?;
-    if status.success() { Ok(()) } else { Err("could not clone the steam-overlay".to_string()) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err("could not clone the steam-overlay".to_string())
+    }
 }
 
 #[cfg(test)]
@@ -332,7 +466,11 @@ mod tests {
         a.extend(args.iter().map(|s| s.to_string()));
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let code = execute(&a, &mut out, &mut err);
-        (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+        (
+            code,
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
     }
 
     #[test]
@@ -351,10 +489,16 @@ mod tests {
         assert_eq!(code, 0, "{err}");
         assert!(out.contains("terminal") && out.contains("browser"), "{out}");
         let (_, shown, _) = run(&root, &["show"]);
-        assert!(shown.contains("flavor:    desktop (Desktop)") && shown.contains("inherits:  minimal"), "{shown}");
+        assert!(
+            shown.contains("flavor:    desktop (Desktop)") && shown.contains("inherits:  minimal"),
+            "{shown}"
+        );
         assert!(shown.contains("desktop:   yes"), "{shown}");
         let set = std::fs::read_to_string(root.join("etc/portage/sets/slp")).unwrap();
-        assert!(set.contains("x11-terms/ghostty") && set.contains("net-wireless/iwd"), "{set}");
+        assert!(
+            set.contains("x11-terms/ghostty") && set.contains("net-wireless/iwd"),
+            "{set}"
+        );
         let (code, _, err) = run(&root, &["init"]);
         assert_eq!(code, 1);
         assert!(err.contains("already has a profile"), "{err}");
@@ -370,19 +514,27 @@ mod tests {
         assert!(out.contains("gaming") && out.contains("office"), "{out}");
         let set = std::fs::read_to_string(root.join("etc/portage/sets/slp")).unwrap();
         assert!(set.contains("games-util/gamemode") && set.contains("app-office/libreoffice-bin"));
-        assert!(std::fs::read_to_string(root.join("etc/portage/package.accept_keywords/slp")).unwrap().contains("games-util/gamemode ~amd64"));
+        assert!(
+            std::fs::read_to_string(root.join("etc/portage/package.accept_keywords/slp"))
+                .unwrap()
+                .contains("games-util/gamemode ~amd64")
+        );
         let (code, _, _) = run(&root, &["mix-in", "-gaming", "-office"]);
         assert_eq!(code, 0);
         let set = std::fs::read_to_string(root.join("etc/portage/sets/slp")).unwrap();
         assert!(!set.contains("gamemode") && !set.contains("libreoffice"));
         let (code, _, err) = run(&root, &["mix-in", "+nonsense"]);
         assert_eq!(code, 1);
-        assert!(err.contains("unknown mix-in") && err.contains("gaming"), "{err}");
+        assert!(
+            err.contains("unknown mix-in") && err.contains("gaming"),
+            "{err}"
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn the_alternatives_of_one_graphics_vendor_exclude_each_other_but_can_be_swapped_in_one_command() {
+    fn the_alternatives_of_one_graphics_vendor_exclude_each_other_but_can_be_swapped_in_one_command(
+    ) {
         let root = temp("gfx");
         run(&root, &["init", "desktop"]);
         run(&root, &["mix-in", "+gfx-nouveau", "+gfx-intel"]);
@@ -404,10 +556,20 @@ mod tests {
         let (code, _, err) = run(&root, &["flavor", "minimal"]);
         assert_eq!(code, 0, "{err}");
         let (_, shown, _) = run(&root, &["show"]);
-        assert!(shown.contains("flavor:    minimal") && shown.contains("desktop:   no") && shown.contains("gaming"), "{shown}");
+        assert!(
+            shown.contains("flavor:    minimal")
+                && shown.contains("desktop:   no")
+                && shown.contains("gaming"),
+            "{shown}"
+        );
         run(&root, &["flavor", "workstation", "--defaults"]);
         let (_, shown, _) = run(&root, &["show"]);
-        assert!(shown.contains("flavor:    workstation") && shown.contains("dev") && !shown.contains("gaming"), "{shown}");
+        assert!(
+            shown.contains("flavor:    workstation")
+                && shown.contains("dev")
+                && !shown.contains("gaming"),
+            "{shown}"
+        );
         let (code, _, err) = run(&root, &["flavor", "nope"]);
         assert_eq!(code, 1);
         assert!(err.contains("unknown flavor"), "{err}");
@@ -420,11 +582,20 @@ mod tests {
         run(&root, &["init", "desktop"]);
         let (code, out, _) = run(&root, &["list"]);
         assert_eq!(code, 0);
-        assert!(out.contains(" * desktop") && out.contains("   minimal"), "{out}");
-        assert!(out.contains(" * terminal") && out.contains("   gaming"), "{out}");
+        assert!(
+            out.contains(" * desktop") && out.contains("   minimal"),
+            "{out}"
+        );
+        assert!(
+            out.contains(" * terminal") && out.contains("   gaming"),
+            "{out}"
+        );
         assert!(out.contains("gfx-amd"), "{out}");
         let (code, out, _) = run(&root, &["list", "flavors"]);
-        assert!(code == 0 && !out.contains("Mix-ins") && !out.contains("live"), "the live flavor is not offered: {out}");
+        assert!(
+            code == 0 && !out.contains("Mix-ins") && !out.contains("live"),
+            "the live flavor is not offered: {out}"
+        );
         assert_eq!(run(&root, &["list", "nonsense"]).0, 1);
         std::fs::remove_dir_all(&root).ok();
     }
@@ -434,9 +605,17 @@ mod tests {
         let root = temp("info");
         let (code, out, err) = run(&root, &["info", "gfx-nvidia"]);
         assert_eq!(code, 0, "{err}");
-        assert!(out.contains("x11-drivers/nvidia-drivers (~amd64)") && out.contains("VIDEO_CARDS+=\"nvidia\"") && out.contains("group:      nvidia"), "{out}");
+        assert!(
+            out.contains("x11-drivers/nvidia-drivers (~amd64)")
+                && out.contains("VIDEO_CARDS+=\"nvidia\"")
+                && out.contains("group:      nvidia"),
+            "{out}"
+        );
         let (_, out, _) = run(&root, &["info", "workstation"]);
-        assert!(out.contains("inherits:   flavor/desktop") && out.contains("ticks:"), "{out}");
+        assert!(
+            out.contains("inherits:   flavor/desktop") && out.contains("ticks:"),
+            "{out}"
+        );
         assert_eq!(run(&root, &["info", "nope"]).0, 1);
         std::fs::remove_dir_all(&root).ok();
     }
@@ -460,9 +639,16 @@ mod tests {
         run(&root, &["init", "live"]);
         let (code, out, err) = run(&root, &["rebuild"]);
         assert_eq!(code, 0, "{err}");
-        assert_eq!(out.lines().collect::<Vec<_>>(), ["media-libs/mesa", "dev-vcs/git", "net-analyzer/tcpdump"]);
+        assert_eq!(
+            out.lines().collect::<Vec<_>>(),
+            ["media-libs/mesa", "dev-vcs/git", "net-analyzer/tcpdump"]
+        );
         let pkg_use = std::fs::read_to_string(root.join("etc/portage/package.use/slp")).unwrap();
-        assert!(pkg_use.contains("media-libs/mesa -llvm") && pkg_use.contains("dev-vcs/git -perl -python -gpg -nls"), "{pkg_use}");
+        assert!(
+            pkg_use.contains("media-libs/mesa -llvm")
+                && pkg_use.contains("dev-vcs/git -perl -python -gpg -nls"),
+            "{pkg_use}"
+        );
         run(&root, &["flavor", "desktop"]);
         assert_eq!(run(&root, &["rebuild"]).1, "");
         std::fs::remove_dir_all(&root).ok();
@@ -473,7 +659,10 @@ mod tests {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         assert_eq!(execute(&["frobnicate".into()], &mut out, &mut err), 1);
         assert!(String::from_utf8(err).unwrap().contains("usage: slp"));
-        assert_eq!(execute(&["--root".into()], &mut Vec::new(), &mut Vec::new()), 2);
+        assert_eq!(
+            execute(&["--root".into()], &mut Vec::new(), &mut Vec::new()),
+            2
+        );
         let mut out = Vec::new();
         assert_eq!(execute(&["help".into()], &mut out, &mut Vec::new()), 0);
         assert!(String::from_utf8(out).unwrap().contains("slp [--root DIR]"));

@@ -293,7 +293,10 @@ async fn advance(state: &mut AppState) {
     match state.step {
         Step::Network => {
             // The flavor is asked for unless the environment (or the simulation) already answers it.
-            if std::env::var("GENTOO_INSTALLER_FLAVOR").is_ok() || simulate_mode() || state.flavors.len() < 2 {
+            if std::env::var("GENTOO_INSTALLER_FLAVOR").is_ok()
+                || simulate_mode()
+                || state.flavors.len() < 2
+            {
                 enter_disk_select(state).await;
             } else {
                 state.step = Step::Flavor;
@@ -796,7 +799,11 @@ mod tests {
         std::env::remove_var("GENTOO_INSTALLER_SIMULATE");
         let mut state = AppState::new();
         assert_eq!(
-            state.flavors.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+            state
+                .flavors
+                .iter()
+                .map(|f| f.id.as_str())
+                .collect::<Vec<_>>(),
             ["minimal", "desktop", "workstation"]
         );
         assert_eq!(state.flavors[state.flavor_idx].id, "desktop");

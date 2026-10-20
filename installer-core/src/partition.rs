@@ -373,7 +373,9 @@ pub async fn create_partitions(
         runner
             .run_status(
                 "parted",
-                &["--script", "--", disk, "mkpart", "biosboot", "-2MiB", "-1MiB"],
+                &[
+                    "--script", "--", disk, "mkpart", "biosboot", "-2MiB", "-1MiB",
+                ],
             )
             .await?;
         runner
@@ -754,23 +756,45 @@ mod tests {
     }
 
     fn parted_calls(runner: &FakeCommandRunner) -> Vec<Vec<String>> {
-        runner.calls().into_iter().filter(|(c, _)| c == "parted").map(|(_, a)| a).collect()
+        runner
+            .calls()
+            .into_iter()
+            .filter(|(c, _)| c == "parted")
+            .map(|(_, a)| a)
+            .collect()
     }
 
     #[tokio::test]
-    async fn a_bios_machine_gets_a_bios_boot_partition_after_the_others_so_they_keep_their_numbers() {
+    async fn a_bios_machine_gets_a_bios_boot_partition_after_the_others_so_they_keep_their_numbers()
+    {
         // Limine cannot boot a GPT disk through legacy BIOS without one ("no BIOS boot partition specified or detected").
         let runner = FakeCommandRunner::new(); // no size known: one root partition
         let mut layout = plan("/dev/sda", RootFs::Btrfs, 16 * GIB);
         layout.bios_boot = true;
         let parts = create_partitions(&runner, &layout).await.unwrap();
-        assert_eq!((parts.esp.as_str(), parts.swap.as_str(), parts.root.as_str()), ("/dev/sda1", "/dev/sda2", "/dev/sda3"));
+        assert_eq!(
+            (parts.esp.as_str(), parts.swap.as_str(), parts.root.as_str()),
+            ("/dev/sda1", "/dev/sda2", "/dev/sda3")
+        );
         let calls = parted_calls(&runner);
-        let root = calls.iter().find(|a| a.contains(&"root".to_string())).unwrap();
-        assert_eq!(root[root.len() - 1], "-2MiB", "root stops short of the end: {root:?}");
+        let root = calls
+            .iter()
+            .find(|a| a.contains(&"root".to_string()))
+            .unwrap();
+        assert_eq!(
+            root[root.len() - 1],
+            "-2MiB",
+            "root stops short of the end: {root:?}"
+        );
         let n = calls.len();
-        assert_eq!(calls[n - 2], ["--script", "--", "/dev/sda", "mkpart", "biosboot", "-2MiB", "-1MiB"]);
-        assert_eq!(calls[n - 1], ["--script", "/dev/sda", "set", "4", "bios_grub", "on"]);
+        assert_eq!(
+            calls[n - 2],
+            ["--script", "--", "/dev/sda", "mkpart", "biosboot", "-2MiB", "-1MiB"]
+        );
+        assert_eq!(
+            calls[n - 1],
+            ["--script", "/dev/sda", "set", "4", "bios_grub", "on"]
+        );
     }
 
     #[tokio::test]
@@ -782,9 +806,15 @@ mod tests {
         let parts = create_partitions(&runner, &layout).await.unwrap();
         assert_eq!(parts.home.as_deref(), Some("/dev/sda4"));
         let calls = parted_calls(&runner);
-        let home = calls.iter().find(|a| a.contains(&"home".to_string())).unwrap();
+        let home = calls
+            .iter()
+            .find(|a| a.contains(&"home".to_string()))
+            .unwrap();
         assert_eq!(home[home.len() - 1], "-2MiB");
-        assert_eq!(calls[calls.len() - 1], ["--script", "/dev/sda", "set", "5", "bios_grub", "on"]);
+        assert_eq!(
+            calls[calls.len() - 1],
+            ["--script", "/dev/sda", "set", "5", "bios_grub", "on"]
+        );
     }
 
     #[tokio::test]
@@ -794,8 +824,13 @@ mod tests {
         layout.bios_boot = false;
         create_partitions(&runner, &layout).await.unwrap();
         let calls = parted_calls(&runner);
-        assert!(!calls.iter().any(|a| a.iter().any(|x| x == "bios_grub" || x == "biosboot")));
-        let root = calls.iter().find(|a| a.contains(&"root".to_string())).unwrap();
+        assert!(!calls
+            .iter()
+            .any(|a| a.iter().any(|x| x == "bios_grub" || x == "biosboot")));
+        let root = calls
+            .iter()
+            .find(|a| a.contains(&"root".to_string()))
+            .unwrap();
         assert_eq!(root[root.len() - 1], "100%");
     }
 

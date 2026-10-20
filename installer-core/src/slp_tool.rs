@@ -35,7 +35,8 @@ mod tests {
     use super::*;
 
     fn tree(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("gentoo-installer-slp-{tag}-{}", std::process::id()));
+        let d =
+            std::env::temp_dir().join(format!("gentoo-installer-slp-{tag}-{}", std::process::id()));
         std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -52,9 +53,19 @@ mod tests {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, "slp").unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(install_from_live(&live, &target).await.unwrap(), ["bin/slp"]);
+        assert_eq!(
+            install_from_live(&live, &target).await.unwrap(),
+            ["bin/slp"]
+        );
         assert!(installed(&target));
-        assert_eq!(std::fs::metadata(target.join(BIN)).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_eq!(
+            std::fs::metadata(target.join(BIN))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
         std::fs::remove_dir_all(&live).ok();
         std::fs::remove_dir_all(&target).ok();
     }

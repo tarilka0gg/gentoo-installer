@@ -48,7 +48,10 @@ impl Phase for PackagesPhase {
             Err(_) => Vec::new(),
         };
         let nouveau = ctx.settings.gpu_override == Some(crate::hardware::Gpu::Nouveau)
-            || ctx.profile.as_ref().is_some_and(|p| p.gpu == crate::hardware::Gpu::Nouveau);
+            || ctx
+                .profile
+                .as_ref()
+                .is_some_and(|p| p.gpu == crate::hardware::Gpu::Nouveau);
         let gfx = crate::gpu::gfx_mix_ins(&gpus, ctx.settings.gpu_override, nouveau);
         packages::install(
             ctx.runner.as_ref(),

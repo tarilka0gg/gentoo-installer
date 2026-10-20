@@ -34,8 +34,8 @@ mod session;
 #[cfg(test)]
 mod tests;
 
-use packages::*;
 pub(crate) use packages::ensure_overlay;
+use packages::*;
 use preset::*;
 use session::*;
 

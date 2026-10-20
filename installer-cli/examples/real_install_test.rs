@@ -29,7 +29,8 @@ async fn main() {
         target: "/mnt/gentoo-installer-test".into(),
         store: store::StoreConfig {
             binhost_url: "http://127.0.0.1:8123".into(),
-            overlay_git_url: "file:///home/tarilka0gg/Documents/work/gentoo-installer-test/test-overlay".into(),
+            overlay_git_url:
+                "file:///home/tarilka0gg/Documents/work/gentoo-installer-test/test-overlay".into(),
             overlay_name: "localrepo".into(),
         },
         kernel_base_name: "gentoo-diy-kernel".into(),

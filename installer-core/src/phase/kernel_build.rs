@@ -129,7 +129,13 @@ mod tests {
             overlay_git_url: String::new(),
             overlay_name: "test".into(),
         };
-        let mut c = Ctx::new(runner, std::env::temp_dir().join("gi-kbuild-test"), layout, store, "k".into());
+        let mut c = Ctx::new(
+            runner,
+            std::env::temp_dir().join("gi-kbuild-test"),
+            layout,
+            store,
+            "k".into(),
+        );
         c.profile = Some(hardware::Profile {
             cpu: hardware::CpuArch::IntelRaptorlake,
             gpu: hardware::Gpu::Intel,
@@ -147,7 +153,11 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         KernelBuildPhase.run(&mut c, &tx).await.unwrap();
         drop(tx);
-        assert!(runner.calls().is_empty(), "no command ran: {:?}", runner.calls());
+        assert!(
+            runner.calls().is_empty(),
+            "no command ran: {:?}",
+            runner.calls()
+        );
         let mut events = Vec::new();
         while let Some(e) = rx.recv().await {
             events.push(e);
@@ -157,7 +167,10 @@ mod tests {
             "no \"Building the kernel\" label for a build that is not happening: {events:?}"
         );
         assert!(c.kernel_pkg.is_none());
-        assert!(KernelBuildPhase.is_satisfied(&c).await.unwrap(), "and a resume skips it too");
+        assert!(
+            KernelBuildPhase.is_satisfied(&c).await.unwrap(),
+            "and a resume skips it too"
+        );
     }
 
     #[tokio::test]

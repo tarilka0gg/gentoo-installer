@@ -399,18 +399,48 @@ mod tests {
     #[test]
     fn the_graphics_mix_ins_are_the_detected_drivers_under_their_profile_names() {
         // the hybrid laptop: both adapters, discrete first, and the proprietary or the open NVIDIA driver as chosen
-        assert_eq!(gfx_mix_ins(&parse_lspci(HYBRID), None, false), ["gfx-nvidia", "gfx-intel"]);
-        assert_eq!(gfx_mix_ins(&parse_lspci(HYBRID), None, true), ["gfx-nouveau", "gfx-intel"]);
-        assert_eq!(gfx_mix_ins(&parse_lspci(VIRTIO), None, false), ["gfx-virtual"]);
-        assert_eq!(gfx_mix_ins(&parse_lspci(VIRTIO), Some(Gpu::Amd), false), ["gfx-virtual", "gfx-amd"]);
-        assert_eq!(gfx_mix_ins(&[], Some(Gpu::RadeonLegacy), false), ["gfx-legacy-radeon"]);
+        assert_eq!(
+            gfx_mix_ins(&parse_lspci(HYBRID), None, false),
+            ["gfx-nvidia", "gfx-intel"]
+        );
+        assert_eq!(
+            gfx_mix_ins(&parse_lspci(HYBRID), None, true),
+            ["gfx-nouveau", "gfx-intel"]
+        );
+        assert_eq!(
+            gfx_mix_ins(&parse_lspci(VIRTIO), None, false),
+            ["gfx-virtual"]
+        );
+        assert_eq!(
+            gfx_mix_ins(&parse_lspci(VIRTIO), Some(Gpu::Amd), false),
+            ["gfx-virtual", "gfx-amd"]
+        );
+        assert_eq!(
+            gfx_mix_ins(&[], Some(Gpu::RadeonLegacy), false),
+            ["gfx-legacy-radeon"]
+        );
         assert_eq!(gfx_mix_ins(&[], None, false), Vec::<String>::new());
         // every name is a mix-in that exists, and a hybrid laptop's pair can be chosen together
-        for id in ["gfx-nvidia", "gfx-intel", "gfx-nouveau", "gfx-virtual", "gfx-amd", "gfx-legacy-radeon"] {
-            assert!(slp_profiles::Repo::bundled().info(slp_profiles::Kind::MixIn, id).is_some(), "{id}");
+        for id in [
+            "gfx-nvidia",
+            "gfx-intel",
+            "gfx-nouveau",
+            "gfx-virtual",
+            "gfx-amd",
+            "gfx-legacy-radeon",
+        ] {
+            assert!(
+                slp_profiles::Repo::bundled()
+                    .info(slp_profiles::Kind::MixIn, id)
+                    .is_some(),
+                "{id}"
+            );
         }
         assert!(slp_profiles::Repo::bundled()
-            .resolve(&slp_profiles::Selection { flavor: "desktop".into(), mix_ins: gfx_mix_ins(&parse_lspci(HYBRID), None, false) })
+            .resolve(&slp_profiles::Selection {
+                flavor: "desktop".into(),
+                mix_ins: gfx_mix_ins(&parse_lspci(HYBRID), None, false)
+            })
             .is_ok());
     }
 
