@@ -1,1 +1,1 @@
-VIDEO_CARDS+="virgl vmware qxl"
+VIDEO_CARDS+="virgl"

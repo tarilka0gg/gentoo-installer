@@ -162,7 +162,7 @@ fn the_graphics_mix_ins_name_the_drivers_the_installer_picks() {
     );
     assert_eq!(vc("gfx-legacy-radeon")[0].1, "radeon r300 r600");
     assert_eq!(vc("gfx-intel")[0].1, "intel");
-    assert_eq!(vc("gfx-virtual")[0].1, "virgl vmware qxl");
+    assert_eq!(vc("gfx-virtual")[0].1, "virgl");
     // a hybrid laptop: both, and the alternatives for one vendor exclude each other
     let both = repo
         .resolve(&Selection {

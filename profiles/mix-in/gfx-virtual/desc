@@ -1,2 +1,2 @@
 Virtual machine graphics
-Virtual GPUs: virtio (virgl), VMware and QXL, so that a VM shows a desktop.
+Virtual GPUs (QEMU virtio with virgl; a VMware or QXL adapter adds its own driver from detection), so that a VM shows a desktop.
