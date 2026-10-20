@@ -351,7 +351,7 @@ Both are invisible with serial-only testing and were only noticed from screensho
 
 At run time `installer-core/src/offline.rs` finds `/run/initramfs/live/offline`, serves it on `127.0.0.1` from a thread and sets `GENTOO_STORE_BINHOST_URL`, `GENTOO_BINHOST_URL` and `GENTOO_WM_CONFIGS_URL` (a `file://` path: `git clone --depth 1` does not work over dumb HTTP) unless they are set; `binhost::configure` points the stage3's `[gentoo]` entry and `GENTOO_MIRRORS` at it (the stage3's own entry is kept in `etc/portage/.offline-stock-binrepos/`, because Portage reads every file in `binrepos.conf/`), and the finalize phase puts the public addresses back. The wizard's network step is skipped.
 
-What is left off the medium to stay under GitHub's 2 GiB: the groups in `offline::NOT_ON_MEDIUM` (and their packages, `OFFLINE_EXCLUDE` in `make-offline.sh`), and most of `linux-firmware` (the archive is cut to ~130 MB, `WHENCE` and the tree's Manifest are edited to match). Test with a VM whose network is `restrict=on` (plus a `guestfwd` for the log), and `GENTOO_INSTALLER_GPU=none`: a virtio GPU makes the installer ask for a `video_cards_virgl` Mesa that has no binary.
+What is left off the medium to stay under GitHub's 2 GiB: the groups in `offline::NOT_ON_MEDIUM` (and their packages, `OFFLINE_EXCLUDE` in `make-offline.sh`), and most of `linux-firmware` (the archive is cut to ~130 MB, `WHENCE` and the tree's Manifest are edited to match). Test with a VM whose network is `restrict=on` (plus a `guestfwd` for the log), (a virtio GPU works since 0.2.38: the offline payload carries the `virgl` build of Mesa).
 
 ## SSH into a live session (opt-in)
 
