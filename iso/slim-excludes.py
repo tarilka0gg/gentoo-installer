@@ -14,6 +14,8 @@ a cut that breaks a dependency must not ship. Run it after changing the lists.
 """
 import glob, os, re, subprocess, sys
 
+# Nothing in the image links the ffmpeg 7 compatibility libraries (21 MB), the print server (the GTK printing back end is not built) or
+# libsmi's MIB files (19 MB; tcpdump is built without libsmi). --check proves that no kept program needs a library they carry.
 # Whole packages with no use on the medium: build tools, documentation tools, a mail client, assemblers, media and print leftovers.
 DROP_PACKAGES = """
 net-mail/mailutils virtual/mailx
@@ -22,8 +24,6 @@ sys-devel/bison sys-devel/flex sys-devel/m4 dev-util/re2c dev-lang/nasm dev-lang
 dev-util/mesa_clc dev-util/spirv-llvm-translator
 sys-apps/texinfo app-doc/info-manual sys-apps/man-db sys-apps/groff app-text/mandoc dev-libs/opensp
 llvm-core/lld llvm-core/lld-toolchain-symlinks
-# Nothing in the image links the ffmpeg 7 compatibility libraries (21 MB), the print server (the GTK printing back end is not built) or
-# libsmi's MIB files (19 MB; tcpdump is built without libsmi). --check proves that no kept program needs a library they carry.
 media-video/ffmpeg-compat net-print/cups net-libs/libsmi
 llvm-core/llvm llvm-core/clang llvm-runtimes/compiler-rt llvm-runtimes/compiler-rt-sanitizers
 """.split()
