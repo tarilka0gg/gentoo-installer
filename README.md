@@ -1,5 +1,7 @@
 # Gentoo Installer
 
+[![CI](https://github.com/tarilka0gg/gentoo-installer/actions/workflows/ci.yml/badge.svg)](https://github.com/tarilka0gg/gentoo-installer/actions/workflows/ci.yml) [![License](https://img.shields.io/github/license/tarilka0gg/gentoo-installer)](LICENSE) [![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-blue)](CHANGELOG.md)
+
 The installer and the image build scripts behind [Simple Linux](https://github.com/tarilka0gg/simple-linux),
 a Gentoo-based live system. It installs Gentoo (OpenRC, Limine) onto a disk in about ten minutes, from binary
 packages, with a kernel picked for the machine's hardware.

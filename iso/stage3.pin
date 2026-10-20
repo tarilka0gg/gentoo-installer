@@ -1,0 +1,3 @@
+# The Gentoo stage3 (amd64, openrc) the custom stage of the current release was built on; iso/check-upstream.py compares it with Gentoo.
+# Update it when you rebuild the stage with iso/make-stage.sh.
+20260927T170058Z

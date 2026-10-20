@@ -1,0 +1,36 @@
+name: Upstream check
+# Once a week: has upstream moved past what Simple Linux pins (kernel, stage3, the binary host's tree snapshot, the overlay's ebuilds)?
+# Keeps one open issue called "Upstream updates" up to date and closes it when everything is current. Nothing else is changed.
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check
+        id: check
+        run: |
+          set +e
+          python3 iso/check-upstream.py --check > report.md
+          echo "needs=$?" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update the issue
+        run: |
+          number=$(gh issue list --state open --label upstream --search '"Upstream updates" in:title' --json number --jq '.[0].number // empty')
+          if [ "${{ steps.check.outputs.needs }}" = "1" ]; then
+            body="$(printf 'Checked by `iso/check-upstream.py` (weekly). Pinned versions and what upstream has now:\n\n%s\n\nUpdate what needs it (`MAINTAINING.md` says how), then this issue closes by itself at the next check.' "$(cat report.md)")"
+            if [ -n "$number" ]; then gh issue edit "$number" --body "$body"
+            else gh label create upstream --description "Upstream moved on" --color 7c5cff 2>/dev/null || true
+                 gh issue create --title "Upstream updates" --label upstream --body "$body"; fi
+          elif [ -n "$number" ]; then
+            gh issue close "$number" --comment "Everything pinned is up to date again."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

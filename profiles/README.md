@@ -45,8 +45,9 @@ Every file of a profile directory is optional. Lines starting with `#` and empty
 
 `profiles/overlay/` is a Portage overlay (`slp-local`) with the ebuilds of programs Portage does not have: ready-made binaries of PineconeMC
 and the Craft apps, taken from their GitHub releases (`-bin` ebuilds, with `Manifest`s that pin the archives by checksum). A mix-in that
-says `needs local` makes `render` write it to `/var/db/repos/slp-local` and register it. To update a program: change the version in the
-ebuild's file name, run `ebuild <file> manifest`, and check with `ebuild <file> clean install`.
+says `needs local` makes `render` write it to `/var/db/repos/slp-local` and register it. To update a program: run `profiles/overlay/bump.py <category/package>` (it renames the ebuild, hashes the new archive and writes the
+Manifest line; `--keep` keeps the old ebuild, a version can be given), then check with `ebuild <file> clean install`. The weekly workflow
+`Upstream check` says when a release is newer (`iso/check-upstream.py`).
 
 ## Rules
 
