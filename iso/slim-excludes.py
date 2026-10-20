@@ -38,6 +38,19 @@ PERL_PATHS = ["usr/bin/perl*", "usr/lib64/perl5", "usr/lib64/libperl.so*", "usr/
               "usr/lib64/perl*"]
 
 
+def merged_usr(root, rel):
+    """The path a CONTENTS entry really has in the tree: `usr/sbin/cupsd` is `usr/bin/cupsd` where sbin is a symlink to bin (the archive
+    that is cut knows only the real path)."""
+    parent, base = os.path.split(rel)
+    real_root = os.path.realpath(root)
+    real_parent = os.path.realpath(os.path.join(root, parent))
+    if real_parent.startswith(real_root + os.sep):
+        resolved = os.path.relpath(os.path.join(real_parent, base), real_root)
+        if resolved != rel:
+            return resolved
+    return None
+
+
 def package_files(root, atom):
     cat, name = atom.split("/")
     for d in glob.glob(os.path.join(root, "var/db/pkg", cat, name + "-[0-9]*")):
@@ -45,9 +58,15 @@ def package_files(root, atom):
             for line in open(os.path.join(d, "CONTENTS"), errors="replace"):
                 kind, _, rest = line.rstrip("\n").partition(" ")
                 if kind == "obj":
-                    yield " ".join(rest.split(" ")[:-2]).lstrip("/")
+                    rel = " ".join(rest.split(" ")[:-2]).lstrip("/")
                 elif kind == "sym":
-                    yield rest.split(" -> ")[0].lstrip("/")
+                    rel = rest.split(" -> ")[0].lstrip("/")
+                else:
+                    continue
+                yield rel
+                real = merged_usr(root, rel)
+                if real:
+                    yield real
         except OSError:
             pass
 
