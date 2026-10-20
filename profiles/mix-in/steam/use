@@ -5,3 +5,4 @@ virtual/opengl abi_x86_32
 sys-apps/dbus elogind
 sys-libs/libudev-compat abi_x86_32
 games-util/game-device-udev-rules elogind
+x11-drivers/nvidia-drivers abi_x86_32

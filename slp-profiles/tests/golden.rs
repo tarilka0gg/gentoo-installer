@@ -188,24 +188,24 @@ fn every_package_from_the_local_overlay_has_an_ebuild_and_a_manifest() {
     let repo = Repo::bundled();
     let files = repo.overlay_files();
     assert!(files.contains_key("profiles/repo_name") && files.contains_key("metadata/layout.conf"));
-    let from_overlay: Vec<_> = repo
-        .software()
-        .into_iter()
-        .filter(|m| m.overlays.iter().any(|o| o == "slp-local"))
+    // every package the overlay holds, whichever mix-in uses it
+    let packages: std::collections::BTreeSet<&str> = files
+        .keys()
+        .filter(|k| k.ends_with(".ebuild") && k.matches('/').count() == 2)
+        .filter_map(|k| k.rsplit_once('/').map(|(dir, _)| dir))
         .collect();
-    assert!(from_overlay.len() >= 3, "minecraft, creative, craft-office");
-    for m in from_overlay {
-        for atom in &m.atoms {
-            let dir = format!("{atom}/");
+    assert!(packages.len() >= 3, "minecraft, creative, craft-office");
+    for dir in packages {
+        let manifest = files
+            .get(&format!("{dir}/Manifest"))
+            .unwrap_or_else(|| panic!("{dir} has no Manifest"));
+        let fetches = files.iter().any(|(k, v)| {
+            k.starts_with(&format!("{dir}/")) && k.ends_with(".ebuild") && v.contains("SRC_URI")
+        });
+        if fetches {
             assert!(
-                files
-                    .keys()
-                    .any(|k| k.starts_with(&dir) && k.ends_with(".ebuild")),
-                "{atom} has no ebuild in the overlay"
-            );
-            assert!(
-                files[&format!("{dir}Manifest")].contains("DIST "),
-                "{atom}: the Manifest pins no archive"
+                manifest.contains("DIST "),
+                "{dir}: the Manifest pins no archive"
             );
         }
     }

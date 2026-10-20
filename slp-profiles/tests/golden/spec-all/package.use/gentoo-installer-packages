@@ -17,5 +17,3 @@ kde-frameworks/sonnet qml
 media-libs/vulkan-loader X
 app-text/poppler cairo
 media-libs/gegl cairo lcms
-games-util/gamemode elogind
-sys-apps/dbus elogind

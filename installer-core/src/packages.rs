@@ -508,11 +508,18 @@ mod tests {
                 "CONFIG_PROTECT_MASK=/etc/portage",
                 "emerge",
                 "--noreplace",
+                "--changed-use",
                 "--autounmask-write",
                 "--autounmask-continue",
                 "www-client/zen-bin",
+                "games-util/game-device-udev-rules",
+                "sys-libs/libudev-compat",
+                "games-util/steam-launcher",
                 "games-util/gamemode",
-                "games-util/mangohud"
+                "games-util/mangohud",
+                "gui-wm/gamescope",
+                "games-util/protonup-qt-bin",
+                "games-util/slp-gaming-tweaks"
             ]
         );
         assert_eq!(calls.iter().filter(|(c, _)| c == "umount").count(), 3);
@@ -524,7 +531,7 @@ mod tests {
         );
         let set = std::fs::read_to_string(dir.join("etc/portage/sets/slp")).unwrap();
         assert!(
-            set.contains("www-client/zen-bin\ngames-util/gamemode\ngames-util/mangohud\n"),
+            set.contains("www-client/zen-bin\ngames-util/game-device-udev-rules\nsys-libs/libudev-compat\ngames-util/steam-launcher\ngames-util/gamemode\ngames-util/mangohud\n"),
             "{set}"
         );
         let kw =

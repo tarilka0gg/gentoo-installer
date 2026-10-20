@@ -1,2 +1,5 @@
 games-util/gamemode | GameMode | Switches the computer to its fastest settings while a game runs.
 games-util/mangohud | MangoHud | An overlay that shows the frame rate and temperatures in games.
+gui-wm/gamescope | gamescope | Valve's game window: fixed resolution, upscaling and a frame limiter for any game.
+games-util/protonup-qt-bin | ProtonUp-Qt | Installs and updates GE-Proton, the community build of Proton that fixes many games.
+games-util/slp-gaming-tweaks | Gaming settings | The kernel and login settings Steam and Proton expect (memory maps, controllers, fast sync).

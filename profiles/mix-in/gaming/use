@@ -1,2 +1,3 @@
-games-util/gamemode elogind
+games-util/gamemode elogind abi_x86_32
+games-util/mangohud abi_x86_32
 sys-apps/dbus elogind

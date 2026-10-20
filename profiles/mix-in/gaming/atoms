@@ -1,2 +1,5 @@
 ~games-util/gamemode
 ~games-util/mangohud
+~gui-wm/gamescope
+games-util/protonup-qt-bin
+games-util/slp-gaming-tweaks

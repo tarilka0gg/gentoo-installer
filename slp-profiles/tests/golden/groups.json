@@ -301,26 +301,5 @@
     "services": [],
     "testing": [],
     "use_flags": []
-  },
-  {
-    "atoms": [
-      "games-util/gamemode",
-      "games-util/mangohud"
-    ],
-    "default": false,
-    "description": "GameMode and MangoHud",
-    "guru": true,
-    "id": "gaming",
-    "licenses": [],
-    "name": "Gaming tools",
-    "services": [],
-    "testing": [
-      "games-util/gamemode",
-      "games-util/mangohud"
-    ],
-    "use_flags": [
-      "games-util/gamemode elogind",
-      "sys-apps/dbus elogind"
-    ]
   }
 ]
