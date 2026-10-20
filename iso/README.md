@@ -1,7 +1,7 @@
 # Live ISOs (minimal TUI, and GUI)
 
-Boots on BIOS and UEFI, autologins as root and starts the installer (`installer-cli` on the minimal image, the GUI on the GUI image). Sizes of 0.2.26: minimal 434 MiB, GUI 637 MiB, and the
-*offline* variants that carry everything an install downloads: minimal 1.6 GiB, GUI 1.8 GiB (see "Offline images" at the end).
+Boots on BIOS and UEFI, autologins as root and starts the installer (`installer-cli` on the minimal image, the GUI on the GUI image). Sizes of 0.2.36: minimal 348 MiB, GUI 488 MiB, and the
+*offline* variants that carry everything an install downloads: minimal 1.5 GiB, GUI 1.6 GiB (see "Offline images" at the end).
 Tested in QEMU (KVM) with SeaBIOS and OVMF: Limine → kernel → dracut (`dmsquash-live`,
 OverlayFS) → OpenRC → the installer's TUI on tty1 and on the serial console.
 
