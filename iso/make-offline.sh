@@ -11,6 +11,7 @@
 #   KERNEL_STORE [newest ~/Documents/work/gentoo-installer-test/release-*/simple-linux-kernel-store.tar]
 #   WM_CONFIGS [sibling simple-linux-configs]           cloned bare into configs.git
 #   OFFLINE_EXCLUDE [libreoffice podman telegram gimp vlc mpv]   path prefixes (space separated) of packages left out; keep in step with offline.rs
+#   OFFLINE_PREV []                                     an earlier payload: its index entries are kept for collected packages the binary host dropped
 #   GENTOO_INDEX_URL, SL_INDEX_URL, TREE_URL            where the two indexes and the tree snapshot come from
 set -euo pipefail
 OUT=$(readlink -m "${1:?out dir}")
@@ -56,6 +57,15 @@ def cut(repo, index):
         path = next((l[6:] for l in b.splitlines() if l.startswith("PATH: ")), None)
         if path in files:
             kept.append(b); used.add(path)
+    # The binary host rebuilds and renames packages over time while the tree snapshot (and so what Portage wants) stays: a package that
+    # was collected earlier but is gone from today's index keeps its entry from the previous payload's index, if there is one.
+    prev = os.environ.get("OFFLINE_PREV", "")
+    prev_index = os.path.join(prev, "binhost", repo, "Packages")
+    if prev and os.path.exists(prev_index):
+        for b in open(prev_index, encoding="utf-8").read().split("\n\n")[1:]:
+            path = next((l[6:] for l in b.splitlines() if l.startswith("PATH: ")), None)
+            if path in files and path not in used:
+                kept.append(b); used.add(path)
     missing = sorted(files - used)
     for rel in sorted(used):
         dst = os.path.join(out, repo, rel)
