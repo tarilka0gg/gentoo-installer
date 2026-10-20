@@ -53,6 +53,7 @@ rm -rf --one-file-system "$W/var/db/repos/gentoo" "$W/var/db/repos/guru" "$W/var
     "$W/var/cache/distfiles" "$W/var/tmp/portage" "$W/tmp" "$W/etc/portage/repos.conf/guru.conf"
 mkdir -p "$W/tmp" "$W/var/db/repos"; chmod 1777 "$W/tmp"
 : > "$W/etc/resolv.conf"
+"$(dirname "$0")/trim-stage.sh" "$W"
 if grep -q "$W" /proc/self/mountinfo; then echo "still mounted under $W; not packing" >&2; exit 1; fi
 
 tar --xattrs --xattrs-include='*.*' --numeric-owner -C "$W" -cf - . | xz -T0 -9 > "$OUT"
