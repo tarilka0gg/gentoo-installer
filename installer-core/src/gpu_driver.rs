@@ -37,6 +37,59 @@ pub async fn install(runner: &dyn CommandRunner, target: &Path) -> crate::Result
     install_for(runner, target, Gpu::Nvidia).await
 }
 
+/// The prepared kernel tree was built with the build machine's compiler, and kbuild records that compiler's `--version` line
+/// (`CONFIG_CC_VERSION_TEXT`). When the target's gcc says something else (a newer patch release), kbuild decides the configuration
+/// is out of date and runs `syncconfig`, which needs the kernel's `Kconfig` files, and the tree has none: the module build stops with
+/// "the kernel needs to be rebuilt". The module is built with the target's own compiler, so the recorded line is changed to match it.
+/// Best-effort: if anything is unclear the files stay as they are.
+async fn align_compiler_text(runner: &dyn CommandRunner, target_str: &str, target: &Path) {
+    let tree = target.join("usr/src/linux");
+    let Ok(config) = tokio::fs::read_to_string(tree.join(".config")).await else {
+        return;
+    };
+    let Some(old) = recorded_compiler_text(&config) else {
+        return;
+    };
+    if !old.starts_with("gcc") {
+        return;
+    }
+    let Ok(version) = runner
+        .run("chroot", &[target_str, "gcc", "--version"])
+        .await
+    else {
+        return;
+    };
+    let Some(new) = version.lines().next().map(str::trim) else {
+        return;
+    };
+    if new.is_empty() || new == old {
+        return;
+    }
+    // `.config` first: the files after it must not be older than it, or kbuild syncs again.
+    for file in [
+        ".config",
+        "include/config/auto.conf.cmd",
+        "include/config/auto.conf",
+        "include/generated/autoconf.h",
+    ] {
+        let path = tree.join(file);
+        if let Ok(text) = tokio::fs::read_to_string(&path).await {
+            if text.contains(&old) {
+                tokio::fs::write(&path, text.replace(&old, new)).await.ok();
+            }
+        }
+    }
+}
+
+/// The value of `CONFIG_CC_VERSION_TEXT="..."` in a kernel `.config`.
+fn recorded_compiler_text(config: &str) -> Option<String> {
+    let line = config
+        .lines()
+        .find(|l| l.starts_with("CONFIG_CC_VERSION_TEXT="))?;
+    let value = line.split_once('=')?.1.trim();
+    Some(value.trim_matches('"').to_string())
+}
+
 /// Split out from `install` so tests can drive it with an arbitrary `Gpu` without
 /// needing real hardware detection.
 async fn install_for(runner: &dyn CommandRunner, target: &Path, gpu: Gpu) -> crate::Result<Ran> {
@@ -58,6 +111,7 @@ async fn install_for(runner: &dyn CommandRunner, target: &Path, gpu: Gpu) -> cra
     bind_mount_chroot_dirs(runner, target).await?;
 
     let result = async {
+        align_compiler_text(runner, target_str, target).await;
         ensure_network_resolves(target).await?;
         ensure_portage_tree(runner, target, target_str).await?;
         configure_nvidia_portage_overrides(target).await?;
@@ -132,6 +186,16 @@ pub enum Ran {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_recorded_compiler_line_is_read_from_the_kernel_config() {
+        let config = "CONFIG_CC_IS_GCC=y\nCONFIG_CC_VERSION_TEXT=\"gcc (Gentoo Hardened 15.2.1 p5) 15.2.1\"\nCONFIG_GCC_VERSION=150201\n";
+        assert_eq!(
+            recorded_compiler_text(config).as_deref(),
+            Some("gcc (Gentoo Hardened 15.2.1 p5) 15.2.1")
+        );
+        assert_eq!(recorded_compiler_text("CONFIG_X=y\n"), None);
+    }
     use crate::command::FakeCommandRunner;
 
     #[tokio::test]

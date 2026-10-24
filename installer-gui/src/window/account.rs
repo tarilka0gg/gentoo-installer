@@ -93,6 +93,12 @@ pub(super) fn account_page_build(
                 error_label.set_visible(true);
                 return;
             }
+            // The name is checked here, not when the account is made at about a quarter of the way through the install.
+            if let Err(e) = installer_core::account::validate_username(&username) {
+                error_label.set_label(&e.to_string());
+                error_label.set_visible(true);
+                return;
+            }
             if password.len() < 8 {
                 error_label.set_label("Password needs to be at least 8 characters.");
                 error_label.set_visible(true);

@@ -1,7 +1,7 @@
 //! Limine install/config — the only bootloader this distro supports.
 
 use crate::command::CommandRunner;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Writes a minimal `limine.conf` for the installed system: single entry booting
 /// `kernel_file` (a file name in the ESP root, which is `/boot` on the target). `root_subvol`
@@ -173,8 +173,7 @@ pub async fn install(
     esp_device: &str,
 ) -> crate::Result<()> {
     let boot = target.join("boot");
-    let limine_dir = boot.join("limine");
-    tokio::fs::create_dir_all(&limine_dir).await?;
+    let limine_dir = ensure_dir(&boot, "limine").await?;
 
     // Boot protocol modules + config live under boot/limine regardless of firmware mode.
     for file in ["limine-bios.sys"] {
@@ -186,15 +185,15 @@ pub async fn install(
     }
 
     if firmware_is_uefi() {
-        let efi_boot = boot.join("EFI/BOOT");
-        tokio::fs::create_dir_all(&efi_boot).await?;
+        // A Windows ESP already has `EFI/Boot`; FAT is case-insensitive, so `EFI/BOOT` is the same directory and is reused as it is.
+        let efi_boot = ensure_dir(&ensure_dir(&boot, "EFI").await?, "BOOT").await?;
         // A shared ESP may already have another system's loader at the fallback path: keep it.
         let fallback = efi_boot.join("BOOTX64.EFI");
         let kept = efi_boot.join("BOOTX64.EFI.previous");
         if fallback.is_file() && !kept.exists() {
             tokio::fs::copy(&fallback, &kept).await.ok();
         }
-        copy_if_present("/usr/share/limine/BOOTX64.EFI", fallback).await?;
+        copy_if_present("/usr/share/limine/BOOTX64.EFI", &fallback).await?;
         // A boot entry of its own, first in the order: without it a firmware that already has entries (the other system's)
         // starts those and never reaches the fallback path. Not fatal: some firmware and VMs have no variables to write.
         if let Some((entry_disk, number)) = split_partition(esp_device) {
@@ -243,6 +242,26 @@ fn split_partition(device: &str) -> Option<(String, u32)> {
     Some((head.to_string(), number.parse().ok()?))
 }
 
+/// `parent/name`, created if missing. A directory that differs only in case counts as present (FAT is case-insensitive, and a
+/// shared ESP spells it its own way), and "already exists" is not an error however the filesystem reports it.
+async fn ensure_dir(parent: &Path, name: &str) -> crate::Result<PathBuf> {
+    let with_path =
+        |e: std::io::Error, p: &Path| crate::Error::Other(anyhow::anyhow!("{}: {e}", p.display()));
+    if let Ok(mut entries) = tokio::fs::read_dir(parent).await {
+        while let Ok(Some(e)) = entries.next_entry().await {
+            if e.file_name().to_string_lossy().eq_ignore_ascii_case(name) && e.path().is_dir() {
+                return Ok(e.path());
+            }
+        }
+    }
+    let path = parent.join(name);
+    match tokio::fs::create_dir_all(&path).await {
+        Ok(()) => Ok(path),
+        Err(_) if path.is_dir() => Ok(path),
+        Err(e) => Err(with_path(e, &path)),
+    }
+}
+
 async fn copy_if_present(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> crate::Result<()> {
     let src = src.as_ref();
     if !src.exists() {
@@ -251,13 +270,35 @@ async fn copy_if_present(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> crate:
             src.display()
         )));
     }
-    tokio::fs::copy(src, dst).await?;
+    let dst = dst.as_ref();
+    tokio::fs::copy(src, dst).await.map_err(|e| {
+        crate::Error::Other(anyhow::anyhow!(
+            "copying {} to {}: {e}",
+            src.display(),
+            dst.display()
+        ))
+    })?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn ensure_dir_reuses_a_directory_spelled_in_another_case() {
+        let dir = std::env::temp_dir().join(format!("bl-ensure-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("EFI/Boot")).unwrap();
+        let efi = ensure_dir(&dir, "EFI").await.unwrap();
+        let boot = ensure_dir(&efi, "BOOT").await.unwrap();
+        assert_eq!(boot, dir.join("EFI/Boot"));
+        // missing: created; called twice: no error
+        let fresh = ensure_dir(&dir, "limine").await.unwrap();
+        assert!(fresh.is_dir());
+        assert_eq!(ensure_dir(&dir, "limine").await.unwrap(), fresh);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn config_has_expected_shape() {

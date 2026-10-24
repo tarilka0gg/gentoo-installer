@@ -135,17 +135,21 @@ pub(super) fn confirm_page_build(
         .label("Back")
         .css_classes(vec!["flat".to_string()])
         .build();
+    // Next to other systems nothing is erased: no "Erase" on the button, no red.
+    let erases = state.free_space_gib.get().is_none() && !simulate;
     let install_button = gtk::Button::builder()
         .label(if simulate {
             "Simulate install"
-        } else {
+        } else if erases {
             "Erase and install"
+        } else {
+            "Install"
         })
         .css_classes(vec![
-            (if simulate {
-                "suggested-action"
-            } else {
+            (if erases {
                 "destructive-action"
+            } else {
+                "suggested-action"
             })
             .to_string(),
             "pill".to_string(),

@@ -361,6 +361,7 @@ mod tests {
                 "mount",
                 "chroot:emerge-webrsync",
                 "chroot:emerge --noreplace app-admin/doas",
+                "chroot:gpgconf --kill all",
                 "umount",
                 "umount",
                 "umount"

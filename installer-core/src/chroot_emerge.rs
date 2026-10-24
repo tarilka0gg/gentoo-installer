@@ -134,6 +134,13 @@ pub(crate) async fn bind_mount_chroot_dirs(
 /// between the matching `bind_mount_chroot_dirs`, so a failed build doesn't leave the
 /// target's /proc etc. bind-mounted.
 pub(crate) async fn unmount_chroot_dirs(runner: &dyn CommandRunner, target: &Path) {
+    // Portage starts a gpg-agent in the target to check signatures; left running it keeps the mount busy ("target is busy").
+    if let Some(t) = target.to_str() {
+        runner
+            .run_status("chroot", &[t, "gpgconf", "--kill", "all"])
+            .await
+            .ok();
+    }
     for dir in ["dev", "sys", "proc"] {
         if let Some(target_dir_str) = target.join(dir).to_str() {
             runner

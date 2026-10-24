@@ -244,6 +244,7 @@ mod tests {
                 "mount",
                 "locale-gen",
                 "env-update",
+                "gpgconf",
                 "umount",
                 "umount",
                 "umount"

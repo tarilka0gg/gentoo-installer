@@ -727,7 +727,14 @@ mod tests {
             .filter(|(c, _)| c == "chroot")
             .map(|(_, a)| a)
             .collect();
-        assert_eq!(chroots, [[target, "locale-gen"], [target, "env-update"]]);
+        assert_eq!(
+            chroots,
+            [
+                vec![target, "locale-gen"],
+                vec![target, "env-update"],
+                vec![target, "gpgconf", "--kill", "all"],
+            ]
+        );
 
         drop(tx);
         let mut events = Vec::new();
