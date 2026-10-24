@@ -224,6 +224,40 @@ pub fn needs_changed_use(effective: &slp_profiles::Effective) -> bool {
         .any(|l| l.split_whitespace().any(|w| w == "abi_x86_32"))
 }
 
+/// A group that needs 32-bit libraries (Steam) turns `abi_x86_32` on for Mesa, libdrm and more. The desktop is installed before the
+/// groups, and with the flags written only afterwards Mesa would be built twice (64-bit first, then again with 32-bit as well), and
+/// the first build has no binary package to match. So the profile's Portage configuration is written before the desktop step when
+/// the choice needs it; `install` writes the same files again later. Nothing else (overlays, sets, the state file) is touched here.
+pub fn write_use_early(target: &Path, flavor: &str, ids: &[String]) -> crate::Result<()> {
+    let Ok(chosen) = resolve(ids) else {
+        return Ok(());
+    };
+    let selection = Selection {
+        flavor: flavor.to_string(),
+        mix_ins: chosen
+            .iter()
+            .filter(|g| crate::offline::group_available(g.id))
+            .map(|g| g.id.to_string())
+            .collect(),
+    };
+    let Ok(effective) = Repo::bundled().resolve(&selection) else {
+        return Ok(());
+    };
+    if !needs_changed_use(&effective) {
+        return Ok(());
+    }
+    slp_profiles::render(
+        target,
+        &selection,
+        &effective,
+        RenderOptions {
+            guru_wildcard: true,
+        },
+    )
+    .map(|_| ())
+    .map_err(|e| crate::Error::Other(anyhow::anyhow!("writing the profile: {e}")))
+}
+
 const STEAM_OVERLAY: &str = "steam-overlay";
 const STEAM_OVERLAY_URL: &str = "https://github.com/anyc/steam-overlay.git";
 

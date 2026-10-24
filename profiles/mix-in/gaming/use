@@ -1,3 +1,8 @@
 games-util/gamemode elogind abi_x86_32
 games-util/mangohud abi_x86_32
-sys-apps/dbus elogind
+dev-libs/spdlog abi_x86_32
+dev-libs/libfmt abi_x86_32
+media-libs/imgui abi_x86_32
+media-libs/implot abi_x86_32
+x11-libs/libxkbcommon X abi_x86_32
+sys-apps/dbus elogind X abi_x86_32

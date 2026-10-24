@@ -50,6 +50,11 @@ impl Phase for DesktopPhase {
                 "the desktop is set up for a user; none was given"
             ))
         })?;
+        crate::packages::write_use_early(
+            &ctx.target,
+            &ctx.settings.flavor,
+            &ctx.settings.packages,
+        )?;
         let gpus = match ctx.runner.run("lspci", &["-nn", "-D"]).await {
             Ok(text) => crate::gpu::parse_lspci(&text),
             Err(_) => Vec::new(),
