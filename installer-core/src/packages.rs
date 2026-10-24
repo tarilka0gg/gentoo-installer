@@ -419,6 +419,7 @@ mod tests {
             default_ids(),
             [
                 "wifi",
+                "bluetooth",
                 "terminal",
                 "browser",
                 "tools",

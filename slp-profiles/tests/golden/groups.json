@@ -21,6 +21,25 @@
   },
   {
     "atoms": [
+      "net-wireless/bluez"
+    ],
+    "default": true,
+    "description": "BlueZ: pairing and connecting Bluetooth keyboards, mice, controllers and headsets (the desktop's Bluetooth menu uses it)",
+    "guru": false,
+    "id": "bluetooth",
+    "licenses": [],
+    "name": "Bluetooth",
+    "services": [
+      "dbus",
+      "bluetooth"
+    ],
+    "testing": [],
+    "use_flags": [
+      "net-wireless/bluez obex readline udev"
+    ]
+  },
+  {
+    "atoms": [
       "x11-terms/ghostty"
     ],
     "default": true,

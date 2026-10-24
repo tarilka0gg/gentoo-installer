@@ -1,3 +1,4 @@
+net-wireless/bluez obex readline udev
 x11-terms/ghostty wayland
 gnome-base/gvfs udisks
 x11-libs/gtk+ X

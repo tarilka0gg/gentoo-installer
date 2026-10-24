@@ -1,5 +1,6 @@
 net-wireless/iwd
 sys-kernel/linux-firmware
+net-wireless/bluez
 x11-terms/ghostty
 www-client/zen-bin
 dev-vcs/git
