@@ -6,3 +6,4 @@ media-libs/imgui abi_x86_32
 media-libs/implot abi_x86_32
 x11-libs/libxkbcommon X abi_x86_32
 sys-apps/dbus elogind X abi_x86_32
+media-libs/libva abi_x86_32
