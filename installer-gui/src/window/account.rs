@@ -30,6 +30,36 @@ pub(super) fn account_page_build(
         .show_peek_icon(true)
         .build();
 
+    // What is allowed, always visible; the line under it names the problem while the name is typed.
+    let username_hint = gtk::Label::builder()
+        .label("Only English small letters, digits, \"-\" and \"_\"; it must start with a letter.")
+        .css_classes(vec!["dim-label".to_string(), "caption".to_string()])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build();
+    let username_problem = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .visible(false)
+        .css_classes(vec!["error".to_string(), "caption".to_string()])
+        .build();
+    {
+        let username_problem = username_problem.clone();
+        username_entry.connect_changed(move |e| {
+            match installer_core::account::username_problem(e.text().as_str()) {
+                Some(why) => {
+                    username_problem.set_label(why);
+                    username_problem.set_visible(true);
+                    e.add_css_class("error");
+                }
+                None => {
+                    username_problem.set_visible(false);
+                    e.remove_css_class("error");
+                }
+            }
+        });
+    }
+
     let error_label = gtk::Label::builder()
         .halign(gtk::Align::Start)
         .wrap(true)
@@ -48,6 +78,8 @@ pub(super) fn account_page_build(
     content.append(&heading);
     content.append(&body);
     content.append(&username_entry);
+    content.append(&username_hint);
+    content.append(&username_problem);
     content.append(&password_entry);
     content.append(&confirm_entry);
     content.append(&error_label);
@@ -94,8 +126,11 @@ pub(super) fn account_page_build(
                 return;
             }
             // The name is checked here, not when the account is made at about a quarter of the way through the install.
-            if let Err(e) = installer_core::account::validate_username(&username) {
-                error_label.set_label(&e.to_string());
+            if installer_core::account::validate_username(&username).is_err() {
+                error_label.set_label(
+                    installer_core::account::username_problem(&username)
+                        .unwrap_or("Use only English small letters, digits, \"-\" and \"_\"; start with a letter."),
+                );
                 error_label.set_visible(true);
                 return;
             }

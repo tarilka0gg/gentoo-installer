@@ -43,6 +43,37 @@ pub fn validate_username(name: &str) -> crate::Result<()> {
     }
 }
 
+/// Why `name` is not a valid login name, in words for a person, or `None` when it is valid (or still empty). The same rules as
+/// [`validate_username`]; the screens use this one to say what to change while the name is typed.
+pub fn username_problem(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        return None;
+    }
+    if name.chars().any(|c| c.is_ascii_uppercase()) {
+        return Some("Capital letters are not allowed: type the name in small letters only.");
+    }
+    if name.chars().any(|c| c.is_whitespace()) {
+        return Some("Spaces are not allowed in a username.");
+    }
+    if name
+        .chars()
+        .any(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'))
+    {
+        return Some(
+            "Only English small letters, digits, \"-\" and \"_\" are allowed (no other symbols or letters).",
+        );
+    }
+    if !name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') {
+        return Some(
+            "The username must start with a small letter (or \"_\"), not a digit or \"-\".",
+        );
+    }
+    if name.len() > 32 {
+        return Some("The username can be at most 32 characters long.");
+    }
+    None
+}
+
 /// `/usr/bin/fish` if the target's stage has it (a custom stage), else `/bin/bash`. Checked
 /// against the target rather than assumed: `useradd -s` with a missing shell gives an
 /// account that cannot log in.
@@ -312,6 +343,27 @@ mod tests {
         std::fs::write(dir.join("usr/bin/fish"), "").unwrap();
         assert_eq!(login_shell(&dir), "/usr/bin/fish");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_problem_with_a_username_is_named() {
+        assert_eq!(username_problem(""), None);
+        assert_eq!(username_problem("vlad_1-x"), None);
+        assert!(username_problem("Vlad1234").unwrap().contains("Capital"));
+        assert!(username_problem("my name").unwrap().contains("Spaces"));
+        assert!(username_problem("vlad!").unwrap().contains("Only English"));
+        assert!(username_problem("влад").unwrap().contains("Only English"));
+        assert!(username_problem("1vlad").unwrap().contains("must start"));
+        assert!(username_problem("-o").unwrap().contains("must start"));
+        assert!(username_problem(&"a".repeat(33)).unwrap().contains("32"));
+        // the two checks agree
+        for n in ["", "a", "Vlad", "v l", "v!", "1a", "-o", "ok_name-1"] {
+            assert_eq!(
+                validate_username(n).is_ok(),
+                !n.is_empty() && username_problem(n).is_none(),
+                "{n:?}"
+            );
+        }
     }
 
     #[test]

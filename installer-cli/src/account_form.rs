@@ -87,7 +87,9 @@ impl AccountForm {
 
     fn submit(&mut self) -> Outcome {
         if let Err(e) = validate_username(&self.username) {
-            self.message = e.to_string();
+            self.message = installer_core::account::username_problem(&self.username)
+                .map(str::to_string)
+                .unwrap_or_else(|| e.to_string());
             self.field = Field::Username;
         } else if self.password.is_empty() {
             self.message = "The password is empty.".into();
@@ -151,7 +153,7 @@ mod tests {
         let mut f = filled("Solomiya", "pw", "pw");
         assert_eq!(f.handle_key(KeyCode::Enter), Outcome::None);
         assert_eq!(f.field, Field::Username);
-        assert!(f.message.contains("invalid username"), "{}", f.message);
+        assert!(f.message.contains("Capital letters"), "{}", f.message);
     }
 
     #[test]
