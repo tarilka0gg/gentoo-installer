@@ -439,9 +439,10 @@ pub(super) fn packages_select_page(
         let subtitle = if on_medium {
             group.description.to_string()
         } else {
+            let text = group.description.trim_end();
+            let stop = if text.ends_with('.') { "" } else { "." };
             format!(
-                "{} Not on this offline image: needs a network connection, and is installed on the finished system.",
-                group.description
+                "{text}{stop} Not on this offline image: needs a network connection, and is installed on the finished system."
             )
         };
         let row = adw::ExpanderRow::builder()
