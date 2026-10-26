@@ -53,12 +53,19 @@ impl Phase for PackagesPhase {
                 .as_ref()
                 .is_some_and(|p| p.gpu == crate::hardware::Gpu::Nouveau);
         let gfx = crate::gpu::gfx_mix_ins(&gpus, ctx.settings.gpu_override, nouveau);
+        // The desktop's own packages go into the same emerge (see `wm::prepare_emerge`), so the desktop step runs after this one.
+        let desktop_atoms = if ctx.settings.desktop {
+            crate::wm::prepare_emerge(ctx.runner.as_ref(), &ctx.target, ctx.settings.wm).await?
+        } else {
+            Vec::new()
+        };
         packages::install(
             ctx.runner.as_ref(),
             &ctx.target,
             &ctx.settings.flavor,
             &ctx.settings.packages,
             &gfx,
+            &desktop_atoms,
         )
         .await?;
         let copied = slp_tool::install_from_live(Path::new("/"), &ctx.target).await?;

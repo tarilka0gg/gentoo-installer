@@ -273,6 +273,7 @@ pub async fn install(
     flavor: &str,
     ids: &[String],
     gfx: &[String],
+    extra_atoms: &[String],
 ) -> crate::Result<()> {
     let chosen = resolve(ids)?;
     let groups: Vec<_> = chosen
@@ -280,7 +281,7 @@ pub async fn install(
         .copied()
         .filter(|g| crate::offline::group_available(g.id))
         .collect();
-    if groups.is_empty() {
+    if groups.is_empty() && extra_atoms.is_empty() {
         return Ok(());
     }
     let target_str = target
@@ -351,6 +352,7 @@ pub async fn install(
             );
         }
         argv.extend(effective.atoms.iter().map(String::as_str));
+        argv.extend(extra_atoms.iter().map(String::as_str));
         runner.run_status("chroot", &argv).await?;
         // Services only after the packages that ship their init scripts are really there.
         let services: Vec<&str> = effective.services.iter().map(String::as_str).collect();
@@ -512,9 +514,16 @@ mod tests {
     #[tokio::test]
     async fn empty_selection_runs_nothing() {
         let runner = FakeCommandRunner::new();
-        install(&runner, Path::new("/nonexistent"), DEFAULT_FLAVOR, &[], &[])
-            .await
-            .unwrap();
+        install(
+            &runner,
+            Path::new("/nonexistent"),
+            DEFAULT_FLAVOR,
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .unwrap();
         assert!(runner.calls().is_empty());
     }
 
@@ -528,6 +537,7 @@ mod tests {
             DEFAULT_FLAVOR,
             &["browser".into(), "gaming".into()],
             &["gfx-amd".into()],
+            &[],
         )
         .await
         .unwrap();
@@ -598,6 +608,7 @@ mod tests {
             DEFAULT_FLAVOR,
             &["steam".into(), "creative".into()],
             &[],
+            &[],
         )
         .await
         .unwrap();
@@ -639,7 +650,7 @@ mod tests {
         let runner = FakeCommandRunner::new();
         runner.fail("chroot", "emerge: blocked");
         assert!(
-            install(&runner, &dir, DEFAULT_FLAVOR, &["media".into()], &[])
+            install(&runner, &dir, DEFAULT_FLAVOR, &["media".into()], &[], &[])
                 .await
                 .is_err()
         );
@@ -671,6 +682,7 @@ mod use_tests {
             DEFAULT_FLAVOR,
             &["terminal".into()],
             &[],
+            &[],
         )
         .await
         .unwrap();
@@ -690,7 +702,7 @@ mod use_tests {
         std::fs::write(dir.join("etc/resolv.conf"), "x\n").ok();
         let runner = crate::command::FakeCommandRunner::new();
 
-        install(&runner, &dir, DEFAULT_FLAVOR, &["wifi".into()], &[])
+        install(&runner, &dir, DEFAULT_FLAVOR, &["wifi".into()], &[], &[])
             .await
             .unwrap();
 
