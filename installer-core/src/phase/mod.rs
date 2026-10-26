@@ -393,6 +393,7 @@ pub async fn run_phase_list(
         let _ = j.save(path).await;
     }
 
+    let mut timings: Vec<(String, std::time::Duration)> = Vec::new();
     for phase in phases {
         let id = phase.id();
         if mode == RunMode::Resume {
@@ -429,6 +430,7 @@ pub async fn run_phase_list(
             }
         }
         record!(journal.mark_running(id));
+        let started = std::time::Instant::now();
         if let Err(e) = phase.run(ctx, tx).await {
             record!(journal.mark_failed(id, e.to_string()));
             let _ = tx.send(Event::Failed {
@@ -437,10 +439,42 @@ pub async fn run_phase_list(
             });
             return Err(e);
         }
+        timings.push((phase.label().to_string(), started.elapsed()));
         record!(journal.mark_done(id));
+    }
+    // How long each step took, so that a slow install can be looked at (the step list above has no times).
+    if !timings.is_empty() {
+        let total: std::time::Duration = timings.iter().map(|(_, d)| *d).sum();
+        let _ = tx.send(Event::Log {
+            line: format!("Time per step (total {}):", fmt_duration(total)),
+            level: Level::Info,
+        });
+        for (label, d) in &timings {
+            let _ = tx.send(Event::Log {
+                line: format!("  {:>8}  {label}", fmt_duration(*d)),
+                level: Level::Info,
+            });
+        }
     }
     let _ = tx.send(Event::Complete);
     Ok(())
+}
+
+/// `1h 02m 03s`, `2m 05s` or `7s`.
+pub fn fmt_duration(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs >= 3600 {
+        format!(
+            "{}h {:02}m {:02}s",
+            secs / 3600,
+            secs % 3600 / 60,
+            secs % 60
+        )
+    } else if secs >= 60 {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
 }
 
 /// [`run_phases`] in [`RunMode::Fresh`] without a journal: the whole chain, nothing skipped.

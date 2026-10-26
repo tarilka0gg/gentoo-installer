@@ -170,9 +170,10 @@ pub fn binhost_video_cards(detected: &str) -> String {
     cards.join(" ")
 }
 
-/// How many packages `emerge` handles at once on a machine with `cores` threads: a quarter of them, between 1 and 4.
+/// How many packages `emerge` handles at once on a machine with `cores` threads: half of them, between 2 and 8. Most of a binary
+/// install waits on the disk and the network, so more than a quarter of the threads keeps the machine busy.
 pub fn emerge_jobs(cores: u32) -> u32 {
-    (cores / 4).clamp(1, 4)
+    (cores / 2).clamp(2, 8)
 }
 
 /// Pure string transform — strips any existing line assigning one of `OWNED_KEYS`
@@ -305,9 +306,10 @@ mod tests {
 
     #[test]
     fn packages_are_merged_in_parallel_in_proportion_to_the_cores() {
-        assert_eq!(emerge_jobs(2), 1);
-        assert_eq!(emerge_jobs(8), 2);
-        assert_eq!(emerge_jobs(16), 4);
+        assert_eq!(emerge_jobs(2), 2);
+        assert_eq!(emerge_jobs(8), 4);
+        assert_eq!(emerge_jobs(16), 8);
+        assert_eq!(emerge_jobs(32), 8);
         assert_eq!(emerge_jobs(64), 4);
         let out = render(
             "EMERGE_DEFAULT_OPTS=\"--ask\"\n",
@@ -319,7 +321,7 @@ mod tests {
         );
         assert_eq!(out.matches("EMERGE_DEFAULT_OPTS=").count(), 1, "{out}");
         assert!(
-            out.contains("EMERGE_DEFAULT_OPTS=\"--jobs=4 --load-average=16\""),
+            out.contains("EMERGE_DEFAULT_OPTS=\"--jobs=8 --load-average=16\""),
             "{out}"
         );
     }
