@@ -20,6 +20,18 @@ rsync -aHAX --checksum --dry-run --out-format='%n' "$ROOT/" "$WORK/stage/" | sed
 
 grep -vE '^(\./)?(etc/(portage|slp|fstab|hostname|conf\.d/(hostname|keymaps|hwclock|consolefont|modules|net|localmount)|localtime|timezone|locale\.gen|env\.d/02locale|passwd-?|shadow-?|group-?|gshadow-?|subuid-?|subgid-?|os-release|machine-id|resolv\.conf|hosts|issue|motd|runlevels|ssh/ssh_host_)|var/(db/repos|cache|tmp|log|run|lock|spool|mail|lib/dbus/machine-id|lib/random-seed)|usr/src|usr/local|boot|home|root|lib/modules|lib/firmware|usr/lib/firmware|tmp|run|proc|sys|dev|mnt|media|srv)(/|$)' "$WORK/changed" > "$WORK/list"
 
+# The accounts the packages add (seat, messagebus, ...): the lines of the built root's account files that the stage3 does not have.
+# They cannot come with the files (the account files belong to the machine), so the installer adds these lines to its own.
+mkdir -p "$WORK/extra/usr/lib/simple-linux/accounts"
+for f in group gshadow passwd shadow; do
+    comm -13 <(sort "$WORK/stage/etc/$f") <(sort "$ROOT/etc/$f") > "$WORK/extra/usr/lib/simple-linux/accounts/$f"
+done
+# the root's files as listed, then the account lines from the extra directory (GNU tar reads "-C" lines in a list file)
+{
+    cat "$WORK/list"
+    printf '%s\n' "-C $WORK/extra" "usr" "usr/lib" "usr/lib/simple-linux" "usr/lib/simple-linux/accounts"
+    for f in group gshadow passwd shadow; do printf '%s\n' "usr/lib/simple-linux/accounts/$f"; done
+} > "$WORK/list-full"
 # directories are listed once each, without their contents (tar takes the list as it is)
-tar --no-recursion --numeric-owner -C "$ROOT" -cf - -T "$WORK/list" | zstd -q -T0 -15 -o "$OUT/software-desktop-default.tar.zst"
+tar --no-recursion --numeric-owner -C "$ROOT" -cf - -T "$WORK/list-full" | zstd -q -T0 -15 -o "$OUT/software-desktop-default.tar.zst"
 echo "files: $(wc -l < "$WORK/list"), archive: $(stat -c %s "$OUT/software-desktop-default.tar.zst") bytes"

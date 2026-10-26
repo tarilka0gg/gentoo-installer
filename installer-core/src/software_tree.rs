@@ -16,6 +16,9 @@ pub const ARCHIVE: &str = "software-desktop-default.tar.zst";
 /// Atoms of the default set that the archive leaves out. They are emerged on the target.
 pub const NOT_IN_ARCHIVE: &[&str] = &["sys-kernel/linux-firmware", "www-client/zen-bin"];
 
+/// The account lines the archive carries, relative to the target.
+const ACCOUNTS: &str = "usr/lib/simple-linux/accounts";
+
 /// Where the archive is: a GitHub release is flat (its assets are the files), any other store has a `software/` directory.
 pub fn url(binhost_url: &str) -> String {
     let base = binhost_url.trim_end_matches('/');
@@ -86,7 +89,42 @@ pub async fn install(
         .await;
     tokio::fs::remove_file(&file).await.ok();
     result?;
+    merge_accounts(target).await?;
     Ok(true)
+}
+
+/// The account lines the packages add (the groups and users of seatd, messagebus, ...) are in the archive, not in the account files
+/// (those belong to the machine, and were written by the installer already). Each line whose name is not in the target yet is
+/// appended; the lines are then taken out of the target.
+async fn merge_accounts(target: &Path) -> crate::Result<()> {
+    let dir = target.join(ACCOUNTS);
+    for name in ["group", "gshadow", "passwd", "shadow"] {
+        let Ok(add) = tokio::fs::read_to_string(dir.join(name)).await else {
+            continue;
+        };
+        let dest = target.join("etc").join(name);
+        let mut text = tokio::fs::read_to_string(&dest).await.unwrap_or_default();
+        let have: std::collections::HashSet<String> = text
+            .lines()
+            .filter_map(|l| l.split(':').next().map(str::to_string))
+            .collect();
+        for line in add.lines() {
+            let key = line.split(':').next().unwrap_or_default();
+            if !key.is_empty() && !have.contains(key) {
+                if !text.is_empty() && !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                text.push_str(line);
+                text.push('\n');
+            }
+        }
+        tokio::fs::write(&dest, text).await?;
+    }
+    tokio::fs::remove_dir_all(&dir).await.ok();
+    tokio::fs::remove_dir(target.join("usr/lib/simple-linux"))
+        .await
+        .ok();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -107,6 +145,33 @@ mod tests {
             url("http://127.0.0.1:4000/binhost/simple-linux/"),
             "http://127.0.0.1:4000/binhost/simple-linux/software/software-desktop-default.tar.zst"
         );
+    }
+
+    #[tokio::test]
+    async fn the_account_lines_of_the_archive_are_added_once_and_the_directory_is_removed() {
+        let dir = std::env::temp_dir().join(format!("software-accounts-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::create_dir_all(dir.join(ACCOUNTS)).unwrap();
+        std::fs::write(dir.join("etc/group"), "root:x:0:\ntester:x:1000:\n").unwrap();
+        std::fs::write(dir.join("etc/passwd"), "root:x:0:0::/root:/bin/bash\n").unwrap();
+        std::fs::write(
+            dir.join(ACCOUNTS).join("group"),
+            "seat:x:960:\ntester:x:1000:\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(ACCOUNTS).join("passwd"),
+            "seat:x:960:960::/:/bin/false\n",
+        )
+        .unwrap();
+        merge_accounts(&dir).await.unwrap();
+        let group = std::fs::read_to_string(dir.join("etc/group")).unwrap();
+        assert_eq!(group, "root:x:0:\ntester:x:1000:\nseat:x:960:\n");
+        let passwd = std::fs::read_to_string(dir.join("etc/passwd")).unwrap();
+        assert!(passwd.contains("seat:x:960:960"), "{passwd}");
+        assert!(!dir.join(ACCOUNTS).exists());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
