@@ -209,6 +209,16 @@ pub async fn install(
     result
 }
 
+/// The packages of the default desktop (the default compositor, Noctalia and the seat daemon), as `prepare_emerge` names them.
+pub fn default_emerge_atoms() -> Vec<String> {
+    let spec = spec(WmChoice::default());
+    vec![
+        spec.atom.to_string(),
+        "gui-apps/noctalia".to_string(),
+        "sys-auth/seatd".to_string(),
+    ]
+}
+
 /// The desktop's packages join the software step's single emerge instead of a run of their own: one transaction keeps every job
 /// busy until the end (two runs each finish with a few packages on one core), and the dependencies are resolved once. Writes what
 /// those packages need (the GURU overlay, the keywords and masks for Noctalia and the compositor) and returns their atoms. dwl

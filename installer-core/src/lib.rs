@@ -30,6 +30,7 @@ pub mod progress;
 pub mod services;
 pub mod slp_tool;
 pub mod sltools;
+pub mod software_tree;
 pub mod stage3;
 pub mod store;
 pub mod timezone;

@@ -66,6 +66,11 @@ impl Phase for PackagesPhase {
             &ctx.settings.packages,
             &gfx,
             &desktop_atoms,
+            if ctx.settings.package_mode == crate::make_conf::PackageMode::Binary {
+                Some(ctx.store.binhost_url.as_str())
+            } else {
+                None
+            },
         )
         .await?;
         let copied = slp_tool::install_from_live(Path::new("/"), &ctx.target).await?;

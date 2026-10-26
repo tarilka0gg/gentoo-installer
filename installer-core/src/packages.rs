@@ -274,6 +274,7 @@ pub async fn install(
     ids: &[String],
     gfx: &[String],
     extra_atoms: &[String],
+    archive_base: Option<&str>,
 ) -> crate::Result<()> {
     let chosen = resolve(ids)?;
     let groups: Vec<_> = chosen
@@ -334,26 +335,50 @@ pub async fn install(
         // atom. `--autounmask-write --autounmask-continue` lets Portage write and apply
         // them; `CONFIG_PROTECT_MASK` makes it write `/etc/portage` directly instead of
         // `._cfg` files nobody would dispatch. Verified with `emerge -f` on a real stage3.
-        let mut argv = vec![
-            target_str,
-            "env",
-            "CONFIG_PROTECT_MASK=/etc/portage",
-            "emerge",
-            "--noreplace",
-            "--autounmask-write",
-            "--autounmask-continue",
-        ];
-        // A group that needs 32-bit libraries (Steam) changes the USE flags of packages the stage3 already has (util-linux, fontconfig,
-        // expat...): `--noreplace` alone would keep them and stop on a slot conflict, `--changed-use` rebuilds just those.
-        if crate::packages::needs_changed_use(&effective) {
-            argv.insert(
-                argv.iter().position(|a| *a == "--noreplace").unwrap_or(0) + 1,
-                "--changed-use",
+        // The default desktop comes as one archive when this install is that choice (see `software_tree`): then only the packages it
+        // leaves out are emerged. Anything else, or an archive that cannot be fetched, is merged package by package as before.
+        let mut wanted: Vec<String> = effective.atoms.clone();
+        wanted.extend(extra_atoms.iter().cloned());
+        if let Some(base) = archive_base {
+            let default_groups: Vec<String> = default_ids_for(DEFAULT_FLAVOR)
+                .into_iter()
+                .filter(|id| crate::offline::group_available(id))
+                .collect();
+            let chosen_ids: Vec<String> = groups.iter().map(|g| g.id.to_string()).collect();
+            let applies = crate::software_tree::applies(
+                flavor,
+                &chosen_ids,
+                extra_atoms,
+                &default_groups,
+                &crate::wm::default_emerge_atoms(),
             );
+            if applies && crate::software_tree::install(runner, target, base).await? {
+                wanted.retain(|a| {
+                    crate::software_tree::NOT_IN_ARCHIVE.contains(&a.trim_start_matches('~'))
+                });
+            }
         }
-        argv.extend(effective.atoms.iter().map(String::as_str));
-        argv.extend(extra_atoms.iter().map(String::as_str));
-        runner.run_status("chroot", &argv).await?;
+        if !wanted.is_empty() {
+            let mut argv = vec![
+                target_str,
+                "env",
+                "CONFIG_PROTECT_MASK=/etc/portage",
+                "emerge",
+                "--noreplace",
+                "--autounmask-write",
+                "--autounmask-continue",
+            ];
+            // A group that needs 32-bit libraries (Steam) changes the USE flags of packages the stage3 already has (util-linux, fontconfig,
+            // expat...): `--noreplace` alone would keep them and stop on a slot conflict, `--changed-use` rebuilds just those.
+            if crate::packages::needs_changed_use(&effective) {
+                argv.insert(
+                    argv.iter().position(|a| *a == "--noreplace").unwrap_or(0) + 1,
+                    "--changed-use",
+                );
+            }
+            argv.extend(wanted.iter().map(String::as_str));
+            runner.run_status("chroot", &argv).await?;
+        }
         // Services only after the packages that ship their init scripts are really there.
         let services: Vec<&str> = effective.services.iter().map(String::as_str).collect();
         crate::services::enable_all(runner, target, &services).await
@@ -521,6 +546,7 @@ mod tests {
             &[],
             &[],
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -538,6 +564,7 @@ mod tests {
             &["browser".into(), "gaming".into()],
             &["gfx-amd".into()],
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -609,6 +636,7 @@ mod tests {
             &["steam".into(), "creative".into()],
             &[],
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -649,11 +677,17 @@ mod tests {
         let dir = temp_target("fail");
         let runner = FakeCommandRunner::new();
         runner.fail("chroot", "emerge: blocked");
-        assert!(
-            install(&runner, &dir, DEFAULT_FLAVOR, &["media".into()], &[], &[])
-                .await
-                .is_err()
-        );
+        assert!(install(
+            &runner,
+            &dir,
+            DEFAULT_FLAVOR,
+            &["media".into()],
+            &[],
+            &[],
+            None
+        )
+        .await
+        .is_err());
         assert_eq!(
             runner.calls().iter().filter(|(c, _)| c == "umount").count(),
             3
@@ -683,6 +717,7 @@ mod use_tests {
             &["terminal".into()],
             &[],
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -702,9 +737,17 @@ mod use_tests {
         std::fs::write(dir.join("etc/resolv.conf"), "x\n").ok();
         let runner = crate::command::FakeCommandRunner::new();
 
-        install(&runner, &dir, DEFAULT_FLAVOR, &["wifi".into()], &[], &[])
-            .await
-            .unwrap();
+        install(
+            &runner,
+            &dir,
+            DEFAULT_FLAVOR,
+            &["wifi".into()],
+            &[],
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
 
         let lic = std::fs::read_to_string(dir.join("etc/portage/package.license/slp")).unwrap();
         assert!(
