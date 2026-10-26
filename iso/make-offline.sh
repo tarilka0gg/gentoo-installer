@@ -11,6 +11,7 @@
 #   KERNEL_STORE [newest ~/Documents/work/gentoo-installer-test/release-*/simple-linux-kernel-store.tar]
 #   WM_CONFIGS [sibling simple-linux-configs]           cloned bare into configs.git
 #   OFFLINE_EXCLUDE [libreoffice podman telegram gimp vlc mpv]   path prefixes (space separated) of packages left out; keep in step with offline.rs
+#   SOFTWARE_ARCHIVE []                                 the default desktop as one archive (software-archive.sh), copied to software/
 #   OFFLINE_PREV []                                     an earlier payload: its index entries are kept for collected packages the binary host dropped
 #   GENTOO_INDEX_URL, SL_INDEX_URL, TREE_URL            where the two indexes and the tree snapshot come from
 set -euo pipefail
@@ -31,6 +32,11 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # kernels: Packages + kernels/ at the top, like the store the installer reads
 tar -xf "$KERNEL_STORE" -C "$OUT"
+
+# the default desktop as one archive (iso/software-archive.sh), served as software/ like the binary host's own files
+if [ -n "${SOFTWARE_ARCHIVE:-}" ]; then
+    mkdir -p "$OUT/software"; cp "$SOFTWARE_ARCHIVE" "$OUT/software/software-desktop-default.tar.zst"
+fi
 
 # packages and their indexes: the index of each host keeps only the entries whose file is here (the rest is a different set of packages
 # nobody asked for), with the host's own header, so Portage reads it as it reads the real one
