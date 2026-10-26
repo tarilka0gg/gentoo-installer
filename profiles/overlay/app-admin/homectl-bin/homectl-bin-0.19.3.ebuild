@@ -11,8 +11,10 @@ SRC_URI="
 	${BASE}/homectl-linux-x86_64 -> ${P}-linux-x86_64
 	${BASE}/homectl-pty -> ${P}-pty
 	${BASE}/homectl-adopt -> ${P}-adopt
+	${BASE}/homectl-pair-linux-x86_64 -> ${P}-pair
 	${RAW}/homectl.initd -> ${P}.initd
 	${RAW}/homectl-launch.sh -> ${P}-launch.sh
+	${RAW}/homectl-pair.desktop -> ${P}-pair.desktop
 "
 S="${WORKDIR}"
 
@@ -24,6 +26,8 @@ QA_PREBUILT="*"
 
 RDEPEND="
 	sys-apps/openrc
+	gui-libs/gtk:4
+	media-gfx/qrencode
 "
 
 src_install() {
@@ -31,6 +35,11 @@ src_install() {
 	newbin "${DISTDIR}/${P}-pty" homectl-pty
 	newbin "${DISTDIR}/${P}-adopt" homectl-adopt
 	newbin "${DISTDIR}/${P}-launch.sh" homectl-launch
+	newbin "${DISTDIR}/${P}-pair" homectl-pair
+
+	# the window that shows the pairing code and link, in the application menu
+	insinto /usr/share/applications
+	newins "${DISTDIR}/${P}-pair.desktop" homectl-pair.desktop
 
 	# the init script must find the binaries where this package installs them
 	# the service user defaults to the first login account (uid 1000), which the installer creates

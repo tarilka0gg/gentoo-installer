@@ -447,6 +447,7 @@ mod tests {
             [
                 "wifi",
                 "bluetooth",
+                "homectl",
                 "terminal",
                 "browser",
                 "tools",
@@ -508,6 +509,7 @@ mod tests {
         assert_eq!(
             needs,
             [
+                "homectl",
                 "terminal",
                 "browser",
                 "files",

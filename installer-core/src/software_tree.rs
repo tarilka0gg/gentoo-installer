@@ -14,7 +14,8 @@ use std::path::Path;
 pub const ARCHIVE: &str = "software-desktop-default.tar.zst";
 
 /// Atoms of the default set that the archive leaves out. They are emerged on the target.
-pub const NOT_IN_ARCHIVE: &[&str] = &["sys-kernel/linux-firmware", "www-client/zen-bin"];
+// homectl is added after the archive was built, so it is emerged on the target until the archive is rebuilt with it.
+pub const NOT_IN_ARCHIVE: &[&str] = &["sys-kernel/linux-firmware", "www-client/zen-bin", "app-admin/homectl-bin"];
 
 /// The account lines the archive carries, relative to the target.
 const ACCOUNTS: &str = "usr/lib/simple-linux/accounts";
