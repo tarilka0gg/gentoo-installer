@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(emerge_jobs(8), 4);
         assert_eq!(emerge_jobs(16), 8);
         assert_eq!(emerge_jobs(32), 8);
-        assert_eq!(emerge_jobs(64), 4);
+        assert_eq!(emerge_jobs(64), 8);
         let out = render(
             "EMERGE_DEFAULT_OPTS=\"--ask\"\n",
             CpuArch::AmdZnver4,
