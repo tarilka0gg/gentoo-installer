@@ -38,7 +38,7 @@ src_install() {
 		-e 's#: "${HOMECTL_USER:=root}"#: "${HOMECTL_USER:=$(getent passwd 1000 | cut -d: -f1)}"#' \
 		"${DISTDIR}/${P}.initd" > "${T}/homectl.initd" || die
 	grep -q 'getent passwd 1000' "${T}/homectl.initd" || die "initd default user not patched"
-	doinitd "${T}/homectl.initd"
+	newinitd "${T}/homectl.initd" homectl
 
 	# the tunnel stays off by default, so nothing is exposed until the user turns it on
 	printf '%s\n' \
