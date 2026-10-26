@@ -433,16 +433,25 @@ pub(super) fn packages_select_page(
     // sentence about each, and a screenshot where there is one (compiled in with the profiles).
     let mut group_rows: Vec<(String, gtk::Switch, adw::ExpanderRow, bool)> = Vec::new();
     for group in installer_core::packages::GROUPS.iter() {
-        if !installer_core::offline::group_available(group.id) {
-            continue; // not on an offline medium
-        }
+        // On an offline image the groups that do not fit on the medium stay on the page, as in the online installer, but cannot be
+        // ticked: they are installed on the finished system, with a network.
+        let on_medium = installer_core::offline::group_available(group.id);
+        let subtitle = if on_medium {
+            group.description.to_string()
+        } else {
+            format!(
+                "{} Not on this offline image: needs a network connection, and is installed on the finished system.",
+                group.description
+            )
+        };
         let row = adw::ExpanderRow::builder()
             .title(group.name)
-            .subtitle(group.description)
+            .subtitle(subtitle)
             .build();
         let switch = gtk::Switch::builder()
             .valign(gtk::Align::Center)
-            .active(state.packages.borrow().iter().any(|id| id == group.id))
+            .sensitive(on_medium)
+            .active(on_medium && state.packages.borrow().iter().any(|id| id == group.id))
             .build();
         let state = state.clone();
         let id = group.id.to_string();
@@ -479,7 +488,11 @@ pub(super) fn packages_select_page(
                 let usable = f.desktop || !*needs_desktop;
                 group_row.set_visible(usable);
                 // the switch handler keeps `state.packages` in step
-                switch.set_active(usable && f.defaults.iter().any(|d| d == id));
+                switch.set_active(
+                    usable
+                        && installer_core::offline::group_available(id)
+                        && f.defaults.iter().any(|d| d == id),
+                );
             }
         });
     }
