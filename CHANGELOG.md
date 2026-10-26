@@ -9,6 +9,10 @@ no release of their own yet.
 
 ## [Unreleased]
 
+### Changed
+- The ISO's homectl is `app-admin/homectl-bin` 0.20.0 (was 0.19.3): live webcam video, Wake up, the performance profile and the regrouped
+  app tabs. The ebuild and Manifest are built from the release's assets, and their checksums match the release's `SHA256SUMS`.
+
 ### Added
 - The Software page shows each program's sentence and, for many, a screenshot that opens full-size on a click.
 - `GENTOO_INSTALLER_GUI_PAGE=desktop|network` (besides the existing pages) opens the wizard on that page, for looking at it.
