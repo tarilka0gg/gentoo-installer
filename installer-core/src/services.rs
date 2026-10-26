@@ -106,3 +106,22 @@ mod tests {
         assert_eq!(runner.calls().len(), 1);
     }
 }
+
+/// The login starts a per-user OpenRC session through `pam_openrc.so` (session, for every login). Nothing here uses user services:
+/// the desktop starts from the login shell, and the system services are not affected. Without the line a login shows
+/// "user.<name> failed to start" (the system OpenRC lock is root's), so it is taken out of the PAM login stack.
+pub async fn drop_user_session_from_login(target: &Path) -> crate::Result<()> {
+    let path = target.join("etc/pam.d/system-login");
+    let Ok(text) = tokio::fs::read_to_string(&path).await else {
+        return Ok(());
+    };
+    if text.lines().any(|l| l.contains("pam_openrc.so")) {
+        let kept: String = text
+            .lines()
+            .filter(|l| !l.contains("pam_openrc.so"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        tokio::fs::write(&path, kept).await?;
+    }
+    Ok(())
+}

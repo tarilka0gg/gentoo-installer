@@ -201,6 +201,7 @@ pub async fn install(
             emerge_wm_packages(runner, target, &spec).await?;
         }
         enable_session_services(runner, target, username).await?;
+        crate::services::drop_user_session_from_login(target).await?;
         write_runtime_dir_script(target).await?;
         apply_preset_from_dir(runner, target, &staging, &spec, username, render).await
     }
