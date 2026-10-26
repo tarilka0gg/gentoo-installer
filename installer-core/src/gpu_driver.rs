@@ -176,6 +176,77 @@ async fn configure_nvidia_portage_overrides(target: &Path) -> crate::Result<()> 
     Ok(())
 }
 
+/// The NVIDIA driver could not be built, so the system keeps the open Nouveau driver instead: `VIDEO_CARDS` loses `nvidia` and
+/// keeps the binary host's own set (which has `nouveau`), so Mesa stays the binary package it already is. Returns whether the
+/// installed kernel carries the Nouveau module; without it the desktop still installs, but it has no kernel driver for this card.
+pub async fn fall_back_to_open_driver(target: &Path) -> crate::Result<bool> {
+    let path = target.join("etc/portage/make.conf");
+    let text = tokio::fs::read_to_string(&path).await?;
+    let mut out = String::new();
+    for line in text.lines() {
+        if line.starts_with("VIDEO_CARDS=") {
+            let kept: Vec<&str> = line
+                .trim_matches('"')
+                .split_once('=')
+                .map(|(_, v)| v.trim_matches('"'))
+                .unwrap_or("")
+                .split_whitespace()
+                .filter(|c| *c != "nvidia")
+                .collect();
+            let cards = if kept.contains(&"nouveau") {
+                kept.join(" ")
+            } else {
+                let mut all = kept.clone();
+                all.push("nouveau");
+                all.join(" ")
+            };
+            out.push_str(&format!("VIDEO_CARDS=\"{cards}\"\n"));
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    tokio::fs::write(&path, out).await?;
+    Ok(has_nouveau_module(target))
+}
+
+/// Whether the kernel the target boots has the Nouveau module (in its module tree).
+pub fn has_nouveau_module(target: &Path) -> bool {
+    std::fs::read_dir(target.join("lib/modules"))
+        .map(|d| {
+            d.filter_map(|e| e.ok()).any(|e| {
+                let dir = e.path().join("kernel/drivers/gpu/drm/nouveau");
+                std::fs::read_dir(dir)
+                    .map(|n| {
+                        n.filter_map(|f| f.ok())
+                            .any(|f| f.file_name().to_string_lossy().starts_with("nouveau.ko"))
+                    })
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// The open driver is the one in use: `make.conf` no longer asks for `nvidia`, and includes `nouveau`.
+pub async fn open_driver_selected(target: &Path) -> bool {
+    let Ok(text) = tokio::fs::read_to_string(target.join("etc/portage/make.conf")).await else {
+        return false;
+    };
+    text.lines()
+        .find(|l| l.starts_with("VIDEO_CARDS="))
+        .map(|l| {
+            let cards: Vec<&str> = l
+                .trim_matches('"')
+                .split_once('=')
+                .map(|(_, v)| v.trim_matches('"'))
+                .unwrap_or("")
+                .split_whitespace()
+                .collect();
+            cards.contains(&"nouveau") && !cards.contains(&"nvidia")
+        })
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ran {
     /// This machine's GPU doesn't need an out-of-tree driver built at install time.
@@ -186,6 +257,51 @@ pub enum Ran {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_open_driver_takes_over_when_nvidia_fails() {
+        let dir = std::env::temp_dir().join(format!("gpu-fallback-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("etc/portage")).unwrap();
+        std::fs::create_dir_all(dir.join("lib/modules/7.1.8/kernel/drivers/gpu/drm/nouveau"))
+            .unwrap();
+        std::fs::write(
+            dir.join("lib/modules/7.1.8/kernel/drivers/gpu/drm/nouveau/nouveau.ko.xz"),
+            "",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("etc/portage/make.conf"),
+            "MAKEOPTS=\"-j8\"\nVIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi nvidia\"\nDONT_MOUNT_BOOT=\"1\"\n",
+        )
+        .unwrap();
+        assert!(!open_driver_selected(&dir).await);
+        assert!(fall_back_to_open_driver(&dir).await.unwrap());
+        let conf = std::fs::read_to_string(dir.join("etc/portage/make.conf")).unwrap();
+        assert!(
+            conf.contains("VIDEO_CARDS=\"amdgpu intel nouveau radeon radeonsi\""),
+            "{conf}"
+        );
+        assert!(conf.contains("MAKEOPTS=\"-j8\""));
+        assert!(open_driver_selected(&dir).await);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn without_a_nouveau_module_the_fallback_says_so() {
+        let dir = std::env::temp_dir().join(format!("gpu-fallback-none-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("etc/portage")).unwrap();
+        std::fs::write(
+            dir.join("etc/portage/make.conf"),
+            "VIDEO_CARDS=\"nvidia\"\n",
+        )
+        .unwrap();
+        assert!(!fall_back_to_open_driver(&dir).await.unwrap());
+        let conf = std::fs::read_to_string(dir.join("etc/portage/make.conf")).unwrap();
+        assert!(conf.contains("VIDEO_CARDS=\"nouveau\""), "{conf}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn the_recorded_compiler_line_is_read_from_the_kernel_config() {

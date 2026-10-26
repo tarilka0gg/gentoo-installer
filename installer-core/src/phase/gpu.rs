@@ -36,7 +36,9 @@ impl Phase for GpuPhase {
     }
 
     async fn is_satisfied(&self, ctx: &Ctx) -> crate::Result<bool> {
-        Ok(!needs_driver(ctx) || nvidia_installed(&ctx.target))
+        Ok(!needs_driver(ctx)
+            || nvidia_installed(&ctx.target)
+            || gpu_driver::open_driver_selected(&ctx.target).await)
     }
 
     async fn run(&self, ctx: &mut Ctx, tx: &EventTx) -> crate::Result<()> {
@@ -49,7 +51,24 @@ impl Phase for GpuPhase {
                 line: "Building the NVIDIA driver for the installed kernel...".into(),
                 level: Level::Info,
             });
-            gpu_driver::install(ctx.runner.as_ref(), &ctx.target).await?;
+            // The NVIDIA driver is a convenience: when it cannot be built (no prepared kernel tree for this kernel, or the build fails),
+            // the install goes on with the open Nouveau driver from Mesa instead of stopping at 28 %.
+            if let Err(e) = gpu_driver::install(ctx.runner.as_ref(), &ctx.target).await {
+                let _ = tx.send(Event::Log {
+                    line: format!("The NVIDIA driver could not be installed: {e}"),
+                    level: Level::Warn,
+                });
+                let has_module = gpu_driver::fall_back_to_open_driver(&ctx.target).await?;
+                let line = if has_module {
+                    "Using the open Nouveau driver (Mesa) for this NVIDIA card instead: it works, with less speed and none of NVIDIA's own features. Install the NVIDIA driver later from the system once a prepared kernel is available.".to_string()
+                } else {
+                    "Using the open Nouveau driver (Mesa) for this NVIDIA card, but the installed kernel has no Nouveau module: the screen may stay on the basic framebuffer until a kernel with it is installed.".to_string()
+                };
+                let _ = tx.send(Event::Log {
+                    line,
+                    level: Level::Warn,
+                });
+            }
         } else {
             let gpu = ctx
                 .profile
