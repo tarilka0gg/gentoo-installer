@@ -251,6 +251,12 @@ if os.path.isdir(fw):
             print("usr/lib/firmware/intel/iwlwifi/" + f)
 FWPY
 
+# Then, in the directories whose drivers list every file they load (GPU, Realtek/Atheros/MediaTek Wi-Fi), only what this kernel's modules
+# name: firmware-excludes.py. FIRMWARE_TRIM=0 skips it.
+if [ "${FIRMWARE_TRIM:-1}" = 1 ]; then
+    python3 "$(dirname "$(readlink -f "$0")")/firmware-excludes.py" "$W/$ROOTFS" --stats >> "$W/squashfs-excludes.txt"
+fi
+
 # Build-time leftovers (cargo-c, cmake, mesa/GTK build helpers, static libraries, introspection/vala/autoconf data, libclc): the live system
 # compiles nothing and the installed system gets its own packages from the binhost. About 80 MB compressed.
 python3 - "$W/$ROOTFS" >> "$W/squashfs-excludes.txt" <<'BUILDPY'
