@@ -3,8 +3,9 @@
 [![CI](https://github.com/tarilka0gg/gentoo-installer/actions/workflows/ci.yml/badge.svg)](https://github.com/tarilka0gg/gentoo-installer/actions/workflows/ci.yml) [![License](https://img.shields.io/github/license/tarilka0gg/gentoo-installer)](LICENSE) [![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-blue)](CHANGELOG.md)
 
 The installer and the image build scripts behind [Simple Linux](https://github.com/tarilka0gg/simple-linux),
-a Gentoo-based live system. It installs Gentoo (OpenRC, Limine) onto a disk in about ten minutes, from binary
-packages, with a kernel picked for the machine's hardware.
+a Gentoo-based live system. It installs Gentoo (OpenRC, Limine) onto a disk from binary packages, with a kernel picked for
+the machine's hardware: about ten minutes when it merges the packages one by one, under two minutes for the default desktop
+(one archive, see below). Times are from a QEMU VM with KVM.
 
 - **`installer-cli`**: ratatui text installer (and `--headless`), used by the minimal image.
 - **`installer-gui`**: GTK4 + libadwaita wizard, used by the GUI image (niri + Noctalia).
@@ -50,7 +51,12 @@ License: [GPL-2.0-or-later](LICENSE).
   ([simple-linux-binhost](https://github.com/tarilka0gg/simple-linux-binhost): niri, Noctalia, ghostty, packages whose USE
   the installer changes). A binary is used only if its USE flags match, so what the installer asks for is pinned in
   `installer-core/assets/binhost/` and the binhost is built from the same files. A full install of every software group
-  merged 263 packages in a VM, compiled none, and took about 15 minutes (the default groups: 261 packages, about 10).
+  merged 263 packages in a VM, compiled none, and took about 15 minutes (the default groups: 261 packages, about 10:
+  749 s measured in 0.2.46 before nine packages were added to the binhost, 642 s after).
+- **The default desktop as one archive.** For the default groups and desktop the installer unpacks
+  `software-desktop-default.tar.zst` (built by `iso/software-archive.sh` from the binary packages; on the `kernels` release of
+  the binhost and in the offline payload) instead of merging them: 96 s online (archive served from the host), 52 s offline,
+  in a VM. Any other choice merges package by package. `linux-firmware` and Zen stay outside it. See `software_tree.rs`.
 - **Offline install.** The `*-offline.iso` images carry the stage3, kernels, packages, Portage tree, configs and source
   files on the medium; `offline.rs` serves them on `127.0.0.1` and points every URL at it (see below).
 - **Language and zone** are guessed from the keyboard layout (`ua` gives `uk_UA` + `en_US` and `Europe/Kyiv`).
@@ -250,7 +256,7 @@ through the firmware menu. The update tool re-signs after a new kernel. Prefligh
 ## Images
 
 `iso/` builds the live images; `iso/release.sh <version> [step…]` runs the whole recipe (build, Limine BIOS stages, rootfs, both ISOs with Secure Boot signing, offline payload and images, stage3 and kernel files, signed
-`SHA256SUMS`). `check` is read-only and refuses a dirty tree, a stale binary or a missing input; pass `PROFILE=` (the saved desktop profile) or the GUI image lacks its dock and colours. It does not commit or publish. The images
+`SHA256SUMS`). `check` is read-only and refuses a dirty tree, a stale binary or a missing input; pass `PROFILE=` (the saved desktop profile) or the GUI image lacks its dock and colours. It does not commit or publish. The live images use BusyBox in place of 83 GNU coreutils programs (`iso/busybox-userland.sh`) and leave out firmware the live kernel never asks for (`iso/firmware-excludes.py`); `BUSYBOX_USERLAND=0` and `FIRMWARE_TRIM=0` turn them off. The images
 boot on BIOS and UEFI, and from Ventoy (grub2 mode and, since 0.2.15, normal mode). See [iso/README.md](iso/README.md).
 
 ## Status
